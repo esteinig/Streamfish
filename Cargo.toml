@@ -1,0 +1,35 @@
+[package]
+name = "reefsquid"
+version = "0.1.0"
+authors = ["esteinig <eike.steinig@unimelb.edu.au>"]
+description = "Reefsquid: a squishy adaptive sampling library for nanopore devices"
+documentation = "https://github.com/esteinig/reefsquid"
+homepage = "https://github.com/meta-gp/reefsquid"
+repository = "https://github.com/meta-gp/reefsquid"
+readme = "README.md"
+keywords = ["nanopore", "adaptive-sampling", "read-until", "minknow", "grpc"]
+categories = ["science"]
+license = "MIT"
+edition = "2018"
+include = [
+    "**/*.rs",
+    "src/data/*",
+    "Cargo.toml"
+]
+
+[dependencies]
+clap = { version = "4.3.4", features = ["derive", "env", "cargo"] }
+dotenvy = { version = "0.15.7", features = ["clap"] }
+env_logger = "0.10.0"
+log = "0.4.19"
+
+
+[dev-dependencies]
+assert_cmd = "2.0.1"
+predicates = "1"
+float_eq = "0.6.1"
+tempfile = "3.5"
+
+[[bin]]
+name = "reefsquid"
+path = "src/main.rs"
