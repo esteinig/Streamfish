@@ -1,6 +1,6 @@
 # Reefsquid
 
-Adaptive sampling library that interfaces with MinKnow through a custom gRPC client and implements the [`ReadUntil API`](https://github.com/nanoporetech/read_until_api) in Rust.
+Adaptive sampling library that interfaces with `MinKnow` through a custom gRPC client and implements the [`ReadUntil API`](https://github.com/nanoporetech/read_until_api) in Rust.
 
 ## Motivation
 
