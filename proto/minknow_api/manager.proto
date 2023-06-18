@@ -1,0 +1,1351 @@
+syntax="proto3";
+
+package minknow_api.manager;
+
+option java_package = "com.nanoporetech.minknow_api";
+option objc_class_prefix = "MKAPI";
+
+import "minknow_api/rpc_options.proto";
+import "minknow_api/device.proto";
+import "minknow_api/instance.proto";
+import "minknow_api/protocol_settings.proto";
+import "google/protobuf/timestamp.proto";
+
+service ManagerService {
+    // Get information about the machine running MinKNOW.
+    //
+    // This RPC can be called without providing any authentication tokens.
+    //
+    // Since 3.6
+    rpc describe_host (DescribeHostRequest) returns (DescribeHostResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // List all known positions where flow cells can be inserted.
+    //
+    // Provides a snapshot of places where users can insert flow cells. It has a streamed response
+    // in case there are too many positions to fit into a single response, but normally there should
+    // only be a single response.
+    //
+    // This RPC can be called without providing any authentication tokens.
+    //
+    // Since 3.6
+    rpc flow_cell_positions (FlowCellPositionsRequest) returns (stream FlowCellPositionsResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // Watch for changes in flow cell position availability and state.
+    //
+    // This is like flow_cell_positions, but updates are streamed as positions come and go (eg:
+    // MinIONs being plugged or unplugged), or their status otherwise changes.
+    //
+    // This RPC can be called without providing any authentication tokens.
+    //
+    // Since 3.6
+    rpc watch_flow_cell_positions (WatchFlowCellPositionsRequest) returns (stream WatchFlowCellPositionsResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // Reset a flow cell position.
+    //
+    // If the hardware is in an error state or has been removed and the software is running, it will
+    // stop the software (causing the position to be forgotten if the hardware was removed).
+    //
+    // If the hardware is not in an error state
+    rpc reset_position (ResetPositionRequest) returns (ResetPositionResponse) {}
+
+    // Get the connection information for the basecaller API.
+    //
+    // This is the service that implements the minknow_api.basecaller interface for basecalling
+    // reads files.
+    //
+    // This RPC can be called without providing any authentication tokens.
+    //
+    // Since 3.5
+    rpc basecaller_api (BasecallerApiRequest) returns (BasecallerApiResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // Get information about Guppy, including the port to connect to it on.
+    //
+    // Since 4.1
+    rpc get_guppy_info (GetGuppyInfoRequest) returns (GetGuppyInfoResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // Current version information includes:
+    // - Minknow version
+    // - Protocols version (i.e. Bream-4 version)
+    // - Configuration version (i.e. Wanda version)
+    // - Distribution version
+    // - Guppy version
+    //
+    // This RPC can be called without providing any authentication tokens.
+    //
+    // See also: instance.get_version_info which provides some similar information on a per instance basis.
+    // Since 3.3
+    rpc get_version_info (GetVersionInfoRequest) returns (instance.GetVersionInfoResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // Returns all the files that are within the protocol output dir specified in the user_conf - or a descendant of that directory
+    // if `path` is supplied in the request.
+    //
+    // INVALID_ARGUMENT will be returned if the `path` argument in the request is not a descendant of the protocol output directory
+    //
+    // NOT_FOUND will be returned if the path does not exist. 'The path' being either the protocol output directory if the `path` argument is not specified
+    // or a valid `path` argument is specified but does not exist.
+    //
+    // Since 3.5
+    rpc list_protocol_output_dir_files (ListProtocolOutputDirFilesRequest) returns (stream ListProtocolOutputDirFilesResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // Create a directory within the protocol output directory tree.
+    //
+    // Errors:
+    //     INVALID_ARGUMENT will be returned if the parent path (where the directory is requested to
+    //         be created) is not within the protocol output directory, or if invalid characters are
+    //         in the requested directory name.
+    //
+    //     FAILED_PRECONDITION will be returned if the parent path is not a directory.
+    //
+    //     NOT_FOUND will be returned if the parent path does not exist.
+    //
+    //     ALREADY_EXISTS will be returned if the directory exists and is not a directory (if the
+    //         directory already exists, this is treated as success).
+    //
+    // The possible valid parent paths can be determined using list_protocol_output_dir_files().
+    //
+    // Since 3.6
+    rpc create_directory (CreateDirectoryRequest) returns (CreateDirectoryResponse) {
+        option idempotency_level = IDEMPOTENT;
+    }
+
+    // Returns information about the amount of disk space available, how much
+    // space is needed to stop an experiment cleanly and if MinKNOW thinks
+    // that the free disk-space is approaching or past this limit
+    //
+    // Since 3.7
+    rpc get_disk_space_info (GetDiskSpaceInfoRequest) returns (GetDiskSpaceInfoResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // As with `instance.get_default_output_directories`, this will return the
+    // paths that are defined in the config used when an instance of minknow
+    // is started.
+    //
+    // Since 4.3
+    rpc get_default_output_directories (instance.GetDefaultOutputDirectoriesRequest) returns (instance.OutputDirectories) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // Stream information about the amount of disk space available, how quickly
+    // it is being used, how much space is needed to stop an experiment cleanly
+    // and if MinKNOW thinks that the free disk-space is approaching or past
+    // this limit
+    //
+    // Since 4.0
+    rpc stream_disk_space_info(StreamDiskSpaceInfoRequest) returns (stream GetDiskSpaceInfoResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // Get info about all available barcoding kits
+    //
+    // Since 4.1
+    rpc get_barcode_kit_info(GetBarcodeKitInfoRequest) returns (GetBarcodeKitInfoResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // Get info about all available lamp kits
+    //
+    // Since 4.1
+    rpc get_lamp_kit_info(GetLampKitInfoRequest) returns (GetLampKitInfoResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // List all barcode keys associated with the specified barcoding kits
+    //
+    // Since 4.1
+    rpc get_barcode_keys(GetBarcodeKeysRequest) returns (GetBarcodeKeysResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // List all known types of flow cell.
+    //
+    // The primary purpose of this RPC is to provide a list of flow cell types for a user to select
+    // from (although most flow cells are capable of telling MinKNOW their product code, making user
+    // selection unnecessary).
+    //
+    // A secondary benefit of this call is it allows extra information about flow cell types to be
+    // given.
+    //
+    // Since 4.1
+    rpc get_flow_cell_types(GetFlowCellTypesRequest) returns (GetFlowCellTypesResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+        option (experimental) = true;
+    }
+
+    // List all known sequencing kits.
+    //
+    // The intention is to provide a list of sequencing kits for a user to select from, plus extra
+    // information that can be used to filter that list.
+    //
+    // Since 4.1
+    rpc get_sequencing_kits(GetSequencingKitsRequest) returns (GetSequencingKitsResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+        option (experimental) = true;
+    }
+
+    // Creates a simulated device of the type your system is configured for
+    //
+    // Since 4.3
+    rpc add_simulated_device(AddSimulatedDeviceRequest) returns (AddSimulatedDeviceResponse) {}
+
+    // Removes a simulated device
+    //
+    // Since 4.3
+    rpc remove_simulated_device(RemoveSimulatedDeviceRequest) returns (RemoveSimulatedDeviceResponse) {
+        option idempotency_level = IDEMPOTENT;
+    }
+
+    // Get the path for the local authentication token.
+    //
+    // This RPC is only useful when connecting to MinKNOW from the same computer that MinKNOW is
+    // running on (ie: connecting to "localhost"). If this file exists (which it should if MinKNOW's
+    // guest mode is not completely disabled), it contains a description of a token that can be used
+    // to connect to MinKNOW. This is most useful when MinKNOW's guest mode is set to "local_only",
+    // as it certifies that the client is connecting from the local machine. If the guest mode is
+    // set to "enabled", no token is required to connect.
+    //
+    // The contents of the file is a json object with two fields, "token" and "expires". "token" is
+    // the string that can be passed in a "local-auth" gRPC authentication metadata field, while
+    // "expires" gives the time the token will expire (in RFC3339 format). Note that a new token
+    // will be written out shortly before this time (and, in fact, the token will be accepted a
+    // short time after).
+    //
+    //
+    // An example token file is::
+    //
+    //  {
+    //    "token": "30fe5214-a7c5-4cb3-b521-b1ec8a49592a",
+    //    "expires": "2020-12-18T14:26:12.021934+00:00"
+    //  }
+    //
+    // To connect before 14:26:12.021934 on 2020-12-18, a client would set the metadata field
+    // "local-auth" to "30fe5214-a7c5-4cb3-b521-b1ec8a49592a". At around 14:26:12, the client should
+    // re-read the file and update the metadata field with the newly-read value.
+    //
+    // This RPC can be called without providing any authentication tokens.
+    //
+    // Since 4.2
+    rpc local_authentication_token_path(LocalAuthenticationTokenPathRequest) returns (LocalAuthenticationTokenPathResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // Query information about a reference file.
+    //
+    // Reference file types are picked up by extension:
+    // for fasta: .fasta, .fna, .ffn, .faa, .frn
+    // for mmi: .mmi
+    //
+    // Since 4.4
+    rpc get_alignment_reference_information(GetAlignmentReferenceInformationRequest) returns (GetAlignmentReferenceInformationResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // Get the device code/key for association.
+    //
+    // This can be used to either get the code that the user must enter into the customer support
+    // portal to associate the device with their account, or the key used for online association.
+    //
+    // Errors:
+    //     INVALID_ARGUMENT: The requested flow cell position does not exist.
+    //
+    // Since 4.4
+    rpc association_device_code(AssociationDeviceCodeRequest) returns (AssociationDeviceCodeResponse) {
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // Apply the unlock code for offline association.
+    //
+    // This is the code that the user receives from the customer support portal after entering the
+    // device code for this device (see `offline_association_device_code`).
+    //
+    // This is only required if either `describe_host` indicates that the device as a whole needs
+    // association, or `flow_cell_positions` indicates that a particular positions needs it.
+    //
+    // Errors:
+    //     INVALID_ARGUMENT: The requested flow cell position does not exist, or no unlock code
+    //         was provided.
+    //
+    // Note that you will need to check the result to see if the association was successful. Calling
+    // this on an already-associated device with a valid unlock code will succeed, but have no
+    // effect.
+    //
+    // Since 4.4
+    rpc apply_offline_association_unlock_code(ApplyOfflineAssociationUnlockCodeRequest) returns (ApplyOfflineAssociationUnlockCodeResponse) {
+        option idempotency_level = IDEMPOTENT;
+    }
+
+    // List all developer API tokens.
+    //
+    // List all developer tokens, and their expiry times. Note this does not return the actual token value - this is only available at creation time.
+    //
+    // Since 4.4
+    rpc list_developer_api_tokens(ListDeveloperApiTokensRequest) returns (ListDeveloperApiTokensResponse) {
+        option idempotency_level = IDEMPOTENT;
+    }
+
+    // Create a new developer API token, with a user facing name, and optional expiry time.
+    //
+    // The response contains the requested token, which will be valid until provided expiry time.
+    //
+    // The token cannot be obtained a second time, once the CreateDeveloperApiTokenResponse is destroyed.
+    //
+    // Since 4.4
+    rpc create_developer_api_token(CreateDeveloperApiTokenRequest) returns (CreateDeveloperApiTokenResponse) {}
+
+    // Remove a developer api token.
+    //
+    // Since 4.4
+    rpc revoke_developer_api_token(RevokeDeveloperApiTokenRequest) returns (RevokeDeveloperApiTokensResponse) {}
+
+    // Find protocols which can be run based on the current device + flowcell.
+    //
+    // Throws an error if there is no flow cell connected.
+    //
+    // Since 4.5
+    rpc find_protocols(FindProtocolsRequest) returns (FindProtocolsResponse) {
+        option (experimental) = true;
+    }
+
+    // Given a protocol and some information about the flow-cell and kits will provide a list
+    // of settings required by the protocol, their defaults and dependencies.
+    //
+    // Since 4.5 (moved from ProtocolService)
+    rpc list_settings_for_protocol(ListSettingsForProtocolRequest) returns (ListSettingsForProtocolResponse) {
+        option (experimental) = true;
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // Get the status of BETA/experimental features
+    rpc get_features(GetFeaturesRequest) returns (GetFeaturesResponse) {
+        option (experimental) = true;
+        option idempotency_level = NO_SIDE_EFFECTS;
+    }
+
+    // Change whether features are enabled or disabled
+    rpc set_features(SetFeaturesRequest) returns (SetFeaturesResponse) {
+        option (experimental) = true;
+    }
+
+}
+
+message DescribeHostRequest {
+}
+
+message DescribeHostResponse {
+    // The product code for the host, if applicable.
+    //
+    // If this is an integrated Oxford Nanopore device, this will be the product code of the device,
+    // or the part of the device that runs MinKNOW (eg: several PromethION models have separate
+    // product codes for the sequencing unit where the flow cells are inserted and the compute
+    // unit - this would be the product code for the compute unit).
+    //
+    // Some example product codes:
+    //
+    // ============  =================
+    // Product Code  Name
+    // ============  =================
+    // GRD-X5B001    GridION X5
+    // GRD-X5B002    GridION X5
+    // GRD-X5B003    GridION X5 Mk1
+    // MIN-101C      MinION Mk1C
+    // PRO-PRMC01    PromethION Beta
+    // PRO-PRC024    PromethION 24
+    // PRO-PRC048    PromethION 48
+    // ONT-314       PromethION (Production)
+    //
+    // If MinKNOW is running on a machine that is not provided by Oxford Nanopore (ie: their own
+    // laptop or desktop machine with a MinION plugged in), this field will be empty.
+    string product_code = 1;
+
+    // A human-readable name for the type of host.
+    //
+    // If `product_code` is set, it will be the name of the model of instrument (see the table in
+    // the `product_code` field). Otherwise it will be empty.
+    string description = 2;
+
+    // The serial of Nanopore device.
+    //
+    // If `product_code` is empty, this will also be empty.
+    //
+    // This uniquely identifies the device.
+    //
+    // See also `network_name`.
+    string serial = 3;
+
+    // The network name of the host.
+    //
+    // This is the name the host system believes it has on the network. This can be useful if an IP
+    // address was used to connect to the RPC system.
+    //
+    // For customer computers, this is the only available identfying information for the system.
+    string network_name = 4;
+
+    // This device has not been associated with an account.
+    //
+    // Association must be completed before using the device.
+    //
+    // Note that this will only ever be set for hosts that also have a `product_code` and `serial`.
+    //
+    // If this is true, all positions will report as ``STATE_NEEDS_ASSOCIATION`` until the device
+    // is associated. Even if this is false, however, removable sequencing units (eg: the MinION
+    // Mk1B) may require their own association (in which case they will individually report as
+    // ``STATE_NEEDS_ASSOCIATION`` - see the `flow_cell_positions` RPC).
+    //
+    // Since 4.4
+    bool needs_association = 16;
+
+    // Whether the device can sequence while offline.
+    //
+    // Not all sequencing devices can sequence without an internet connection. This indicates
+    // whether it is possible for the integrated sequencing positions. Note that this will only be
+    // set if `needs_association` is true.
+    //
+    // Since 4.4
+    bool can_sequence_offline = 5;
+
+    enum BasecallingAvailability {
+        // Basecalling is available and the underlying services are up and running
+        BASECALLING_AVAILABLE = 0;
+        // Basecalling is unavailable
+        // 
+        // This may be due to failing to start or has failed to recover after being restarted
+        BASECALLING_UNAVAILABLE = 1;
+        // Basecalling is unavailable due to bad configuration of the underlying service
+        // and automatic recovery is not possible
+        //
+        // This may be due to hardware configuration or compatibility when GPU basecalling is
+        // enabled but the server is unable to support or use the GPU
+        BASECALLING_UNAVAILABLE_BAD_CONFIGURATION = 2;
+        // Basecalling is temporarily unavailable and the system is attempting to restart
+        // the underlying service
+        // 
+        // This may be due to a runtime issue and attempts are being made to recover
+        BASECALLING_UNAVAILABLE_ATTEMPTING_RECOVERY = 3;
+     };
+     // Whether the device can currently provide basecalling
+     //
+     // 
+     BasecallingAvailability can_basecall = 6;
+}
+
+enum SimpleProtocolState {
+    // No protocol has been started on this position (since MinKNOW was started, or the position
+    // was reset). It may also indicate that the protocol state has been manually cleared by the
+    // user (although there is currently no API for doing this).
+    NO_PROTOCOL_STATE = 0;
+
+    // A protocol is currently running on this flow cell position.
+    PROTOCOL_RUNNING = 1;
+
+    // No protocol is currently running, and the last protocol finished successfully (it either ran
+    // to completion or the user manually stopped it).
+    PROTOCOL_FINISHED_SUCCESSFULLY = 2;
+
+    // No protocol is currently running, and the last protocol finished with an error.
+    PROTOCOL_FINISHED_WITH_ERROR = 3;
+}
+
+message FlowCellPosition {
+    // The name of the position.
+    //
+    // For MinIONs, this is the name of the MinION (eg: MN12345). For integrated positions, this is
+    // the label for the position on the sequencer (eg: X1 for GridION, 1-A1-D1 for PromethION).
+    string name = 1;
+
+    message Location {
+        // The column (counting from 0, left-to-right) of the flow cell position on the sequencing
+        // unit when viewed from above/in front.
+        int32 x = 1;
+
+        // The row (counting from 0, top-to-bottom) of the flow cell position on the sequencing
+        // unit when viewed from above/in front.
+        int32 y = 2;
+    }
+    // For integrated flow cell positions, indicates where it is on the sequencing unit.
+    //
+    // This information is not provided for MinIONs (except for the MinION Mk1C, in which case the
+    // position is always 0, 0).
+    Location location = 2;
+
+    enum State {
+        // The flow cell position is being initialised. This state should only last for a few
+        // seconds, before moving to `STATE_RUNNING` or one of the error states.
+        STATE_INITIALISING = 0;
+        // The flow cell position is in a basic state of operation, and an RPC interface is
+        // available for it.
+        //
+        // `rpc_ports` is guaranteed to be set in this tate. Note that port information may also be
+        // provided in the hardware error states if the software is still running.
+        //
+        // Note that many hardware and software errors are not detectable by the manager, so
+        // `STATE_RUNNING` may be set even when there is a problem. The interface provided over
+        // `rpc_ports` should be the canonical source of the state of the flow cell position when in
+        // `STATE_RUNNING`. In the future, more errors may be tracked properly here.
+        STATE_RUNNING = 1;
+        // After calling reset_position(), this state may be entered to indicate the software is in
+        // the process of being stopped.
+        //
+        // Typically, this state will either transition into STATE_INITIALISING or the position will
+        // be removed entirely (although it could return to one of the hardware error states).
+        STATE_RESETTING = 2;
+        // The hardware corresponding to the flow cell position was removed.
+        //
+        // Only set for removable positions (ie: USB MinIONs). This state indicates that the
+        // hardware was removed, but the software is still running. The software will not be stopped
+        // automatically to prevent possible data loss. Call reset_position() to stop the software
+        // and forget about the position.
+        STATE_HARDWARE_REMOVED = 3;
+        // Communication with the hardware failed.
+        //
+        // For integrated positions, this can include when the hardware was not found at all (eg: if
+        // a PromethION has not had one of its sequencing unit cables attached).
+        //
+        // More information may be available in `error_info`.
+        STATE_HARDWARE_ERROR = 4;
+        // The software corresponding to the flow cell position could not be started (or stopped
+        // unexpectedly).
+        //
+        // More information may be available in `error_info`.
+        STATE_SOFTWARE_ERROR = 5;
+        // The position is not available because it requires association.
+        //
+        // See also `DescribeHostResponse.needs_association`. If the `describe_host` RPC result has
+        // `needs_association` set to false, this position is a pluggable device (likely a MinION
+        // Mk1B) that individually requires assocation.
+        //
+        // Since 4.4
+        STATE_NEEDS_ASSOCIATION = 6;
+    };
+    // The state of the flow cell position.
+    //
+    // If the state is not `STATE_RUNNING` or `STATE_INITIALISING`, the flow cell position can be
+    // assumed to be unusable, and the `error_info` field should be populated.
+    State state = 3;
+
+    message RpcPorts {
+        // A port providing the standard gRPC protocol over TLS
+        uint32 secure = 1;
+        // A port providing the gRPC-Web protocol over TLS
+        uint32 secure_grpc_web = 3;
+    }
+    // The ports the APIs for this flow cell position are provided on.
+    //
+    // Always provided if `state` is `STATE_RUNNING`. May also be provided when `state` is one of
+    // the hardware errors if the software is still running.
+    RpcPorts rpc_ports = 4;
+
+    // Provides a textual description of error states.
+    //
+    // When `state` is not `STATE_INITIALISING`, `STATE_RUNNING` or `STATE_RESETTING`, this provides
+    // some information (in English) about the error. This will be a textual description of the
+    // value in `state`, possibly with extra information about the error (if available).
+    //
+    // This can be useful for dealing with (new) unknown states.
+    string error_info = 5;
+
+    message SharedHardwareGroup {
+        uint32 group_id = 1;
+    }
+
+    // Some positions may share hardware. Positions that share hardware will have the same
+    // group-id. If positions do share hardware, to reset the hardware you will need to
+    // reset all positions in the group at the same time.
+    SharedHardwareGroup shared_hardware_group = 6;
+
+    // Indicates that this is an integrated flow cell position.
+    //
+    // This is true for the integrated positions on a PromethION, GridION or MinION Mk1C, and false
+    // for a MinION Mk1B.
+    //
+    // Integrated positions are always listed, even if (due to some hardware error) they can't be
+    // found. They are never in STATE_HARDWARE_REMOVED, and they always report a location.
+    //
+    // Additionally, integrated positions cannot be associated independently - if they are in
+    // STATE_NEEDS_ASSOCIATION, then the host as a whole needs associating. Likewise, either all
+    // integrated positions can run offline, or none of them can.
+    //
+    // Since 4.4
+    bool is_integrated = 7;
+
+    // Indicates that this position can sequence offline.
+    //
+    // For integrated positions, this is the same as the corresponding field returned from the
+    // describe_host RPC.
+    bool can_sequence_offline = 8;
+
+    // Indicates the state of the last or current protocol on the flow cell position.
+    //
+    // Since 5.0.
+    SimpleProtocolState protocol_state = 9;
+
+    // Whether the device is simulated.
+    //
+    // If this is true, there is no physical device - MinKNOW is simulating it. If it is false,
+    // MinKNOW will be acquiring data from a real device.
+    //
+    // Since 5.2
+    bool is_simulated = 10;
+
+    // The type of the device.
+    //
+    // Since 5.2
+    minknow_api.device.GetDeviceInfoResponse.DeviceType device_type = 11;
+
+    // The name of the device this flow cell position is part of.
+    //
+    // For an integrated position, this will be the host serial, as returned by describe_host().
+    //
+    // For a MinION Mk1B, this will be the same as the `name` field.
+    //
+    // For a P2 Solo, this will be the name of the P2 Solo unit.
+    //
+    // Since 5.3
+    string parent_name = 12;
+}
+
+message FlowCellPositionsRequest {
+}
+
+message FlowCellPositionsResponse {
+    // How many positions are available in total.
+    //
+    // This is the same in every message returned from a single call, and allows the caller to
+    // easily see how many further positions might be in subsequent messages.
+    int32 total_count = 1;
+
+    // Known flow cell positions.
+    //
+    // Note that not all positions listed here are necessarily available. In particular, integrated
+    // flow cell positions (eg: on GridIONs or PromethIONs) will always be listed.
+    repeated FlowCellPosition positions = 2;
+}
+
+message WatchFlowCellPositionsRequest {
+}
+
+// Each flow cell position will first be listed in `additions`. After that, it may appear in
+// `changes` in zero or more messages. Then, it may appear in `removals` once, after which it will
+// either never appear again, or appear in `additions` again (restarting the cycle).
+//
+// No position will ever appear in more than one field in the same response message.
+message WatchFlowCellPositionsResponse {
+    // Flow cell positions that are new (to this call).
+    //
+    // Contains flow cell positions that have not been seen before on this call (or have re-appeared
+    // after being removed).
+    //
+    // Note that a flow cell position being listed here does not mean it is available. In
+    // particular, integrated flow cell positions (eg: on GridIONs or PromethIONs) will always be
+    // provided, so that they can be positioned appropriately.
+    repeated FlowCellPosition additions = 1;
+
+    // Flow cell positions that have changed state.
+    //
+    // Every flow cell position provided in this list will have previously been provided in
+    // `additions`.
+    repeated FlowCellPosition changes = 2;
+
+    // A flow cell position has been removed.
+    //
+    // Note that this can only happen with MinIONs - integrated flow cell positions are never
+    // removed (if they become unavailable, this will be noted in the `changes` field).
+    repeated string removals = 3;
+}
+
+message ResetPositionRequest {
+    // The names of positions to restart.
+    repeated string positions = 3;
+
+    // Force the software to be restarted even when it appears to be in a healthy state (ie:
+    // STATE_RUNNING).
+    bool force = 2;
+}
+
+message ResetPositionResponse {
+}
+
+message BasecallerApiRequest {}
+
+message BasecallerApiResponse {
+    // The port to use to access the minknow_api.basecaller API using the standard gRPC protocol
+    // over TLS
+    uint32 secure = 1;
+    // The port to use to access the minknow_api.basecaller API using the gRPC-Web protocol over TLS
+    uint32 secure_grpc_web = 3;
+}
+
+message GetGuppyInfoRequest {}
+
+message GetGuppyInfoResponse {
+    oneof connection_type {
+        // The port Guppy is listening on.
+        uint32 port = 1;
+
+        // The path to an ipc file Guppy is using.
+        // Use "ipc://<ipc_path>" for a guppy connection string.
+        string ipc_path = 3;
+    }
+
+    // The Guppy server version.
+    string version = 2;
+}
+
+message GetVersionInfoRequest {}
+
+message ListProtocolOutputDirFilesRequest {
+    // Specify the root path to list files from. If the path is left empty, then the base protocol output directory
+    // will be used.
+    //
+    // Note that the path specified HAS to be a descendant of the protocol output directory, otherwise a INVALID_ARGUMENT
+    // error will be returned
+    //
+    // If the path is left empty, and the path specified in the user config doesn't exist, then the NOT_FOUND error code
+    // will be returned
+    string path = 1;
+}
+
+message ListProtocolOutputDirFilesResponse {
+    message DirectoryInfo {
+        string name = 1;
+        int32 directory_count = 2;
+        int32 file_count = 3;
+    }
+
+    // List of sub-directories in the directory specified
+    repeated DirectoryInfo directories = 1;
+
+    // List of files in the directory specified
+    repeated string files = 2;
+
+    // The absolute directory that is being listed within this response
+    string current_listed_path = 3;
+}
+
+message CreateDirectoryRequest {
+    // The path at which to create the directory.
+    //
+    // This must exist, be a directory, and be within the protocol output directory. This can be
+    // determined via calls to list_protocol_output_dir_files().
+    string parent_path = 1;
+
+    // The name of the directory to create.
+    //
+    // This must be a single path component (ie: it cannot contain '/' or '\'). There may be other
+    // restrictions on valid characters, depending on the operating system.
+    string name = 2;
+}
+
+message CreateDirectoryResponse {
+    // The path to the created directory.
+    string path = 1;
+}
+
+// disk-usage information for one file-system
+message FilesystemDiskSpaceInfo {
+    // The name of the file-system
+    string filesystem_id = 1;
+
+    // How much space is left on the file-system
+    uint64 bytes_available = 2;
+
+    // The total capacity of the file-system when empty.
+    uint64 bytes_capacity = 3;
+
+    // A list of what types of file MinKNOW stores on this file-system, eg:
+    // reads, logs, intermediate-files, etc.
+    repeated string file_types_stored = 4;
+
+    // MinKNOW needs this much space to stop experiments. If bytes_available
+    // goes below this number, data could be lost!
+    uint64 bytes_to_stop_cleanly = 5;
+
+    // The amount of space left on the file-system when recommend_alert
+    // was set true.
+    uint64 bytes_when_alert_issued = 6;
+
+    // MinKNOW recommends that you alert someone about the disk-usage
+    bool recommend_alert = 7;
+
+    // MinKNOW recommends that you stop experiments due to disk-usage
+    // concerns
+    bool recommend_stop = 8;
+
+    // Rate of change in bytes_available (per second) +'ve numbers indicate
+    // that bytes_available is decreasing and space is being used
+    // A value of 0 can indicate that this has not applicable or not available.
+    int64 bytes_per_second = 9;
+}
+
+message GetDiskSpaceInfoRequest {
+}
+
+message StreamDiskSpaceInfoRequest {
+    // Disk space information will be streamed with this value determining the
+    // period in seconds between updates.
+    // A period of 0 is invalid
+    uint32 period = 1;
+}
+
+message GetDiskSpaceInfoResponse {
+    repeated FilesystemDiskSpaceInfo filesystem_disk_space_info = 1;
+}
+
+
+message GetBarcodeKitInfoRequest{}
+
+message GetBarcodeKitInfoResponse{
+    message BarcodeKitInfo{
+        bool is_dual = 2;
+        bool is_both_ends = 3;
+    }
+
+    // Map of barcode kit name to barcode kit info
+    map<string, BarcodeKitInfo> barcode_kit_info = 1;
+}
+
+message GetLampKitInfoRequest{}
+
+message GetLampKitInfoResponse{
+    // Lamp kit names
+    repeated string lamp_kits = 2;
+}
+
+
+message GetBarcodeKeysRequest{
+    // Names of barcode kits to obtain barcode names for
+    //
+    // Fails with INVALID_ARGUMENT if any of the requested `barcode_kit_names` are unavailable
+    //
+    repeated string barcode_kit_names = 1;
+
+    // Name of lamp kit to obtain barcode names for.
+    //
+    // Fails with INVALID_ARGUMENT if the requested `lamp_kit_name` is unavailable.
+    string lamp_kit_name = 2;
+}
+
+message GetBarcodeKeysResponse {
+    // Returned barcode keys.
+    repeated string barcode_keys = 1;
+
+    // Returned lamp barcode ids.
+    repeated string lamp_keys = 2;
+
+    // Combined barcode and lamp keys.
+    //
+    // Returned keys are joined strings of all requested barcode kits, giving the caller
+    // a unique string to identify each barcode pair.
+    //
+    // eg. if both a lamp kit + barcode kit are specified, NxM barcode keys are returned:
+    //  - barcode01_lamp01
+    //  - barcode01_lamp02
+    //  - barcode01_lamp03
+    //  - barcode02_lamp01
+    //  - barcode02_lamp02
+    //  - barcode02_lamp03
+    repeated string combined_keys = 3;
+}
+
+// Request message for `ManagerService.get_flow_cell_types`.
+message GetFlowCellTypesRequest {
+}
+
+// Response message for `ManagerService.get_flow_cell_types`.
+message GetFlowCellTypesResponse {
+    // Information about a flow cell type.
+    message Info {
+        // The product code for the flow cell type.
+        //
+        // This is the user-visible name for the flow cell type. It is the name used to order flow
+        // cells, and is also displayed on the packaging.
+        //
+        // While most product codes are 10 characters, be aware that longer product codes can exist
+        // and have been used in the past.
+        //
+        // Example: "FLO-MIN106".
+        string product_code = 1;
+
+        // The connector type of this flow cell type.
+        //
+        // This determines which flow cell positions it is possible to insert this flow cell into.
+        // The connector type for a given flow cell position can be determined using
+        // `minknow_api.device.DeviceService.get_device_state`.
+        //
+        // This will never be ``FCCON_NOT_SET``.
+        device.FlowCellConnectorType connector_type = 2;
+
+        // Indicates that live basecalling is not possible on the flow cell.
+        //
+        // Note that almost all flow cell types can be basecalled on: that is why this indicates a
+        // negative (saving some bytes on the wire by allowing the common case of basecalling being
+        // possible to be omitted entirely).
+        bool cannot_live_basecall = 3;
+    }
+
+    // The flow cell types.
+    repeated Info types = 1;
+}
+
+// Request message for `ManagerService.get_sequencing_kits`.
+message GetSequencingKitsRequest {
+    // The product code of the flow cell that will be used for sequencing.
+    //
+    // Only kits compatible with this flow cell type will be returned (currently, this means that
+    // there is at least one (sequencing or control) protocol that is compatible with both the kit
+    // and this flow cell product code).
+    //
+    // This may also affect the returned information about the kit. For example, if it isn't
+    // possible to basecall on the flow cell, none of the kits will claim to be barcoding capable
+    // (or compatible with any barcoding expansion kits).
+    string flow_cell_product_code = 1;
+}
+
+// Response message for `ManagerService.get_sequencing_kits`.
+message GetSequencingKitsResponse {
+    // Information about a sequencing kit.
+    message Kit {
+        // The product code for the sequencing kit.
+        //
+        // This is the user-visible name for the kit. It is the name used to order kits, and is also
+        // displayed on the packaging.
+        //
+        // While most product codes are 10-15 characters, be aware that longer (or shorter) product
+        // codes can exist.
+        //
+        // Examples: "SQK-LSK109", "OND-SQK-LP0096S".
+        string product_code = 1;
+
+        // Compatible barcoding expansion kits.
+        //
+        // These are indexes into the GetSequencingKitsResponse.barcoding_expansion_kits list. For
+        // example, 0 would indicate the first kit in that list. The values are guaranteed to be
+        // unique and valid indexes for that list.
+        repeated int32 barcoding_expansion_kits = 2;
+
+        // Whether barcoding support is part of the sequencing kit.
+        //
+        // If this is set, barcoding can be done without any expansion kits (and, in fact, barcoding
+        // is an integral part of the kit).
+        bool includes_barcoding = 3;
+
+        // Whether the kit can be used for LamPORE diagnostics.
+        bool lamp_kit = 16;
+
+        // Whether there is a "control" protocol available for this kit.
+        bool has_control_protocol = 4;
+
+        // Indicates there is no sequencing protocol available for this kit.
+        //
+        // This is an unusual situation. If a kit is known about, it should generally have a
+        // sequencing protocol associated with it, and it would be strange to have a control
+        // protocol available but no sequencing protocol.
+        bool no_sequencing_protocol = 17;
+
+        // Indicates that the sequencing kit is one of the most commonly used ones.
+        //
+        // This can be used to display such kits first, or otherwise highlight them in some way.
+        bool frequently_used = 18;
+
+        // The kit can be used with DNA samples.
+        bool dna = 5;
+        // The kit can be used with RNA samples.
+        bool rna = 6;
+        // The kit can be used with samples that have had PCR applied to them.
+        bool pcr = 7;
+        // The kit can be used without a PCR step.
+        bool pcr_free = 8;
+    }
+    // The known sequencing kits.
+    repeated Kit kits = 1;
+
+    // Information about a barcoding expansion kit.
+    //
+    // In the future, this may include compatibility information for dual barcoding, for example.
+    message BarcodingExpansionKit {
+        // The product code for the barcoding expansion kit.
+        //
+        // This is the user-visible name for the kit. It is the name used to order kits, and is also
+        // displayed on the packaging.
+        //
+        // While most product codes are 10 characters, be aware that longer product codes can exist.
+        //
+        // Example: "EXP-NBD104".
+        string product_code = 1;
+    }
+    // The possible barcoding expansion kits.
+    //
+    // These are kits that can be used in combination with certain sequencing kits to add (or
+    // extend) barcoding functionality.
+    repeated BarcodingExpansionKit barcoding_expansion_kits = 2;
+}
+
+enum SimulatedDeviceType {
+    SIMULATED_AUTO = 0;
+    SIMULATED_MINION = 1;
+    SIMULATED_TRAXION = 2;
+    SIMULATED_PROMETHION = 3;
+    SIMULATED_P2 = 4;
+}
+
+message AddSimulatedDeviceRequest {
+
+    // The name of the position, this must be unique and the correct format:
+    //
+    // For MinION Mk1B and Mk1C: "MS" followed by five digits, eg: "MS12345".
+    // For GridION: "GS" followed by five digits, eg: "GS12345".
+    // For P2 Solo: "P2S_" followed by five digits, and then "-A" or "-B" eg: "P2S_12345-A".
+    //
+    // PromethION and P2 Solo position-names have no format restriction, but must be unique. It is
+    // strongly recommended to follow standard naming conventions:
+    //
+    // For PromethION: start with "1A" and then increase the number and/or the letter as you add
+    // more positions.
+    // For P2 Solo: use "P2S_00000-A" and "P2S_00000-B" (these fit the format of real P2 Solo devices,
+    // but do not correspond to any real device).
+    //
+    // Future versions might constrain PromethION and P2 Solo device names. Using the above
+    // suggestions should ensure that your code will continue to work.
+    //
+    // Note that MinKNOW Core 5.5 and earlier required the P2 Solo device name to be "P2S" followed
+    // by four digits. This is no longer recommended.
+    string name = 1 [(rpc_required) = true];
+
+    // The type of the simulated device to create.
+    //
+    // If left at default (AUTO), then a sensible default device type is selected.
+    SimulatedDeviceType type = 2 [(rpc_required) = true];
+}
+
+message AddSimulatedDeviceResponse {
+}
+
+message RemoveSimulatedDeviceRequest {
+    // The name of the simulated device to be removed
+    string name = 1 [(rpc_required) = true];
+}
+
+message RemoveSimulatedDeviceResponse {
+}
+
+message LocalAuthenticationTokenPathRequest {
+}
+
+message LocalAuthenticationTokenPathResponse {
+    // The full path of the local authentication token
+    string path = 1;
+}
+
+message GetAlignmentReferenceInformationRequest {
+    // The full path of the alignment reference.
+    //
+    // Should be a .fasta, or .mmi file.
+    string path = 1;
+}
+
+message GetAlignmentReferenceInformationResponse {
+    // Estimated load time of the reference in seconds.
+    float estimated_load_time_seconds = 1;
+
+    // Estimated size of the reference file in bases.
+    uint64 estimated_reference_size_bases = 2;
+
+    // Does the reference file fit within the recommended live usage memory size?
+    //
+    // This uses an estimate of how much memory a reference may use when running in guppy
+    // and compares to the amount of memory in the sequencer. It does not account for
+    // whether the reference will run in real time.
+    bool recommended_live_usage = 3;
+}
+
+message AssociationDeviceCodeRequest {
+    // The flow cell position to get the association code/key for.
+    //
+    // If this is omitted, the code/key for the sequencing device as a whole is returned.
+    //
+    // Note that this cannot be omitted if MinKNOW is installed on a PC (as opposed to a sequencing
+    // device). It should be omitted if (and only if) the data returned from `describe_host` has
+    // its ``needs_association`` field set to true.
+    //
+    // Passing a integrated flow cell position will return the code/key for the whole sequencing
+    // device.
+    string position_name = 1;
+
+    // Offline association is now the default workflow
+    //
+    // The following are therefore reserved/deprecated
+    reserved "offline";
+    reserved 2;
+}
+
+message AssociationDeviceCodeResponse {
+    // The code required to associate the device with an account.
+    //
+    // If the request had `offline` set, this code is suitable for use in the customer portal
+    // offline association page. Otherwise, it is suitable for the online association APIs.
+    string code = 1;
+}
+
+message ApplyOfflineAssociationUnlockCodeRequest {
+    // The flow cell position to unlock.
+    //
+    // This should be set (or not set) to match the corresponding call to
+    // `offline_association_device_code`.
+    string position_name = 1;
+
+    // The unlock code provided by the user.
+    //
+    // This the code given by the customer support portal when the corresponding device code is
+    // entered into the device association page.
+    string unlock_code = 2;
+}
+
+message ApplyOfflineAssociationUnlockCodeResponse {
+    // True if the association was successful (the unlock_code was accepted), false otherwise.
+    bool associated = 1;
+}
+
+message ListDeveloperApiTokensRequest {}
+
+message ListDeveloperApiTokensResponse {
+    message DeveloperApiToken {
+        // Unique ID assigned to the token.
+        string id = 1;
+
+        // User facing name describing the token (guaranteed unique across tokens).
+        string name = 2;
+
+        // Optional expiry of the token.
+        google.protobuf.Timestamp expiry = 3;
+    }
+
+    repeated DeveloperApiToken tokens = 1;
+}
+
+message CreateDeveloperApiTokenRequest {
+
+    // User facing name describing the token.
+    string name = 2;
+
+    // Optional expiry time for the token.
+    google.protobuf.Timestamp expiry = 3;
+}
+
+message CreateDeveloperApiTokenResponse {
+    // Unique ID assigned to the token for identification purposes. Not valid as an authentication token.
+    string id = 1;
+
+    // Created token, available to be used with minknow API's immediately.
+    string token = 2;
+}
+
+message RevokeDeveloperApiTokenRequest {
+    // The id passed back from [CreateDeveloperApiTokenRequest] or [DeveloperApiToken].
+    string id = 1;
+}
+
+message RevokeDeveloperApiTokensResponse {}
+
+enum ExperimentType {
+    // Must not be hidden, experiment type must be "sequencing".
+    SEQUENCING = 0;
+
+    // Must not be hidden, experiment type must be "control".
+    CONTROL = 1;
+
+    // Must not be hidden, experiment type must not be "sequencing" or "control", and if the protocol is in the installation directory, it must also not be "CTC", "platform QC" or "flowcell_plugin".
+    CUSTOM = 2;
+
+    // "hidden" protocols are not returned, but any other compatible protocols are.
+    ALL_EXCEPT_HIDDEN = 3;
+
+    // All protocols, including "hidden" protocols, are returned.
+    ALL_INCLUDING_HIDDEN = 4;
+}
+
+message FindProtocolsRequest {
+    // Find protocols that are compatible with this flow cell product code.
+    //
+    // Set to empty string to find protocols matching all flow cell product codes.
+    string flow_cell_product_code = 1;
+
+    // Limit to protocols that are compatible with this sequencing kit.
+    //
+    // Set to empty string to find protocols matching all kits.
+    string sequencing_kit = 2;
+
+    // Limit response to certain protocol types.
+    ExperimentType experiment_type = 3;
+}
+
+message FindProtocolsResponse {
+    message Protocol {
+        // An identifying string for protocol, of the form: LOCATION:relative/path/to/protocol
+        //
+        // The identifier uniquely identifies the protocol.
+        //
+        string identifier = 1;
+
+        // Whether the protocol requires a flow cell product code in order to start.
+        bool requires_flow_cell_product_code = 2;
+
+        // Whether the protocol requires a sequencing kit in order to start.
+        bool requires_sequencing_kit = 3;
+    }
+
+    // Protocols available for starting.
+    repeated Protocol protocols = 1;
+}
+
+message ListSettingsForProtocolRequest {
+    oneof protocol_identifier {
+        // specify the protocol with a string containing all the protocol's identifying components, eg:
+        // "sequencing/sequencing_MIN106_DNA:FLO-MIN106:SQK-RPB004"
+        string identifier = 1;
+
+        // specify the protocol providing the identifying components individually. All components are optional, if more
+        // than one protocol matches given strings, information about the first will be returned.
+        protocol_settings.ProtocolIdentifierComponents components = 2;
+    }
+    // The flow-cell connector type identifies the type of hardware and is used
+    // to identify the correct protocol.
+    // The flow-cell connector types applicable to the device are listed by
+    // the get_flow_cell_types rpc in this service and the get_device_state rpc
+    // in the device service.
+    device.FlowCellConnectorType flow_cell_connector = 3 [(rpc_required) = true];
+}
+
+
+message ListSettingsForProtocolResponse {
+    // Run options
+    message RunOptions {
+        protocol_settings.ProtocolSetting run_length = 1;
+        protocol_settings.ProtocolSetting bias_voltage = 2;
+        protocol_settings.ProtocolSetting read_until_enabled = 3;
+        protocol_settings.ProtocolSetting read_until_ref_file = 4;
+        protocol_settings.ProtocolSetting read_until_channels = 5;
+        protocol_settings.ProtocolSetting read_until_bed_file_enabled = 6;
+        protocol_settings.ProtocolSetting read_until_bed_file = 7;
+        protocol_settings.ProtocolSetting read_until_enrichment = 8;
+        protocol_settings.ProtocolSetting active_channel_selection = 9; // bool
+        protocol_settings.ProtocolSetting mux_scan_period = 10; // in hours
+        protocol_settings.ProtocolSetting group_change_period = 11;
+    }
+
+    message Basecalling {
+        protocol_settings.ProtocolSetting basecalling_enabled = 1;
+        protocol_settings.ProtocolSetting barcoding_enabled = 2;
+        protocol_settings.ProtocolSetting barcoding_kits = 3;
+        protocol_settings.ProtocolSetting basecall_model = 4;
+        protocol_settings.ProtocolSetting trim_barcodes_enabled = 5;
+        protocol_settings.ProtocolSetting require_barcodes_both_ends = 6;
+        protocol_settings.ProtocolSetting detect_mid_strand_barcodes = 7;
+        protocol_settings.ProtocolSetting override_mid_barcoding_score = 8;
+        protocol_settings.ProtocolSetting override_rear_barcoding_score = 9;
+        protocol_settings.ProtocolSetting min_barcoding_score = 10;
+        protocol_settings.ProtocolSetting min_barcoding_score_rear = 11;
+        protocol_settings.ProtocolSetting min_barcoding_score_mid = 12;
+        protocol_settings.ProtocolSetting alignment_enabled = 13;
+        protocol_settings.ProtocolSetting alignment_ref_file = 14;
+        protocol_settings.ProtocolSetting alignment_bed_file_enabled = 15;
+        protocol_settings.ProtocolSetting alignment_bed_file = 16;
+    }
+
+    // Output
+    message Output {
+        protocol_settings.ProtocolSetting output_location = 1;
+        protocol_settings.ProtocolSetting fast_q_enabled = 2;
+        protocol_settings.ProtocolSetting fast_q_reads_per_file = 3;
+        protocol_settings.ProtocolSetting fast_q_data_compression = 4;
+        protocol_settings.ProtocolSetting fast_5_enabled = 5;
+        protocol_settings.ProtocolSetting fast_5_reads_per_file = 6;
+        protocol_settings.ProtocolSetting fast_5_data_trace_table = 7;
+        protocol_settings.ProtocolSetting fast_5_data_move_table = 8;
+        protocol_settings.ProtocolSetting fast_5_data_fast_q = 9;
+        protocol_settings.ProtocolSetting fast_5_data_raw = 10;
+        protocol_settings.ProtocolSetting fast_5_data_compression = 11;
+        protocol_settings.ProtocolSetting bam_enabled = 12;
+        protocol_settings.ProtocolSetting read_filtering_enabled = 13;
+        protocol_settings.ProtocolSetting read_filtering_min_qscore = 14;
+        protocol_settings.ProtocolSetting read_filtering_min_read_length = 15;
+        protocol_settings.ProtocolSetting read_filtering_max_read_length = 16;
+        protocol_settings.ProtocolSetting bulk_file_enabled = 17;
+        protocol_settings.ProtocolSetting bulk_file_raw = 18;
+        protocol_settings.ProtocolSetting bulk_file_events = 19;
+        protocol_settings.ProtocolSetting bulk_file_read_table = 20;
+        protocol_settings.ProtocolSetting bulk_file_raw_enabled = 21;
+        protocol_settings.ProtocolSetting bulk_file_events_enabled = 22;
+        protocol_settings.ProtocolSetting bulk_file_read_table_enabled = 23;
+    }
+
+    protocol_settings.ProtocolIdentifierComponents protocol = 1;
+
+    RunOptions run_options = 2;
+    Basecalling basecalling = 3;
+    Output output = 4;
+
+    // Any protocol settings not covered by the above structures, for example
+    // those required for custom-scripts.
+    repeated protocol_settings.ProtocolSetting protocol_settings = 5;
+}
+
+
+message Feature {
+    // Enable or disable the feature
+    bool enabled = 1;
+}
+
+message FeatureList {
+    // feature_flags is a special value 
+    // If false, turns off all other feature flags
+    // If true, allows individual flags to be enabled and disabled
+    Feature feature_flags = 3;
+    Feature enrich_deplete = 1;
+    Feature barcode_balancing = 2;
+    Feature data_offload = 4;
+}
+
+message GetFeaturesRequest {
+    
+}
+
+message GetFeaturesResponse {
+    enum State {
+        // MinKNOW shouldn't send this, likely a bug
+        UNKNOWN = 0;
+
+        // No saved config was detected, so a default from minknow was provided
+        NO_FILE = 1;
+
+        // Saved config was detected, but there was an error in processing it
+        // The values may be different from what the user expects
+        ERROR_LOADING_FROM_FILE = 2;
+
+        // A saved config was detected and was loaded successfully
+        LOADED_FROM_FILE = 3;
+    }
+
+    State state = 1;
+    FeatureList features = 2;
+}
+
+message SetFeaturesRequest {
+    FeatureList features = 1;
+}
+
+message SetFeaturesResponse {
+    
+}

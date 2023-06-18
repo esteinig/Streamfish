@@ -30,9 +30,9 @@ pub struct GlobalOptions {
     #[clap(long, short, global = true, default_value="0")]
     pub verbose: usize,
 
-     /// Use a dot env file (.env) for Reefsquid configuration
+     /// Environmental variable file (.env) for configuration.
      /// 
-     /// Dotenv file must be in current directory tree.
-     #[clap(long, short, global = true, default_value="false")]
+     /// File must be in current directory tree.
+     #[clap(long, short, global = true, default_value="true")]
      pub dotenv: bool,
 }
