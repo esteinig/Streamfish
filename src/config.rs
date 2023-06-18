@@ -10,11 +10,11 @@ fn get_env_var(var: &str) -> String {
 #[derive(Debug, Clone)]
 pub struct MinKnowConfig {
     // Host address that runs MinKnow
-    host: String,
+    pub host: String,
     // Port of MinKnow manager service [9502]
-    port: i32,
+    pub port: i32,
     // Developer token generated in MinKnow UI
-    token: String
+    pub token: String
 }
 
 
@@ -26,11 +26,11 @@ pub struct ReadUntilConfig {
 #[derive(Debug, Clone)]
 pub struct ReefSquidConfig {
     // Reefsquid version
-    version: String,
+    pub version: String,
     // MinKno  configuration
-    minknow: MinKnowConfig,
+    pub minknow: MinKnowConfig,
     // ReadUntil configuration
-    readuntil: ReadUntilConfig
+    pub readuntil: ReadUntilConfig
 }
 
 impl ReefSquidConfig {
@@ -58,7 +58,7 @@ impl std::fmt::Display for ReefSquidConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let s = formatdoc! {"
 
-        
+
             =======================
             Reefsquid configuration
             =======================

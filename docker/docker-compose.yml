@@ -1,5 +1,23 @@
 version: "3.8"
+
 services:
+
+  # This builds a development container which mirrors the repository 
+  # for cargo-watch auto-building on every change during development
+  #
+  #   docker-compose -f <compose-file> --profile dev --project-name <project> up <--build>
+  #
+  # For testing the terminal client while the development container
+  # is running enter the running service container with:
+  #
+  #   docker exec -it <project>-reefsquid-dev-1 /bin/bash
+  #
+  # The compiled executable is copied to /usr/bin and available:
+  #
+  #   reefsquid test --help
+  #
+  # Note that we are adding the host network / ports to the container network! This is so
+  # we can run MinKnow on the host, but still reach it inside the container.
 
   reefsquid-dev:
     profiles:
@@ -7,7 +25,8 @@ services:
     image: reefsquid:latest
     build:
       context: ..
-      dockerfile: ./docker/Dockerfile
+      dockerfile: ./docker/Dockerfile.dev
     volumes:
       - ../:/usr/src/reefsquid
-    command: cargo watch -x "build --release"
+      - /opt/ont/minknow/conf/rpc-certs/:/opt/ont/minknow/conf/rpc-certs/
+    command: cargo watch -x "build --target x86_64-unknown-linux-musl --release && cp /usr/src/reefsquid/target/release/reefsquid /usr/bin"

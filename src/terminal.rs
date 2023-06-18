@@ -30,7 +30,7 @@ pub struct GlobalOptions {
     #[clap(long, short, global = true, default_value="0")]
     pub verbose: usize,
 
-     /// Environmental variable file (.env) for configuration.
+     /// use an nvironmental variable file (.env) for configuration.
      /// 
      /// File must be in current directory tree.
      #[clap(long, short, global = true, default_value="true")]
