@@ -10,7 +10,7 @@ readme = "README.md"
 keywords = ["nanopore", "adaptive-sampling", "read-until", "minknow", "grpc"]
 categories = ["science"]
 license = "MIT"
-edition = "2018"
+edition = "2021"
 include = [
     "**/*.rs",
     "src/data/*",
@@ -26,9 +26,11 @@ log = "0.4.19"
 prost = "0.11.9"
 tokio = { version = "1.28.2", features = ["full"] }
 tonic = { version = "0.9.2", features = ["tls"] }
+prost-types = "0.11"
 
 [build-dependencies]
-tonic-build = "0.9"
+tonic-build = { version = "0.9", features = ["prost"] }
+
 
 [dev-dependencies]
 assert_cmd = "2.0.1"

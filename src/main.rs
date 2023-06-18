@@ -1,7 +1,5 @@
 #![allow(dead_code)]
 
-use std::future::Future;
-
 use clap::Parser;
 
 use crate::terminal::{App, Commands};
@@ -12,7 +10,6 @@ mod terminal;
 mod config;
 mod utils;
 mod error;
-mod api;
 
 #[tokio::main]
 async fn main() {

@@ -1,0 +1,13 @@
+version: "3.8"
+services:
+
+  reefsquid-dev:
+    profiles:
+      - dev
+    image: reefsquid:latest
+    build:
+      context: ..
+      dockerfile: ./docker/Dockerfile
+    volumes:
+      - ../:/usr/src/reefsquid
+    command: cargo watch -x "build --release"
