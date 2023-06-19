@@ -15,18 +15,37 @@ services:
   # The compiled executable is copied to /usr/bin and available:
   #
   #   reefsquid test --help
+
+
+  # This development container requires MinKnow to run on the host, it will
+  # map the host ports into the container on `minknow_host` so that we can
+  # connect to the MinKnow API. This requires to set the configuration 
+  # environmental variable:
   #
-  # Note that we are adding the host network / ports to the container network! This is so
-  # we can run MinKnow on the host, but still reach it inside the container.
+  # REEFSQUID_MINKNOW_HOST=minknow_host
+  #
+  # This is done here with the environment variable which overrides the
+  # configuration file (.env) from the shared directory tree
 
   reefsquid-dev:
     profiles:
       - dev
+      - minknow
     image: reefsquid:latest
     build:
       context: ..
       dockerfile: ./docker/Dockerfile.dev
+    environment:
+      - REEFSQUID_MINKNOW_HOST=minknow_host
+    extra_hosts:
+      - "minknow_host:host-gateway"
+    networks:
+      - reefsquid
     volumes:
       - ../:/usr/src/reefsquid
       - /opt/ont/minknow/conf/rpc-certs/:/opt/ont/minknow/conf/rpc-certs/
-    command: cargo watch -x "build --target x86_64-unknown-linux-musl --release && cp /usr/src/reefsquid/target/release/reefsquid /usr/bin"
+    command: cargo watch -x "build --target x86_64-unknown-linux-musl --release && cp /usr/src/reefsquid/target/x86_64-unknown-linux-musl/release/reefsquid /usr/bin"
+
+
+networks:
+  reefsquid:
