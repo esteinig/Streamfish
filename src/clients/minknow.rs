@@ -1,8 +1,27 @@
 
-use crate::config::MinknowConfig;
+use std::collections::HashMap;
+use crate::{config::MinknowConfig, services::minknow_api::manager::FlowCellPosition};
 use crate::clients::manager::ManagerClient;
+use crate::clients::data::DataClient;
 
 use tonic::transport::{ClientTlsConfig, Certificate, Channel};
+
+use thiserror::Error;
+
+
+#[derive(Error, Debug)]
+pub enum ActivePositionError {
+    /// Represents a failure to obtain the port of a position - this
+    /// usually occurs when the position is not in a running state
+    #[error("failed to obtain port of the requested position ({0})")]
+    PortNotFound(String),
+    /// Represents a failure to obtain a position - this
+    /// likely due to that the position was not running at 
+    /// initiation of the MinknowClient connection with the 
+    /// ManagerService
+    #[error("failed to obtain the requested position ({0})")]
+    PositionNotFound(String),
+}
 
 pub struct ActiveChannels {
     pub manager: Channel
@@ -12,13 +31,34 @@ pub struct ActiveClients {
     pub manager: ManagerClient
 }
 
+pub struct ActivePositions {
+    pub positions: HashMap<String, FlowCellPosition>,
+}
+impl ActivePositions {
+    pub fn get_secure_port(&self, name: &str) -> Result<u32, ActivePositionError> {
+        match self.positions.get(name) {
+            Some(position) => match &position.rpc_ports {
+                Some(rpc_ports) => Ok(rpc_ports.secure),
+                None => Err(ActivePositionError::PortNotFound(name.to_string()))
+            },
+            None => Err(ActivePositionError::PositionNotFound(name.to_string()))
+        }
+    }
+    pub fn get_position(&self, name: &str) -> Result<FlowCellPosition, ActivePositionError> {
+        match self.positions.get(name) {
+            Some(position) => Ok(position.clone()),
+            None => Err(ActivePositionError::PositionNotFound(name.to_string()))
+        }
+    }
+}
+
 // Main client for the MinKnow API
-pub struct MinknowClient {
-    pub host: String,
-    pub port: i32,
-    pub token: String,
+pub struct MinknowClient{
+    pub tls: ClientTlsConfig,
+    pub config: MinknowConfig,
     pub clients: ActiveClients,
-    pub channels: ActiveChannels
+    pub channels: ActiveChannels,
+    pub positions: ActivePositions
 }
 
 impl MinknowClient {
@@ -48,32 +88,52 @@ impl MinknowClient {
         let cert = std::fs::read_to_string(&config.tls_cert_path).expect(
             &format!("Failed to read certificate from path: {}", &config.tls_cert_path.display()) 
         );
-        let tls_ca = Certificate::from_pem(cert);
-        let tls_config = ClientTlsConfig::new().domain_name("localhost").ca_certificate(tls_ca);
+        let tls = ClientTlsConfig::new()
+            .domain_name("localhost")
+            .ca_certificate(Certificate::from_pem(cert));
+
+
+        // ========================
+        // ManagerClient Initiation 
+        // ========================
 
         // Establish a secure channel to the MinKnow manager service, that will be 
         // available throughout to request data from the manager service
-        let manager_uri = format!("https://{}:{}", config.host, config.port);
-        let manager_channel = Channel::from_shared(manager_uri)?
-            .tls_config(tls_config)?
-            .connect()
-            .await?;
-        
-        // Test the connection by getting MinKnow version - we clone the established channel
-        // (cheap, see below) and instantiate a new manger service client, that allows us tpo
-        // send the implemented requests.
+        let manager_channel = Channel::from_shared(
+            format!("https://{}:{}", config.host, config.port)
+        )?.tls_config(tls.clone())?.connect().await?;
 
-        log::info!("Requesting version from ManagerService");
-        let mut manager_client = ManagerClient::new(manager_channel.clone());
+        // Use a simple interceptor for authentication - this might have to be generalised
+        // using `tower` middleware - but it's too complex for my simple brain right now.
+
+        // We clone the established channel (cheap, see below) and instantiate a new manger 
+        // service client, that allows us to send the implemented requests. This is a general
+        // patterns to create the client wrappers.
+        
+        let mut manager_client = ManagerClient::new(
+            manager_channel.clone(), config.token.clone()
+        );
 
         // Get the version information to test the connection and print the version of MinKnow
-        let response = manager_client.get_version_info().await?;
-        log::info!("MinKnow version is: v{}", response);
+        let version_response = manager_client.get_version_info().await?;
+        log::info!("MinKnow version: v{}", version_response);
 
-        // Get the flow cell positions and print their total count
-        let positions = manager_client.get_flow_cell_positions().await?;
-        log::info!("Flow cell positions: {}", positions);
+        // Get the flowcell positions and print their total count, if present, print their summary
+        let position_response = manager_client.get_flow_cell_positions().await?;
 
+        if position_response.total_count > 0 {
+            log::info!("MinKnow flowcell positions detected:");
+            for position in &position_response.positions {
+                log::info!("{}", position);
+            }
+        } else {
+            log::info!("MinKnow flowcell positions: {}", &position_response);
+        }
+
+        let active_positions: HashMap<String, FlowCellPosition> = HashMap::from_iter(
+            position_response.positions.iter().map(|p| (p.name.clone(), p.clone()))
+        );
+        
         // # Multiplexing requests [from Tonic]
         //
         // Sending a request on a channel requires a `&mut self` and thus can only send
@@ -100,21 +160,41 @@ impl MinknowClient {
         // I may have to revisit this as the requests get more complex, e.g. on streaming 
         // acquisition data or sending off reads for basecalling.
     
-        let minknow_channels = ActiveChannels {
-            manager: manager_channel
-        };
-
-        let minknow_clients = ActiveClients {
-            manager: manager_client
-        };
-
         Ok(Self {
-            host: config.host.to_owned(),
-            port: config.port.to_owned(),
-            token: config.token.to_owned(),
-            clients: minknow_clients,
-            channels: minknow_channels
+            tls: tls.clone(),
+            config: config.clone(),
+            clients: ActiveClients { manager: manager_client },
+            channels: ActiveChannels { manager: manager_channel },
+            positions: ActivePositions { positions: active_positions }
         })
+    }
+    // Opens a new channel to the requested position and logs the channel state stream to the terminal
+    pub async fn stream_channel_state_log(&self, position_name: &str, first_channel: u32, last_channel: u32, log_stream: bool) -> Result<(), Box<dyn std::error::Error>> {
+
+        // Opens a new secure channel to the requested position RPC port and 
+        // issues the request to start streaming channel data
+
+        let mut data_client = DataClient::from_minknow_client(
+            &self, position_name, false
+        ).await?;
+
+        let mut stream = data_client.stream_channel_state(
+            first_channel,
+            last_channel,
+            None,
+            false,
+            Some(prost_types::Duration { seconds: 1, nanos: 0 })  // 0.1 seconds = 100000000 ns
+         ).await?;
+
+        // Logging the streamed data as formatted terminal output
+        while let Some(state_response) = stream.message().await? {
+            for channel_state in state_response.channel_states {
+                log::info!("{}", channel_state) // might be inefficient
+            }
+        }
+
+        Ok(())
+
     }
 }
 

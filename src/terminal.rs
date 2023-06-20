@@ -35,7 +35,7 @@ pub struct AddDeviceArgs {
     pub name: String,
 
     /// Device name restricted by device type
-    #[clap(long, short, value_parser=clap::builder::PossibleValuesParser::new(["minion", "promethion", "p2"]))]
+    #[clap(long, short, default_value="minion", value_parser=clap::builder::PossibleValuesParser::new(["minion", "promethion", "p2"]))]
     pub r#type: String,
 }
 

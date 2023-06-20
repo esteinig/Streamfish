@@ -5,7 +5,7 @@ services:
   # This builds a development container which mirrors the repository 
   # for cargo-watch auto-building on every change during development
   #
-  #   docker-compose -f <compose-file> --profile dev --project-name <project> up <--build>
+  #   docker-compose -f <compose-file> --profile dev --profile minknow --project-name <project> up <--build>
   #
   # For testing the terminal client while the development container
   # is running enter the running service container with:

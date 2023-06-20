@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let terminal = App::parse();
     let config = ReefsquidConfig::new(terminal.global.dotenv);
-    
+    log::info!("Reefsquid configuration initiated: {}", config);
 
     match &terminal.command {
 
@@ -52,10 +52,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn test_main(config: &ReefsquidConfig) -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Reefsquid configuration initiated: {}", config);
-    log::info!("Running test function for development ...");     
 
-    let minknow_client = MinknowClient::connect(&config.minknow).await?;
+    let mk = MinknowClient::connect(&config.minknow).await?;
     
+    mk.stream_channel_states("MS12345", 1, 512).await?;
 
     Ok(())
 
