@@ -6,7 +6,7 @@ use crate::terminal::{App, Commands};
 
 
 use crate::config::ReefsquidConfig;
-use crate::clients::minknow::MinknowClient;
+use crate::clients::minknow::{MinknowClient, ReadUntilClient};
 use crate::services::minknow_api::manager::SimulatedDeviceType;
 
 mod services;
@@ -53,9 +53,12 @@ async fn test_main(config: &ReefsquidConfig) -> Result<(), Box<dyn std::error::E
 
     log::info!("Reefsquid configuration initiated: {}", config);
 
-    let mk = MinknowClient::connect(&config.minknow).await?;
+    // let mk = MinknowClient::connect(&config.minknow).await?;
+    // mk.stream_channel_states_queue_log("MS12345", 1, 512).await?;
+
+    let mut client = ReadUntilClient::new(&config).await?;
     
-    mk.stream_channel_states("MS12345", 1, 512).await?;
+    client.run("MS12345").await?;
 
     Ok(())
 

@@ -1,10 +1,12 @@
 
 use std::collections::HashMap;
+use crate::config::ReefsquidConfig;
+use crate::services::minknow_api::data::get_channel_states_response::ChannelStateData;
 use crate::{config::MinknowConfig, services::minknow_api::manager::FlowCellPosition};
 use crate::clients::manager::ManagerClient;
 use crate::clients::data::DataClient;
 
-use tonic::transport::{ClientTlsConfig, Certificate, Channel};
+use tonic::transport::{ClientTlsConfig, Certificate, Channel, channel};
 
 use thiserror::Error;
 
@@ -169,16 +171,14 @@ impl MinknowClient {
         })
     }
     // Opens a new channel to the requested position and logs the channel state stream to the terminal
-    pub async fn stream_channel_state_log(&self, position_name: &str, first_channel: u32, last_channel: u32, log_stream: bool) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn stream_channel_states_log(&self, position_name: &str, first_channel: u32, last_channel: u32) -> Result<(), Box<dyn std::error::Error>> {
 
         // Opens a new secure channel to the requested position RPC port and 
         // issues the request to start streaming channel data
 
-        let mut data_client = DataClient::from_minknow_client(
-            &self, position_name, false
-        ).await?;
+        let mut data_client = DataClient::from_minknow_client(&self, position_name).await?;
 
-        let mut stream = data_client.stream_channel_state(
+        let mut stream = data_client.stream_channel_states(
             first_channel,
             last_channel,
             None,
@@ -192,15 +192,125 @@ impl MinknowClient {
                 log::info!("{}", channel_state) // might be inefficient
             }
         }
+        Ok(())
+    }
+    // Opens a new channel to the requested position and logs the channel state stream into an async queue (one receiver, multiple sender) for testing
+    pub async fn stream_channel_states_queue_log(&self, position_name: &str, first_channel: u32, last_channel: u32) -> Result<(), Box<dyn std::error::Error>> {
+
+        // Opens a new secure channel to the requested position RPC port and 
+        // issues the request to start streaming channel data
+
+        let mut data_client = DataClient::from_minknow_client(&self, position_name).await?;
+
+        let mut stream = data_client.stream_channel_states(
+            first_channel,
+            last_channel,
+            None,
+            false,
+            Some(prost_types::Duration { seconds: 1, nanos: 0 })  // 0.1 seconds = 100000000 ns
+         ).await?;
+
+
+        // The channel will buffer up to the provided number of messages. Once the buffer is full, attempts to
+        // send new messages will wait until a message is received from the channel. All data sent on Sender 
+        // will become available on Receiver in the same order as it was sent. The Sender can be cloned to 
+        // send to the same channel from multiple code locations. Only one Receiver is supported. If the 
+        // Receiver is disconnected while trying to send, the send method will return a SendError. 
+        // Similarly, if Sender is disconnected while trying to recv, the recv method will return None.
+        
+        let (state_tx, mut state_rx) = tokio::sync::mpsc::channel(1000);
+        
+        // Spawn an async thread that streams the responses from the RPC endpoint and sends each channel's state to the queue
+        tokio::spawn(async move { 
+            while let Some(state_response) = stream.message().await.expect("Could not get message from stream") {
+                for state_data in state_response.channel_states {
+                    state_tx.send(state_data).await.expect("Could not send message on channel")
+                }
+            }   
+        });
+        
+        // Concurrently receive the state data and print their summary from the queue 
+        while let Some(msg) = state_rx.recv().await {
+            log::info!("{}", msg)
+        }
 
         Ok(())
-
     }
+    
 }
 
 
+use crate::services::minknow_api::data::get_live_reads_request::{Action, UnblockAction, StreamSetup, StopFurtherData, Request::Setup};
+use crate::services::minknow_api::data::{GetLiveReadsResponse, GetLiveReadsRequest};
+
+
+pub struct ActionQueue {
+
+}
 
 
 pub struct ReadUntilClient {
+    pub minknow: MinknowClient
+}
 
+impl ReadUntilClient {
+
+    pub async fn new(config: &ReefsquidConfig) -> Result<Self, Box<dyn std::error::Error>> {
+
+        let minknow_client = MinknowClient::connect(&config.minknow).await?;
+
+        Ok(Self { minknow: minknow_client })
+    }
+
+    pub async fn run(&mut self, position_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+
+        let mut data_client = DataClient::from_minknow_client(
+            &self.minknow, position_name
+        ).await?;
+
+        let outbound = async_stream::stream! {
+            let mut interval = tokio::time::interval(
+                core::time::Duration::from_secs(1)
+            );
+            let mut i = 0;
+            loop {
+                let _ = interval.tick().await;
+                let request = match i < 1 {
+                    true => {
+                        GetLiveReadsRequest { request: Some(Setup(StreamSetup { 
+                                first_channel: 1, 
+                                last_channel: 32, 
+                                raw_data_type: 2, 
+                                sample_minimum_chunk_size: 100, 
+                                accepted_first_chunk_classifications: vec![83], 
+                                max_unblock_read_length: None
+                            }))
+                        }
+                    },
+                    false => GetLiveReadsRequest { request: None }
+                };
+                log::info!("Iteration {}: {:?} ", i, request);
+
+                i += 1;
+                yield request;
+            }
+        };
+
+        let request = tonic::Request::new(outbound);
+        let mut inbound = data_client.client.get_live_reads(request).await?.into_inner();
+        
+        while let Some(stream_response) = inbound.message().await? {
+            log::info!("{:?}", stream_response)
+        }
+
+        // .get_live_reads() takes an iterable of requests and generates
+        // raw data chunks and responses to our requests: the iterable
+        // thereby controls the lifetime of the stream. ._runner() as
+        // implemented below initialises the stream then transfers
+        // action requests from the action_queue to the stream.
+
+
+
+        Ok(())
+    }
 }

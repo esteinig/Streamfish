@@ -1,9 +1,12 @@
 use crate::services::minknow_api::data::get_channel_states_response::ChannelStateData;
 use crate::services::minknow_api::data::get_channel_states_response::channel_state_data::State;
-use crate::services::minknow_api::data::{GetChannelStatesRequest, GetChannelStatesResponse};
+use crate::services::minknow_api::data::get_live_reads_request::{Action, UnblockAction, StreamSetup, StopFurtherData};
+use crate::services::minknow_api::data::{GetChannelStatesRequest, GetChannelStatesResponse, GetLiveReadsResponse, GetLiveReadsRequest};
 use crate::services::minknow_api::data::data_service_client::DataServiceClient;
 use crate::clients::auth::AuthInterceptor;
+use crate::services::minknow_api::data::get_live_reads_request;
 
+use futures::stream;
 use tonic::{Request, Streaming};
 use tonic::transport::Error as TransportError;
 use tonic::codegen::http::uri::InvalidUri;
@@ -13,6 +16,8 @@ use tonic::service::interceptor::InterceptedService;
 
 use crate::clients::minknow::MinknowClient;
 use thiserror::Error;
+
+use colored::*;
 
 #[derive(Error, Debug)]
 pub enum DataClientError {
@@ -49,7 +54,7 @@ impl DataClient {
 
         Self { client }
     }    
-    pub async fn from_minknow_client(minknow_client: &MinknowClient, position_name: &str, watch_positions: bool) -> Result<Self, DataClientError> {
+    pub async fn from_minknow_client(minknow_client: &MinknowClient, position_name: &str) -> Result<Self, DataClientError> {
 
         // If we are not watching positions and their state to enable automated connection of this client to positions
         // that may not already be connected or running  (UNIMPLEMENTED) we try to get the secure RPC port of the named
@@ -74,8 +79,8 @@ impl DataClient {
 
         Ok(Self { client })
     }    
-    // Get the current version information
-    pub async fn stream_channel_state(
+    // Stream the channel states
+    pub async fn stream_channel_states(
         &mut self, 
         first_channel: u32, 
         last_channel: u32, 
@@ -100,13 +105,20 @@ impl std::fmt::Display for ChannelStateData {
         let channel_state_str = match &self.state {
             Some(state) => {
                 match &state {
-                    State::StateName(string) => string,
-                    State::StateId(_) => "not implemented",
-                    _ => "unknown"
+                    State::StateName(string) => match string.as_str() {
+                        "strand" => string.bright_green(),
+                        "unavailable" => string.blue().dimmed(),
+                        "pore" => string.green(),
+                        "unblocking" => string.bright_magenta(),
+                        "pending_mux_change" => string.magenta().dimmed(),
+                        _ => string.black().dimmed()
+                    },
+                    State::StateId(_) => "not implemented".white(),
+                    _ => "unknown".white()
                 }
             },
-            None => "unknown"
+            None => "unknown".white()
         };
-        write!(f, "Channel {:0>4} => {} ", self.channel, channel_state_str)
+        write!(f, "Channel {:>4} => {} ", self.channel, channel_state_str)
     }
 }
