@@ -2,10 +2,12 @@
 use std::collections::HashMap;
 use crate::config::ReefsquidConfig;
 use crate::services::minknow_api::data::get_channel_states_response::ChannelStateData;
+use crate::services::minknow_api::data::get_live_reads_response::ReadData;
 use crate::{config::MinknowConfig, services::minknow_api::manager::FlowCellPosition};
 use crate::clients::manager::ManagerClient;
 use crate::clients::data::DataClient;
 
+use futures::channel::mpsc::Sender;
 use tonic::transport::{ClientTlsConfig, Certificate, Channel, channel};
 
 use thiserror::Error;
@@ -243,6 +245,9 @@ impl MinknowClient {
 use crate::services::minknow_api::data::get_live_reads_request::{Action, UnblockAction, StreamSetup, StopFurtherData, Request::Setup};
 use crate::services::minknow_api::data::{GetLiveReadsResponse, GetLiveReadsRequest};
 
+use futures_core::stream::Stream;
+use futures_util::pin_mut;
+use futures_util::stream::StreamExt;
 
 pub struct ActionQueue {
 
@@ -268,49 +273,93 @@ impl ReadUntilClient {
             &self.minknow, position_name
         ).await?;
 
-        let outbound = async_stream::stream! {
-            let mut interval = tokio::time::interval(
-                core::time::Duration::from_secs(1)
-            );
-            let mut i = 0;
-            loop {
-                let _ = interval.tick().await;
-                let request = match i < 1 {
-                    true => {
-                        GetLiveReadsRequest { request: Some(Setup(StreamSetup { 
-                                first_channel: 1, 
-                                last_channel: 32, 
-                                raw_data_type: 2, 
-                                sample_minimum_chunk_size: 100, 
-                                accepted_first_chunk_classifications: vec![83], 
-                                max_unblock_read_length: None
-                            }))
-                        }
-                    },
-                    false => GetLiveReadsRequest { request: None }
-                };
-                log::info!("Iteration {}: {:?} ", i, request);
+        let (action_tx, mut action_rx) = tokio::sync::mpsc::channel(1000);
 
-                i += 1;
-                yield request;
+        // Setup the stream from this client - this stream reveives messages from the
+        // action message queue, which are `GetLiveReadsRequests`
+        let client_stream = async_stream::stream! {
+            while let Some(action_request) = action_rx.recv().await {
+                log::debug!("Action received => request stream");
+                yield action_request;
             }
         };
 
-        let request = tonic::Request::new(outbound);
-        let mut inbound = data_client.client.get_live_reads(request).await?.into_inner();
+        // Setup the initial request to setup the data stream ....
+        let init_action = GetLiveReadsRequest { request: Some(Setup(StreamSetup { 
+                first_channel: 1, 
+                last_channel: 512, 
+                raw_data_type: 2, 
+                sample_minimum_chunk_size: 100, 
+                accepted_first_chunk_classifications: vec![83], 
+                max_unblock_read_length: None
+            }))
+        };
+
+        // and send it into the action channel to trigger the streaming loop...
+        let init_tx = action_tx.clone();
+        init_tx.send(init_action).await?;
+
+        // with this stream we now send the request to the server ...
+        let request = tonic::Request::new(client_stream);
+
+        // which returns a stream of data containing responses ...
+        let mut server_stream = data_client.client.get_live_reads(request).await?.into_inner();
         
-        while let Some(stream_response) = inbound.message().await? {
-            log::info!("{:?}", stream_response)
-        }
+        while let Some(response) = server_stream.message().await.expect("Failed to get message from stream") {
+            for (channel, read_data) in response.channels {
+                log::info!("Channel {:<5} => {}", channel, read_data);
+            }
 
-        // .get_live_reads() takes an iterable of requests and generates
-        // raw data chunks and responses to our requests: the iterable
-        // thereby controls the lifetime of the stream. ._runner() as
-        // implemented below initialises the stream then transfers
-        // action requests from the action_queue to the stream.
+            //  where each response is evaluated and an action request generated...
+            let action = GetLiveReadsRequest { request: None };
 
+            //  which is then sent into the action queue and back into the client stream
+            action_tx.send(action).await.expect("Failed to send message into channel");
+        };
 
 
         Ok(())
     }
 }
+
+use::colored::*;
+
+impl std::fmt::Display for ReadData {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let id_short = &self.id[..8];
+        let classification_str = format!("{}", self.previous_read_classification);
+        let (pstrand, pid) = match self.previous_read_classification == 80 {
+            true => (classification_str.bright_green(), id_short.bright_green()),
+            false => match self.previous_read_classification == 83 {
+                true => (classification_str.green(), id_short.green()), 
+                false => (classification_str.white(), id_short.white())
+            }
+        };
+        write!(
+            f, "{:<3} {}", 
+            pstrand, 
+            pid
+        )
+    }
+}
+
+// Test function to transform one stream into another - see the for await syntax from the async_stream crate
+// async fn get_read_response_stream<S: Stream<Item = Result<GetLiveReadsResponse, tonic::Status>>>(inbound: S, tx: tokio::sync::mpsc::Sender<u32>) -> impl Stream<Item = GetLiveReadsResponse> {
+//     async_stream::stream! {
+//         for await response in inbound {
+//            let read_response = response.unwrap();
+
+//             // Do some things during unpacking ofthis stream into another stream
+
+//            yield read_response
+//         }
+//     }
+// }
+//
+// let response_stream = get_read_response_stream(inbound, state_tx).await;
+//  pin_mut!(response_stream);
+//  while let Some(response) = response_stream.next().await {
+//      log::info!("{:?}", response)
+//  };
+
+        
