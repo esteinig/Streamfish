@@ -1,17 +1,18 @@
 #![allow(dead_code)]
 
 use clap::Parser;
+use terminal::TestArgs;
 use crate::utils::init_logger;
 use crate::terminal::{App, Commands};
 
 
 use crate::config::ReefsquidConfig;
-use crate::clients::minknow::{MinknowClient, ReadUntilClient};
+use crate::client::minknow::{MinknowClient, ReadUntilClient};
 use crate::services::minknow_api::manager::SimulatedDeviceType;
 
 mod services;
 mod terminal;
-mod clients;
+mod client;
 mod config;
 mod utils;
 mod error;
@@ -27,9 +28,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match &terminal.command {
 
-        Commands::Test ( _  ) => {
+        Commands::Test ( args  ) => {
 
-            test_main(&config).await?;
+            test_main(&config, args).await?;
         },
         Commands::AddDevice ( args  ) => {
 
@@ -49,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 }
 
-async fn test_main(config: &ReefsquidConfig) -> Result<(), Box<dyn std::error::Error>> {
+async fn test_main(config: &ReefsquidConfig, args: &TestArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Reefsquid configuration initiated: {}", config);
 
@@ -58,7 +59,7 @@ async fn test_main(config: &ReefsquidConfig) -> Result<(), Box<dyn std::error::E
 
     let mut client = ReadUntilClient::new(&config).await?;
     
-    client.run("MS12345").await?;
+    client.run("MS12345", &args.channel_start, &args.channel_end).await?;
 
     Ok(())
 

@@ -46,6 +46,22 @@ services:
       - /opt/ont/minknow/conf/rpc-certs/:/opt/ont/minknow/conf/rpc-certs/
     command: cargo watch -x "build --target x86_64-unknown-linux-musl --release && cp /usr/src/reefsquid/target/x86_64-unknown-linux-musl/release/reefsquid /usr/bin"
 
+  dorado-dev:
+    profiles:
+      - dev
+      - dorado
+    image: dorado:latest
+    build:
+      context: ..
+      dockerfile: ./docker/Dockerfile.dorado.dev
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    tty: true   
 
 networks:
   reefsquid:

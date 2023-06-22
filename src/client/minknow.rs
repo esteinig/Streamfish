@@ -1,16 +1,19 @@
 
+
+
+use::colored::*;
+use thiserror::Error;
 use std::collections::HashMap;
+use tonic::transport::{ClientTlsConfig, Certificate, Channel};
+
 use crate::config::ReefsquidConfig;
-use crate::services::minknow_api::data::get_channel_states_response::ChannelStateData;
+use crate::client::data::DataClient;
+use crate::client::manager::ManagerClient;
 use crate::services::minknow_api::data::get_live_reads_response::ReadData;
 use crate::{config::MinknowConfig, services::minknow_api::manager::FlowCellPosition};
-use crate::clients::manager::ManagerClient;
-use crate::clients::data::DataClient;
 
-use futures::channel::mpsc::Sender;
-use tonic::transport::{ClientTlsConfig, Certificate, Channel, channel};
 
-use thiserror::Error;
+
 
 
 #[derive(Error, Debug)]
@@ -243,15 +246,7 @@ impl MinknowClient {
 
 
 use crate::services::minknow_api::data::get_live_reads_request::{Action, UnblockAction, StreamSetup, StopFurtherData, Request::Setup};
-use crate::services::minknow_api::data::{GetLiveReadsResponse, GetLiveReadsRequest};
-
-use futures_core::stream::Stream;
-use futures_util::pin_mut;
-use futures_util::stream::StreamExt;
-
-pub struct ActionQueue {
-
-}
+use crate::services::minknow_api::data::GetLiveReadsRequest;
 
 
 pub struct ReadUntilClient {
@@ -267,62 +262,122 @@ impl ReadUntilClient {
         Ok(Self { minknow: minknow_client })
     }
 
-    pub async fn run(&mut self, position_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(&mut self, position_name: &str, channel_start: &u32, channel_end: &u32) -> Result<(), Box<dyn std::error::Error>> {
 
         let mut data_client = DataClient::from_minknow_client(
             &self.minknow, position_name
         ).await?;
 
-        let (action_tx, mut action_rx) = tokio::sync::mpsc::channel(1000);
+        // ==============
+        // Message queues
+        // ==============
 
-        // Setup the stream from this client - this stream reveives messages from the
-        // action message queue, which are `GetLiveReadsRequests`
-        let client_stream = async_stream::stream! {
+        let (action_tx, mut action_rx) = tokio::sync::mpsc::channel(1024);
+        let (basecall_tx, mut basecall_rx) = tokio::sync::mpsc::channel(1024);
+
+        // ===========================
+        // Streams from message queues
+        // ===========================
+
+        // Setup the action request stream from this client - this stream reveives 
+        // messages from the action queue (`GetLiveReadsRequests`)
+        let action_request_stream = async_stream::stream! {
             while let Some(action_request) = action_rx.recv().await {
-                log::debug!("Action received => request stream");
+                log::info!("Action message received => request stream");
                 yield action_request;
             }
         };
 
-        // Setup the initial request to setup the data stream ....
+        // Setup the basecall request stream from this client - this stream reveives 
+        // messages from the basecall queue (`GetLiveReadsRequests`)
+        let basecall_request_stream = async_stream::stream! {
+            while let Some(basecall_request) = basecall_rx.recv().await {
+                log::debug!("Basecall message received => request stream");
+                yield basecall_request;
+            }
+        };
+
+        // =========================
+        // Data stream setup request
+        // =========================
+
+        // Setup the initial request to setup the data stream ...
         let init_action = GetLiveReadsRequest { request: Some(Setup(StreamSetup { 
-                first_channel: 1, 
-                last_channel: 512, 
-                raw_data_type: 2, 
-                sample_minimum_chunk_size: 100, 
-                accepted_first_chunk_classifications: vec![83], 
+                first_channel: *channel_start, 
+                last_channel: *channel_end, 
+                raw_data_type: 2, // 1 = daq | 2 = pico amp
+                sample_minimum_chunk_size: 100,
+                accepted_first_chunk_classifications: vec![83, 65], 
                 max_unblock_read_length: None
             }))
         };
 
-        // and send it into the action channel to trigger the streaming loop...
-        let init_tx = action_tx.clone();
-        init_tx.send(init_action).await?;
+        // Send it into the action queue that unpacks into the request stream
+        let init_action_stream_tx = action_tx.clone();
+        init_action_stream_tx.send(init_action.clone()).await?;
 
-        // with this stream we now send the request to the server ...
-        let request = tonic::Request::new(client_stream);
+        // Send it into the action queue that unpacks into the request stream
+        // let init_basecall_stream_tx = basecall_tx.clone();
+        // init_basecall_stream_tx.send(init_action.clone()).await?;
 
-        // which returns a stream of data containing responses ...
-        let mut server_stream = data_client.client.get_live_reads(request).await?.into_inner();
+
+        // With this stream we now send the request to the server which returns a stream of responses that contain the data...
+        let action_request = tonic::Request::new(action_request_stream);
+        let mut data_stream = data_client.client.get_live_reads(action_request).await?.into_inner();
         
-        while let Some(response) = server_stream.message().await.expect("Failed to get message from stream") {
-            for (channel, read_data) in response.channels {
-                log::info!("Channel {:<5} => {}", channel, read_data);
+        let stop_action_tx = action_tx.clone(); // places message on the data action stream
+
+        let action_stream_handle = tokio::spawn(async move {
+            while let Some(response) = data_stream.message().await.expect("Failed to get message from stream") {
+                
+                for (channel, read_data) in response.channels {
+                    log::info!("Channel {:<5} => {}", channel, read_data);
+                }
+
+                // When we receive the raw data we send an action to stop further reads that we want
+                // to analyse into the action request stream and send a basecall request with
+                // the acquisition data into the basecall request stream
+
+                // Note that if the read has finished when the stop further data action is sent,
+                // and error is returned for the action (need to match above in the loop)
+
+                // let stop_further_data_action = GetLiveReadsRequest { request: None };
+                // action_tx.send(stop_further_data_action).await.expect("Failed to send message into channel"); // 
+
+                // let test = GetLiveReadsRequest { request: None };
+                // basecall_tx.send(test).await.expect("Failed to send message into channel");
             }
+        });
 
-            //  where each response is evaluated and an action request generated...
-            let action = GetLiveReadsRequest { request: None };
 
-            //  which is then sent into the action queue and back into the client stream
-            action_tx.send(action).await.expect("Failed to send message into channel");
+
+        // Just testing if this works...
+        let action_request = tonic::Request::new(basecall_request_stream);
+        let mut basecall_stream: tonic::Streaming<crate::services::minknow_api::data::GetLiveReadsResponse> = data_client.client.get_live_reads(action_request).await?.into_inner();
+        
+        let basecall_action_tx = action_tx.clone(); // places message on the data action stream
+
+        let basecall_stream_handle = tokio::spawn(async move {
+            while let Some(response) = basecall_stream.message().await.expect("Failed to get message from stream") {
+                
+                for (channel, read_data) in response.channels {
+                    log::info!("BASECALL Channel {:<5} => {}", channel, read_data);
+                }
+            }
+        });
+
+        // Await thread handles to run the streams
+        for handle in [
+            action_stream_handle,
+            basecall_stream_handle
+        ] {
+            handle.await?
         };
-
 
         Ok(())
     }
 }
 
-use::colored::*;
 
 impl std::fmt::Display for ReadData {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -336,9 +391,10 @@ impl std::fmt::Display for ReadData {
             }
         };
         write!(
-            f, "{:<3} {}", 
+            f, "{:<3} {} {:?}", 
             pstrand, 
-            pid
+            pid,
+            self.chunk_classifications
         )
     }
 }

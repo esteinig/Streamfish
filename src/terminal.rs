@@ -24,7 +24,12 @@ pub enum Commands {
 
 #[derive(Debug, Args)]
 pub struct TestArgs {
-   
+   /// Channel start for adaptive sampling
+   #[clap(long, short, default_value="1")]
+   pub channel_start: u32,
+   /// Channel end for adaptive sampling
+   #[clap(long, short, default_value="512")]
+   pub channel_end: u32,
 }
 
 #[derive(Debug, Args)]

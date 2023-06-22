@@ -3,7 +3,7 @@ use crate::services::minknow_api::data::get_channel_states_response::channel_sta
 use crate::services::minknow_api::data::get_live_reads_request::{Action, UnblockAction, StreamSetup, StopFurtherData};
 use crate::services::minknow_api::data::{GetChannelStatesRequest, GetChannelStatesResponse, GetLiveReadsResponse, GetLiveReadsRequest};
 use crate::services::minknow_api::data::data_service_client::DataServiceClient;
-use crate::clients::auth::AuthInterceptor;
+use crate::client::auth::AuthInterceptor;
 use crate::services::minknow_api::data::get_live_reads_request;
 
 use futures::stream;
@@ -14,7 +14,7 @@ use tonic::transport::Channel;
 use tonic::metadata::{MetadataValue, Ascii};
 use tonic::service::interceptor::InterceptedService;
 
-use crate::clients::minknow::MinknowClient;
+use crate::client::minknow::MinknowClient;
 use thiserror::Error;
 
 use colored::*;

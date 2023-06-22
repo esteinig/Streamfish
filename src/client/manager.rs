@@ -22,7 +22,7 @@ use tonic::transport::Channel;
 use tonic::metadata::{MetadataValue, Ascii};
 use tonic::service::interceptor::InterceptedService;
 
-use crate::clients::auth::AuthInterceptor;
+use crate::client::auth::AuthInterceptor;
 
 
 // A wrapper around the MangerServiceClient, which requests 
