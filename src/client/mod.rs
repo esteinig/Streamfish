@@ -1,5 +1,3 @@
-pub mod analysis;
-pub mod manager;
+pub mod services;
 pub mod minknow;
 pub mod auth;
-pub mod data;

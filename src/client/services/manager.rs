@@ -32,10 +32,6 @@ pub struct ManagerClient {
     pub client: ManagerServiceClient<InterceptedService<Channel, AuthInterceptor>>
 }
 impl ManagerClient {
-    // Create the manager from a newly opened channel 
-    // or a clone of a channel - note that we always 
-    // use an authenticated channel where each request
-    // is intercepted to add the `local-auth` metadata
     pub fn new(channel: Channel, token: String) -> Self {
 
         let token: MetadataValue<Ascii> = token.parse().expect("Failed to parse token into correct format (ASCII)");
@@ -67,13 +63,13 @@ impl ManagerClient {
         }
 
         if responses.len() > 1 {
-            log::debug!("ManagerClient: too many flow cell positions were returned to fit into a single response");
-            log::debug!("ManagerClient: only the first flow cell position response is returned");
+            log::debug!("Reefsquid::ManagerClient: too many flow cell positions were returned to fit into a single response");
+            log::debug!("Reefsquid::ManagerClient: only the first flow cell position response is returned");
         }
 
         match responses.get(0) {
             Some(position_response) => Ok(position_response.to_owned()),
-            None => panic!("ManagerClient: could not obtain the required position response")
+            None => panic!("Reefsquid::ManagerClient: could not obtain the required position response")
         }
     }
     // Add a simulated device

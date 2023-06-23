@@ -59,7 +59,7 @@ async fn test_main(config: &ReefsquidConfig, args: &TestArgs) -> Result<(), Box<
 
     let mut client = ReadUntilClient::new(&config).await?;
     
-    client.run("MS12345", &args.channel_start, &args.channel_end).await?;
+    client.run("MS12345", &args.channel_start, &args.channel_end, 0.1, true).await?;
 
     Ok(())
 
