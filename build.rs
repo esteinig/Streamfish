@@ -2,10 +2,12 @@
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
-        .build_server(false)
+        .build_server(true)
         .build_client(true)
         .compile(
             &[
+                "proto/dori_api/basecaller.proto",
+                
                 "proto/minknow_api/minion_device.proto",
                 "proto/minknow_api/data.proto",
                 "proto/minknow_api/protocol.proto",

@@ -10,7 +10,7 @@ use tonic::metadata::{MetadataValue, Ascii};
 use tonic::service::interceptor::InterceptedService;
 
 use crate::client::services::error::ClientError;
-use crate::client::minknow::MinknowClient;
+use crate::client::minknow::MinKnowClient;
 
 use colored::*;
 
@@ -29,7 +29,7 @@ impl DataClient {
 
         Self { client }
     }    
-    pub async fn from_minknow_client(minknow_client: &MinknowClient, position_name: &str) -> Result<Self, ClientError> {
+    pub async fn from_minknow_client(minknow_client: &MinKnowClient, position_name: &str) -> Result<Self, ClientError> {
 
         let rpc_port = minknow_client.positions.get_secure_port(position_name).map_err(
             |_| ClientError::PortNotFound(position_name.to_string())

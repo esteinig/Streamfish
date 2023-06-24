@@ -1,5 +1,5 @@
 // Client implementations share similar setup and error codes from Minknow Instantiation 
-// (except ManagerClient which needs to be initiated in the MinknowClient instantiation) 
+// (except ManagerClient which needs to be initiated in the MinKnowClient instantiation) 
 
 use thiserror::Error;
 use tonic::transport::Error as TransportError;
@@ -9,7 +9,7 @@ use tonic::codegen::http::uri::InvalidUri;
 pub enum ClientError {
     /// Represents a failure to obtain the port of a position 
     /// likely due to that the position was not running at 
-    /// initiation of the MinknowClient connection with the 
+    /// initiation of the MinKnowClient connection with the 
     /// ManagerService
     #[error("failed to obtain port of the requested position ({0})")]
     PortNotFound(String),

@@ -10,7 +10,7 @@ use tonic::metadata::{MetadataValue, Ascii};
 use tonic::service::interceptor::InterceptedService;
 
 use crate::client::services::error::{ClientError, AnalysisConfigurationClientError};
-use crate::client::minknow::MinknowClient;
+use crate::client::minknow::MinKnowClient;
 
 
 
@@ -28,7 +28,7 @@ impl AnalysisConfigurationClient {
 
         Self { client }
     }    
-    pub async fn from_minknow_client(minknow_client: &MinknowClient, position_name: &str) -> Result<Self, ClientError> {
+    pub async fn from_minknow_client(minknow_client: &MinKnowClient, position_name: &str) -> Result<Self, ClientError> {
 
         let rpc_port = minknow_client.positions.get_secure_port(position_name).map_err(
             |_| ClientError::PortNotFound(position_name.to_string())
@@ -59,12 +59,16 @@ impl AnalysisConfigurationClient {
 
     }
     // Obtain the analysis configuration and set specific values - important for latency in  ReadUntilClient 
+    //
+    // Currently DOES NOT WORK - is overwritten by changes in the sequencing TOML file: https://github.com/nanoporetech/minknow_api/issues/18
     pub async fn set_analysis_configuration(&mut self, break_reads_after_seconds: f64) -> Result<(), Box<dyn std::error::Error>> {
 
+        // Get
         let mut analysis_config = self.client.get_analysis_configuration(
             tonic::Request::new(GetAnalysisConfigurationRequest {})
         ).await?.into_inner();
 
+        // Mod
         let read_detection_update = match analysis_config.read_detection {
             Some(mut read_detection_params) => {
                 read_detection_params.break_reads_after_seconds = Some(break_reads_after_seconds);
@@ -72,14 +76,12 @@ impl AnalysisConfigurationClient {
             },
             None => return Err(Box::new(AnalysisConfigurationClientError::ReadDetectionParamsNotFound))
         };
-
         analysis_config.read_detection = Some(read_detection_update);
 
-        log::info!("{:?}", analysis_config.read_detection);
-
+        // Set
         self.client.set_analysis_configuration(tonic::Request::new(analysis_config)).await?;
 
-        log::info!("Set analysis configuration: read_detection.break_reads_after_seconds = {}", break_reads_after_seconds);
+        log::info!("NOT FUNCTIONAL - modified analysis configuration: read_detection.break_reads_after_seconds = {}", break_reads_after_seconds);
 
         Ok(())
 

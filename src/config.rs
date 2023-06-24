@@ -9,7 +9,7 @@ fn get_env_var(var: &str) -> String {
 }
 
 #[derive(Debug, Clone)]
-pub struct MinknowConfig {
+pub struct MinKnowConfig {
     // Host address that runs MinKnow
     pub host: String,
     // Port of MinKnow manager service [9502]
@@ -27,13 +27,23 @@ pub struct ReadUntilConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct DoriConfig {
+    // Unix domain socket path
+    // implemenmt TCP later in case of 
+    // serving remotely
+    pub uds_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
 pub struct ReefsquidConfig {
     // Reefsquid version
     pub version: String,
-    // MinKno  configuration
-    pub minknow: MinknowConfig,
-    // ReadUntil configuration
-    pub readuntil: ReadUntilConfig
+    // Dori server configuration
+    pub dori: DoriConfig,
+    // MinKnow client configuration
+    pub minknow: MinKnowConfig,
+    // ReadUntil client configuration
+    pub readuntil: ReadUntilConfig,
 }
 
 impl ReefsquidConfig {
@@ -45,7 +55,7 @@ impl ReefsquidConfig {
         
         Self {
             version: crate_version!().to_string(),
-            minknow: MinknowConfig {
+            minknow: MinKnowConfig {
                 host: get_env_var("REEFSQUID_MINKNOW_HOST"),
                 port: get_env_var("REEFSQUID_MINKNOW_PORT").parse::<i32>().unwrap(),
                 token: get_env_var("REEFSQUID_MINKNOW_TOKEN"),
@@ -53,6 +63,9 @@ impl ReefsquidConfig {
             },
             readuntil: ReadUntilConfig {
 
+            },
+            dori: DoriConfig {
+                uds_path: get_env_var("REEFSQUID_DORI_UDS_PATH").into(),
             }
         }
     }

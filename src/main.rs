@@ -1,13 +1,15 @@
 #![allow(dead_code)]
 
 use clap::Parser;
-use terminal::TestArgs;
+use terminal::{TestDoriArgs, TestReadUntilArgs};
 use crate::utils::init_logger;
 use crate::terminal::{App, Commands};
 
 
 use crate::config::ReefsquidConfig;
-use crate::client::minknow::{MinknowClient, ReadUntilClient};
+use crate::server::dori::{DoriServer, DoriClient};
+use crate::client::minknow::MinKnowClient;
+use crate::client::readuntil::ReadUntilClient;
 use crate::services::minknow_api::manager::SimulatedDeviceType;
 
 mod services;
@@ -16,6 +18,7 @@ mod client;
 mod config;
 mod utils;
 mod error;
+mod server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,25 +26,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logger();
 
     let terminal = App::parse();
-    let config = ReefsquidConfig::new(terminal.global.dotenv);
+    let config = ReefsquidConfig::new(
+        terminal.global.dotenv
+    );
     log::info!("Reefsquid configuration initiated: {}", config);
 
     match &terminal.command {
 
-        Commands::Test ( args  ) => {
+        Commands::TestReadUntil ( args  ) => {
 
-            test_main(&config, args).await?;
+            test_read_until(&config, args).await?;
+        },
+        Commands::TestDori ( args  ) => {
+
+            test_dori_client(&config, args).await?;
+
+        },
+        Commands::DoriServer ( _  ) => {
+
+            DoriServer::run(&config.dori).await?;
+
         },
         Commands::AddDevice ( args  ) => {
 
-            let mut minknow_client = MinknowClient::connect(&config.minknow).await?;
+            let mut minknow_client = MinKnowClient::connect(&config.minknow).await?;
             minknow_client.clients.manager.add_simulated_device(
                 &args.name, SimulatedDeviceType::from_cli(&args.r#type)
             ).await?;
         },
         Commands::RemoveDevice ( args  ) => {
 
-            let mut minknow_client = MinknowClient::connect(&config.minknow).await?;
+            let mut minknow_client = MinKnowClient::connect(&config.minknow).await?;
             minknow_client.clients.manager.remove_simulated_device(&args.name).await?;
         }
     }
@@ -50,17 +65,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 }
 
-async fn test_main(config: &ReefsquidConfig, args: &TestArgs) -> Result<(), Box<dyn std::error::Error>> {
+async fn test_read_until(config: &ReefsquidConfig, args: &TestReadUntilArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Reefsquid configuration initiated: {}", config);
 
-    // let mk = MinknowClient::connect(&config.minknow).await?;
-    // mk.stream_channel_states_queue_log("MS12345", 1, 512).await?;
-
-    let mut client = ReadUntilClient::new(&config).await?;
-    
-    client.run("MS12345", &args.channel_start, &args.channel_end, 0.1, true).await?;
+    let mut client = ReadUntilClient::connect(&config).await?;
+    client.run("MS12345", &args.channel_start, &args.channel_end, 0.1, true, true).await?;
 
     Ok(())
 
 }
+
+async fn test_dori_client(config: &ReefsquidConfig, args: &TestDoriArgs) -> Result<(), Box<dyn std::error::Error>> {
+
+    log::info!("Reefsquid configuration initiated: {}", config);
+
+    // let mk = MinKnowClient::connect(&config.minknow).await?;
+    // mk.stream_channel_states_queue_log("MS12345", 1, 512).await?;
+
+    let mut client = DoriClient::connect(&config.dori).await?;
+    
+    client.test_basecall_dorado().await?;
+
+    Ok(())
+
+}
+

@@ -1,19 +1,14 @@
 
 
 
-use::colored::*;
 use thiserror::Error;
 use std::collections::HashMap;
 use tonic::transport::{ClientTlsConfig, Certificate, Channel};
 
 
-use crate::config::ReefsquidConfig;
 use crate::client::services::data::DataClient;
 use crate::client::services::manager::ManagerClient;
-use crate::services::minknow_api::data::get_live_reads_response::ReadData;
-use crate::{config::MinknowConfig, services::minknow_api::manager::FlowCellPosition};
-
-
+use crate::{config::MinKnowConfig, services::minknow_api::manager::FlowCellPosition};
 
 
 
@@ -25,7 +20,7 @@ pub enum ActivePositionError {
     PortNotFound(String),
     /// Represents a failure to obtain a position - this
     /// likely due to that the position was not running at 
-    /// initiation of the MinknowClient connection with the 
+    /// initiation of the MinKnowClient connection with the 
     /// ManagerService
     #[error("failed to obtain the requested position ({0})")]
     PositionNotFound(String),
@@ -61,17 +56,17 @@ impl ActivePositions {
 }
 
 // Main client for the MinKnow API
-pub struct MinknowClient{
+pub struct MinKnowClient{
     pub tls: ClientTlsConfig,
-    pub config: MinknowConfig,
+    pub config: MinKnowConfig,
     pub clients: ActiveClients,
     pub channels: ActiveChannels,
     pub positions: ActivePositions
 }
 
-impl MinknowClient {
+impl MinKnowClient {
 
-    pub async fn connect(config: &MinknowConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn connect(config: &MinKnowConfig) -> Result<Self, Box<dyn std::error::Error>> {
 
         // When connecting to MinKnow we require a secure channel (TLS). However, we were getting 
         // an error through the underlying TLS certificate library, solution is documented here.
@@ -244,228 +239,3 @@ impl MinknowClient {
     }
     
 }
-
-use crate::services::minknow_api::data::get_live_reads_request::{Actions, Action, StopFurtherData}; 
-use crate::services::minknow_api::data::get_live_reads_request::action;
-
-use crate::services::minknow_api::data::get_live_reads_request::{UnblockAction, StreamSetup, Request};
-use crate::services::minknow_api::data::{GetLiveReadsRequest, GetLiveReadsResponse};
-use super::services::analysis::AnalysisConfigurationClient;
-use uuid::Uuid;
-
-pub struct ReadUntilClient {
-    pub minknow: MinknowClient
-}
-
-impl ReadUntilClient {
-
-    pub async fn new(config: &ReefsquidConfig) -> Result<Self, Box<dyn std::error::Error>> {
-
-        let minknow_client = MinknowClient::connect(&config.minknow).await?;
-
-        Ok(Self { minknow: minknow_client })
-    }
-
-    pub async fn run(&mut self, position_name: &str, channel_start: &u32, channel_end: &u32, unblock_duration: f64, unblock_all: bool) -> Result<(), Box<dyn std::error::Error>> {
-
-        let mut data_client = DataClient::from_minknow_client(
-            &self.minknow, position_name
-        ).await?;
-
-        let mut analysis_configuration_client = AnalysisConfigurationClient::from_minknow_client(
-            &self.minknow, position_name
-        ).await?;
-
-        let read_classifications = analysis_configuration_client.get_read_classifications().await?;
-        log::info!("{:?}", read_classifications);
-
-        // ==============
-        // Message queues
-        // ==============
-
-        let (action_tx, mut action_rx) = tokio::sync::mpsc::channel(1024);
-        let (dori_tx, mut dori_rx) = tokio::sync::mpsc::channel(1024);
-
-        // =================================================
-        // Message queue receivers unpack into async streams
-        // =================================================
-
-        // Setup the action request stream from this client - this stream reveives 
-        // messages from the action queue (`GetLiveReadsRequests`)
-        let action_request_stream = async_stream::stream! {
-            while let Some(action_request) = action_rx.recv().await {
-                log::debug!("Action message received => request stream");
-                yield action_request;
-            }
-        };
-
-        // Setup the basecall request stream from this client - this stream reveives 
-        // messages from the basecall queue (`GetLiveReadsRequests`)
-        let dori_request_stream = async_stream::stream! {
-            while let Some(dori_request) = dori_rx.recv().await {
-                log::debug!("Basecall message received => request stream");
-                yield dori_request;
-            }
-        };
-
-        // ======================================================
-        // DataService request and response streams are initiated
-        // ======================================================
-
-        // Setup the initial request to setup the data stream ...
-        let init_action = GetLiveReadsRequest { request: Some(Request::Setup(StreamSetup { 
-                first_channel: *channel_start, 
-                last_channel: *channel_end, 
-                raw_data_type: 3, // 1 = daq | 2 = pico amp
-                sample_minimum_chunk_size: 100,
-                accepted_first_chunk_classifications: vec![83, 65], 
-                max_unblock_read_length: None
-            }))
-        };
-
-        // Send it into the action queue that unpacks into the request stream
-        let init_action_stream_tx = action_tx.clone();
-        init_action_stream_tx.send(init_action.clone()).await?;
-
-        // DataService response stream is initiated with the data action request stream
-        let action_request = tonic::Request::new(action_request_stream);
-        let mut data_stream = data_client.client.get_live_reads(action_request).await?.into_inner();
-        
-        // ========================================
-        // DataService response stream is processed
-        // ========================================
-
-        let stop_action_tx = action_tx.clone(); // unpacks stop further data action requests into data request stream
-
-        let action_stream_handle = tokio::spawn(async move {
-            while let Some(response) = data_stream.message().await.expect("Failed to get message from stream") {
-                
-                // Keep for logging action response states (read out of pore, read)
-
-                // for action_response in response.action_responses {
-                //     if action_response.response != 0 {
-                //         log::warn!("Failed action: {} ({})", action_response.action_id, action_response.response);
-                //     }
-                // }
-                
-
-                for (channel, read_data) in response.channels {
-                    log::info!("Channel {:<5} => {}", channel, read_data);
-
-                    let stop_further_data_request = match unblock_all {
-                        // Test action queue - unblock all received reads, compare this to Readfish UNBLOCK ALL
-                        true => GetLiveReadsRequest { request: Some(
-                            Request::Actions(Actions { actions: vec![
-                                Action {
-                                    action_id: Uuid::new_v4().to_string(),
-                                    read: Some(action::Read::Number(read_data.number)),
-                                    action: Some(action::Action::Unblock(UnblockAction { duration: unblock_duration })),
-                                    channel: channel,
-                                }
-                            ]})
-                        )},
-                        // Without test setup send the usual stop further data request
-                        false => GetLiveReadsRequest { request: Some(
-                            Request::Actions(Actions { actions: vec![
-                                Action {
-                                    action_id: Uuid::new_v4().to_string(),
-                                    read: Some(action::Read::Number(read_data.number)),
-                                    action: Some(action::Action::StopFurtherData(StopFurtherData {})),
-                                    channel: channel,
-                                }
-                            ]})
-                        )}
-                    };
-                    
-                    stop_action_tx.send(stop_further_data_request).await.expect("Failed to send message into channel"); 
-
-                }
-
-                // When we receive the raw data we send an action to stop further reads that we want
-                // to analyse into the action request stream and send a basecall request with
-                // the acquisition data into the basecall request stream
-
-                // Note that if the read has finished when the stop further data action is sent,
-                // and error is returned for the action (need to match above in the loop)
-
-
-                // let test = GetLiveReadsRequest { request: None };
-                // basecall_tx.send(test).await.expect("Failed to send message into channel");
-            }
-        });
-
-
-
-        // Just testing if this works...
-        let dori_request = tonic::Request::new(dori_request_stream);
-        let mut dori_stream: tonic::Streaming<crate::services::minknow_api::data::GetLiveReadsResponse> = data_client.client.get_live_reads(dori_request).await?.into_inner();
-        
-
-        // ========================================
-        // DoriService response stream is processed
-        // ========================================
-
-        let unblock_action_tx = action_tx.clone(); // unpacks unblock action requests into data request stream
-
-        let dori_stream_handle = tokio::spawn(async move {
-            while let Some(response) = dori_stream.message().await.expect("Failed to get message from stream") {
-                
-                for (channel, read_data) in response.channels {
-                    log::info!("BASECALL Channel {:<5} => {}", channel, read_data);
-                }
-            }
-        });
-
-        // Await thread handles to run the streams
-        for handle in [
-            action_stream_handle,
-            dori_stream_handle
-        ] {
-            handle.await?
-        };
-
-        Ok(())
-    }
-}
-
-
-impl std::fmt::Display for ReadData {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let id_short = &self.id[..8];
-        let classification_str = format!("{}", self.previous_read_classification);
-        let (pstrand, pid) = match self.previous_read_classification == 80 {
-            true => (classification_str.bright_green(), id_short.bright_green()),
-            false => match self.previous_read_classification == 83 {
-                true => (classification_str.green(), id_short.green()), 
-                false => (classification_str.white(), id_short.white())
-            }
-        };
-        write!(
-            f, "{:<3} {} {}", 
-            pstrand, 
-            pid,
-            self.chunk_length
-        )
-    }
-}
-
-// Test function to transform one stream into another - see the for await syntax from the async_stream crate
-// async fn get_read_response_stream<S: Stream<Item = Result<GetLiveReadsResponse, tonic::Status>>>(inbound: S, tx: tokio::sync::mpsc::Sender<u32>) -> impl Stream<Item = GetLiveReadsResponse> {
-//     async_stream::stream! {
-//         for await response in inbound {
-//            let read_response = response.unwrap();
-
-//             // Do some things during unpacking ofthis stream into another stream
-
-//            yield read_response
-//         }
-//     }
-// }
-//
-// let response_stream = get_read_response_stream(inbound, state_tx).await;
-//  pin_mut!(response_stream);
-//  while let Some(response) = response_stream.next().await {
-//      log::info!("{:?}", response)
-//  };
-
-        

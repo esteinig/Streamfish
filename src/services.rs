@@ -45,3 +45,9 @@ pub mod minknow_api {
         tonic::include_proto!("minknow_api.statistics");
     }
 }
+
+pub mod dori_api {
+    pub(crate) mod basecaller {
+        tonic::include_proto!("dori_api.basecaller");
+    }
+}

@@ -14,8 +14,15 @@ pub struct App {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Test configuration and connections
-    Test(TestArgs),
+    /// ReadUntilClient testing
+    TestReadUntil(TestReadUntilArgs),
+
+    /// DoriClient testing
+    TestDori(TestDoriArgs),
+
+    /// DoriServer launch
+    DoriServer(DoriServerArgs),
+
     /// Add a simulated device to MinKnow
     AddDevice(AddDeviceArgs),
     /// Remove a simulated device from MinKnow
@@ -23,10 +30,23 @@ pub enum Commands {
 }
 
 #[derive(Debug, Args)]
-pub struct TestArgs {
+pub struct DoriServerArgs {
+
+}
+
+
+#[derive(Debug, Args)]
+pub struct TestDoriArgs {
+
+}
+
+#[derive(Debug, Args)]
+pub struct TestReadUntilArgs {
+   
    /// Channel start for adaptive sampling
    #[clap(long, short, default_value="1")]
    pub channel_start: u32,
+
    /// Channel end for adaptive sampling
    #[clap(long, short, default_value="512")]
    pub channel_end: u32,
