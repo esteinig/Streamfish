@@ -13,7 +13,7 @@ This is all so cool, learnt all the following things from scratch in the last co
 * Asynchroneous programming especially with `tokio` and `tonic`
 * Streams and queues
 * RPC clients and server details
-* UDP/TCP sockets, TLS connections and certificates
+* UDS/TCP sockets, TLS connections and certificates
 * Basic data request/response actions with MinKNOW API
 * Basic adaptive samplign logic and re-implementation with async streams
 * Basic C++ literacy through Dorado source code
