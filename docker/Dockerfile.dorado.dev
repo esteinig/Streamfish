@@ -1,14 +1,27 @@
-FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
+FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
+
+ENV PATH="${PATH}:/opt/bin"
+WORKDIR /usr/src/reefsquid/dorado 
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     ca-certificates \
     build-essential \
-    nvidia-cuda-toolkit \
     libhdf5-dev \
     libssl-dev \
     libzstd-dev \
     cmake \
     autoconf \
-    automake
+    automake \
+    python3
+
+COPY ../dorado ./
+
+# Development fork inside container
+RUN git config --global --add safe.directory "*"
+
+RUN cmake -S . -B cmake-build
+RUN cmake --build cmake-build --config Release -j 4
+RUN ctest --test-dir cmake-build
+RUN cmake --install cmake-build --prefix /opt

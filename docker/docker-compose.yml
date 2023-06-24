@@ -62,6 +62,8 @@ services:
               count: 1
               capabilities: [gpu]
     tty: true   
+    volumes:
+      - ../dorado:/usr/src/reefsquid/dorado
 
 networks:
   reefsquid:

@@ -1,4 +1,3 @@
-use crate::services::minknow_api::log::{UserMessage, SendUserMessageRequest, SendUserMessageResponse};
 use crate::services::minknow_api::log::log_service_client::LogServiceClient;
 use crate::client::auth::AuthInterceptor;
 

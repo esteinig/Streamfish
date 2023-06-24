@@ -84,8 +84,7 @@ impl std::fmt::Display for ChannelStateData {
                         "pending_mux_change" => string.magenta().dimmed(),
                         _ => string.black().dimmed()
                     },
-                    State::StateId(_) => "not implemented".white(),
-                    _ => "unknown".white()
+                    State::StateId(_) => "not implemented".white()
                 }
             },
             None => "unknown".white()

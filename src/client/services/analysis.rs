@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::RandomState;
 
-use crate::services::minknow_api::analysis_configuration::{GetReadClassificationsResponse, GetReadClassificationsRequest, GetAnalysisConfigurationRequest};
+use crate::services::minknow_api::analysis_configuration::{GetReadClassificationsRequest, GetAnalysisConfigurationRequest};
 use crate::services::minknow_api::analysis_configuration::analysis_configuration_service_client::AnalysisConfigurationServiceClient;
 use crate::client::auth::AuthInterceptor;
 

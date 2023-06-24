@@ -7,6 +7,3 @@ WORKDIR /usr/src/reefsquid
 RUN apt update && apt-get -y install make cmake libprotobuf-dev protobuf-compiler musl-tools
 RUN rustup target add x86_64-unknown-linux-musl
 RUN cargo install cargo-watch
-
-COPY ../ ./
-

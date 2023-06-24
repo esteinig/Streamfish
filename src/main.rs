@@ -1,24 +1,24 @@
 #![allow(dead_code)]
+#![allow(non_camel_case_types)]
 
 use clap::Parser;
-use terminal::{TestDoriArgs, TestReadUntilArgs};
+
 use crate::utils::init_logger;
-use crate::terminal::{App, Commands};
-
-
 use crate::config::ReefsquidConfig;
-use crate::server::dori::{DoriServer, DoriClient};
+use crate::terminal::{App, Commands};
 use crate::client::minknow::MinKnowClient;
 use crate::client::readuntil::ReadUntilClient;
+use crate::server::dori::{DoriServer, DoriClient};
+use crate::terminal::{TestDoriArgs, TestReadUntilArgs};
 use crate::services::minknow_api::manager::SimulatedDeviceType;
 
-mod services;
 mod terminal;
+mod services;
+mod server;
 mod client;
 mod config;
 mod utils;
 mod error;
-mod server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -26,9 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logger();
 
     let terminal = App::parse();
-    let config = ReefsquidConfig::new(
-        terminal.global.dotenv
-    );
+    let config = ReefsquidConfig::new(terminal.global.dotenv);
     log::info!("Reefsquid configuration initiated: {}", config);
 
     match &terminal.command {
@@ -76,7 +74,7 @@ async fn test_read_until(config: &ReefsquidConfig, args: &TestReadUntilArgs) -> 
 
 }
 
-async fn test_dori_client(config: &ReefsquidConfig, args: &TestDoriArgs) -> Result<(), Box<dyn std::error::Error>> {
+async fn test_dori_client(config: &ReefsquidConfig, _: &TestDoriArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Reefsquid configuration initiated: {}", config);
 

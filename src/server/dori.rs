@@ -2,7 +2,7 @@
 
 use tokio::net::{UnixListener, UnixStream};
 use tokio_stream::wrappers::UnixListenerStream;
-use tonic::transport::{Server, Endpoint, Uri, Channel};
+use tonic::transport::{Server, Endpoint, Channel};
 use tower::service_fn;
 use crate::config::DoriConfig;
 use crate::server::services::basecaller::BasecallerService;
