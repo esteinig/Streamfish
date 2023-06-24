@@ -16,12 +16,17 @@ impl DoriServer {
     pub async fn run(config: &DoriConfig) -> Result<(), Box<dyn std::error::Error>> {
 
         let basecaller_service = BasecallerService { };
+        let uds_path_parent_dir = config.uds_path.parent().unwrap();
 
-        std::fs::create_dir_all(
-            config.uds_path.parent().unwrap()
-        )?;
+        if config.uds_path.exists() && config.uds_path_override {
+            std::fs::remove_file(&config.uds_path)?;
+            log::warn!("UDS override configured! Replaced existing socket: {}", config.uds_path.display());
+        }
 
-        log::info!("Created UDS parent directory for DoriServer connection at: {}", &config.uds_path.display());
+        if !uds_path_parent_dir.exists() {
+            std::fs::create_dir_all(config.uds_path.parent().unwrap())?;
+            log::debug!("UDS parent directory created at: {}", &config.uds_path.display());
+        }
 
         let uds = UnixListener::bind(&config.uds_path)?;
         let uds_stream = UnixListenerStream::new(uds);

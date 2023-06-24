@@ -32,6 +32,7 @@ pub struct DoriConfig {
     // implemenmt TCP later in case of 
     // serving remotely
     pub uds_path: PathBuf,
+    pub uds_path_override: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +67,7 @@ impl ReefsquidConfig {
             },
             dori: DoriConfig {
                 uds_path: get_env_var("REEFSQUID_DORI_UDS_PATH").into(),
+                uds_path_override: get_env_var("REEFSQUID_DORI_UDS_PATH_OVERRIDE").trim().parse().unwrap(),
             }
         }
     }
