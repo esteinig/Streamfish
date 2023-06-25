@@ -4,9 +4,11 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::{Server, Endpoint, Channel};
 use tower::service_fn;
+use colored::*;
+
 use crate::config::DoriConfig;
 use crate::server::services::basecaller::BasecallerService;
-use crate::services::dori_api::basecaller::DoradoBasecallerRequest;
+use crate::services::dori_api::basecaller::BasecallerRequest;
 use crate::services::dori_api::basecaller::basecaller_server::BasecallerServer;
 use crate::services::dori_api::basecaller::basecaller_client::BasecallerClient;
 
@@ -15,7 +17,8 @@ pub struct DoriServer { }
 impl DoriServer {
     pub async fn run(config: &DoriConfig) -> Result<(), Box<dyn std::error::Error>> {
 
-        let basecaller_service = BasecallerService { };
+        let basecaller_service = BasecallerService::new(config);
+
         let uds_path_parent_dir = config.uds_path.parent().unwrap();
 
         if config.uds_path.exists() && config.uds_path_override {
@@ -66,8 +69,8 @@ impl DoriClient {
             );
             loop {
                 let _ = interval.tick().await;
-                let request = DoradoBasecallerRequest { id: String::new(), data: vec![0], number: 0, channel: 0 };
-                log::info!("Sending request to Dori::BasecallDorado: {:#?}", request);
+                let request = BasecallerRequest { id: String::from("TestID"), data: vec![0], number: 0, channel: 0 };
+                log::info!("Sending request to Dori::BasecallDorado");
                 yield request
             }
         };
@@ -77,7 +80,7 @@ impl DoriClient {
         ).await?.into_inner();
 
         while let Some(response) = dorado_response_stream.message().await? {
-           log::info!("Received response from Dori::BasecallDorado: {:#?}", response)
+           log::info!("Received response from Dori::BasecallDorado")
 
         }
 

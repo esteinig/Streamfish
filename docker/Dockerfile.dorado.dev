@@ -6,6 +6,7 @@ WORKDIR /usr/src/reefsquid/dorado
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
+    gdb \
     ca-certificates \
     build-essential \
     libhdf5-dev \

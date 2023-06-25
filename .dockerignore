@@ -1,3 +1,4 @@
 ./target
 ./testing
+./deepnano-blitz
 ./dorado/cmake-build

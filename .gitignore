@@ -21,3 +21,9 @@ testing/
 
 # Dorado fork
 dorado/
+
+# Deepnano fork
+deepnano-blitz/
+
+# VSCode
+.vscode/

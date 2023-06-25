@@ -33,6 +33,8 @@ pub struct DoriConfig {
     // serving remotely
     pub uds_path: PathBuf,
     pub uds_path_override: bool,
+    pub dorado_path: PathBuf,
+    pub dorado_args: String,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +70,9 @@ impl ReefsquidConfig {
             dori: DoriConfig {
                 uds_path: get_env_var("REEFSQUID_DORI_UDS_PATH").into(),
                 uds_path_override: get_env_var("REEFSQUID_DORI_UDS_PATH_OVERRIDE").trim().parse().unwrap(),
+                dorado_path: get_env_var("REEFSQUID_DORI_DORADO_PATH").into(),
+                dorado_args:  get_env_var("REEFSQUID_DORI_DORADO_ARGS"),
+
             }
         }
     }

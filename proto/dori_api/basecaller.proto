@@ -18,13 +18,13 @@ package dori_api.basecaller;
 //
 // Since 1.0
 service Basecaller {
-    /// Dori
-    
-  rpc BasecallDorado(stream DoradoBasecallerRequest) returns (stream DoradoBasecallerResponse) { }
+  
+  //
+  rpc BasecallDorado(stream BasecallerRequest) returns (stream BasecallerResponse) { }
 
 }
 
-message DoradoBasecallerRequest {
+message BasecallerRequest {
   
   // The ID of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData` 
   string id = 1;
@@ -42,7 +42,7 @@ message DoradoBasecallerRequest {
 
 }
 
-message DoradoBasecallerResponse { 
+message BasecallerResponse { 
 
   // The ID of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData` 
   string id = 1;

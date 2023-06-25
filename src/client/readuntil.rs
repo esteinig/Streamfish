@@ -4,15 +4,16 @@ use uuid::Uuid;
 use::colored::*;
 
 use crate::config::ReefsquidConfig;
+
+use crate::server::dori::DoriClient;
 use crate::client::minknow::MinKnowClient;
 use crate::client::services::data::DataClient;
 use crate::client::services::analysis::AnalysisConfigurationClient;
 
-use crate::server::dori::DoriClient;
-use crate::services::dori_api::basecaller::{DoradoBasecallerRequest, DoradoBasecallerResponse};
 use crate::services::minknow_api::data::GetLiveReadsRequest;
 use crate::services::minknow_api::data::get_live_reads_request::action;
 use crate::services::minknow_api::data::get_live_reads_response::ReadData;
+use crate::services::dori_api::basecaller::{BasecallerRequest, BasecallerResponse};
 use crate::services::minknow_api::data::get_live_reads_request::{Actions, Action, StopFurtherData, UnblockAction, StreamSetup, Request}; 
 
 
@@ -106,7 +107,6 @@ impl ReadUntilClient {
         let mut dori_stream = self.dori.client.basecall_dorado(dori_request).await?.into_inner();
         
 
-        
         // =================================================
         // MinKnow::DataService response stream is processed
         // =================================================
@@ -130,7 +130,6 @@ impl ReadUntilClient {
                     log::info!("Channel {:<5} => {}", channel, read_data);
 
                     if unblock_all && !unblock_dori {
-
                         // Unblock all to test unblocking, equivalent to Readfish implementation
                         // do not send a request to the Dori::BasecallerService stream
                         data_action_tx.send(GetLiveReadsRequest { request: Some(
@@ -147,7 +146,7 @@ impl ReadUntilClient {
                     } else {
                         // Otherwise always send the request to the basecaller request stream,
                         // where the unblock request is put in the queue from the response stream
-                        dori_basecall_tx.send(DoradoBasecallerRequest {
+                        dori_basecall_tx.send(BasecallerRequest {
                             id: read_data.id, 
                             channel: channel,
                             number: read_data.number,
@@ -171,7 +170,9 @@ impl ReadUntilClient {
             }
         });
 
+        // IMPORTANT THAT THE SECOND STREAM IS HERE???
 
+        
         // ========================================
         // DoriService response stream is processed
         // ========================================
@@ -183,22 +184,23 @@ impl ReadUntilClient {
 
                 log::info!("Channel {:<5} => {}", dori_reponse.channel, dori_reponse);
 
-                if unblock_all && unblock_dori {
-                    dori_action_tx.send(GetLiveReadsRequest { request: Some(
-                        Request::Actions(Actions { actions: vec![
-                            Action {
-                                action_id: Uuid::new_v4().to_string(),
-                                read: Some(action::Read::Number(dori_reponse.number)),
-                                action: Some(action::Action::Unblock(UnblockAction { duration: unblock_duration })),
-                                channel: dori_reponse.channel,
-                            }
-                        ]})
-                    )}).await.expect("Failed to unblock request to queue");
-                };
+                dori_action_tx.send(GetLiveReadsRequest { request: Some(
+                    Request::Actions(Actions { actions: vec![
+                        Action {
+                            action_id: Uuid::new_v4().to_string(),
+                            read: Some(action::Read::Number(dori_reponse.number)),
+                            action: Some(action::Action::Unblock(UnblockAction { duration: unblock_duration })),
+                            channel: dori_reponse.channel,
+                        }
+                    ]})
+                )}).await.expect("Failed to unblock request to queue");
             }
         });
 
-        // Await thread handles to run the streams
+        // ====================
+        // Await to run streams
+        // ====================
+
         for handle in [
             action_stream_handle,
             dori_stream_handle
@@ -207,11 +209,12 @@ impl ReadUntilClient {
         };
 
         Ok(())
+
     }
 }
 
 
-impl std::fmt::Display for DoradoBasecallerResponse {
+impl std::fmt::Display for BasecallerResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let id_short = &self.id[..8];
         write!(
