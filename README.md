@@ -1,6 +1,6 @@
-# Reefsquid
+# Streamfish
 
-Low-latency adaptive sampling that re-engineers the [`ReadUntil API`](https://github.com/nanoporetech/read_until_api).
+Low-latency adaptive sampling that re-engineers the [`ReadUntil client`](https://github.com/nanoporetech/read_until_api) using asynchroneous streams and a custom Remote Procedure Call (RPC) server.
 
 ## Motivation
 
