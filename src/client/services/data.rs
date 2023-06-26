@@ -70,7 +70,6 @@ impl DataClient {
 }
 
 
-
 impl std::fmt::Display for ChannelStateData {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let channel_state_str = match &self.state {

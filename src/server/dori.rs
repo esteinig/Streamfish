@@ -1,10 +1,9 @@
 //! Dori is a basecall and analysis RPC implementation for Reefsquid::ReadUntilClient 
 
+use tower::service_fn;
 use tokio::net::{UnixListener, UnixStream};
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::{Server, Endpoint, Channel};
-use tower::service_fn;
-use colored::*;
 
 use crate::config::DoriConfig;
 use crate::server::services::basecaller::BasecallerService;
@@ -79,7 +78,7 @@ impl DoriClient {
             tonic::Request::new(dorado_request_stream)
         ).await?.into_inner();
 
-        while let Some(response) = dorado_response_stream.message().await? {
+        while let Some(_) = dorado_response_stream.message().await? {
            log::info!("Received response from Dori::BasecallDorado")
 
         }

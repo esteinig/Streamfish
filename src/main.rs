@@ -68,7 +68,7 @@ async fn test_read_until(config: &ReefsquidConfig, args: &TestReadUntilArgs) -> 
     log::info!("Reefsquid configuration initiated: {}", config);
 
     let mut client = ReadUntilClient::connect(&config).await?;
-    client.run("MS12345", &args.channel_start, &args.channel_end, 0.1, true, true).await?;
+    client.run("MS12345", &args.channel_start, &args.channel_end).await?;
 
     Ok(())
 

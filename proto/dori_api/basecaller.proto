@@ -44,6 +44,12 @@ message BasecallerRequest {
 
 message BasecallerResponse { 
 
+  enum PipelineStage {
+    BASECALLER_INPUT = 0;
+    BASECALLER_CLASSIFIER = 1;
+    CLASSIFIER_OUTPUT = 2;
+  }
+
   // The ID of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData` 
   string id = 1;
 
@@ -52,5 +58,9 @@ message BasecallerResponse {
 
   // The channel of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData.channels` 
   uint32 channel = 3;
+
+  PipelineStage stage = 4;
+
+  
 
 }

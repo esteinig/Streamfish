@@ -1,8 +1,11 @@
 
-use std::path::PathBuf;
+
 
 use indoc::formatdoc;
+use std::path::PathBuf;
 use clap::crate_version;
+
+use crate::services::minknow_api::data::get_live_reads_request::RawDataType;
 
 fn get_env_var(var: &str) -> String {
     std::env::var(var).expect(&format!("Failed to load environmental variable: {}", var))
@@ -20,10 +23,18 @@ pub struct MinKnowConfig {
     pub tls_cert_path: PathBuf,
 }
 
-
+// A run configuration for ReadUntilClient::run - some can be configured on command-line execution
 #[derive(Debug, Clone)]
 pub struct ReadUntilConfig {
-    
+    pub unblock_all: bool, 
+    pub unblock_dori: bool,
+    pub unblock_duration: f64, 
+    pub raw_data_type: RawDataType,
+    pub sample_minimum_chunk_size: u64,
+    pub accepted_first_chunk_classifications: Vec<i32>,
+    pub action_stream_queue_buffer: usize,
+    pub dori_stream_queue_buffer: usize,
+    pub logging_queue_buffer: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -65,7 +76,16 @@ impl ReefsquidConfig {
                 tls_cert_path: get_env_var("REEFSQUID_MINKNOW_TLS_CERT_PATH").into(),
             },
             readuntil: ReadUntilConfig {
-
+                unblock_all: false,
+                unblock_dori: false,
+                unblock_duration: 0.1,
+                raw_data_type: RawDataType::Uncalibrated,
+                sample_minimum_chunk_size: 200,
+                accepted_first_chunk_classifications: vec![83, 65],
+                // May need to increase these for larger pore arrays
+                action_stream_queue_buffer: 2048,
+                dori_stream_queue_buffer: 2048,
+                logging_queue_buffer: 4096
             },
             dori: DoriConfig {
                 uds_path: get_env_var("REEFSQUID_DORI_UDS_PATH").into(),

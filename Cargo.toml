@@ -31,6 +31,7 @@ indoc = "2.0.1"
 log = "0.4.19"
 prost = "0.11.9"
 prost-types = "0.11"
+quanta = "0.11.1"
 serde = { version = "1.0.164", features = ["derive"] }
 serde_json = "1.0.99"
 thiserror = "1.0.40"
