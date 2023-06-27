@@ -82,7 +82,7 @@ impl StreamfishConfig {
                 device_name: "MS12345".to_string(),
                 channel_start: 1,
                 channel_end: 512,
-                unblock_all: true,
+                unblock_all: false,
                 unblock_dori: false,
                 unblock_duration: 0.1,
                 raw_data_type: RawDataType::Uncalibrated,
