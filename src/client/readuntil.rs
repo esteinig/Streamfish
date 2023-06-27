@@ -50,18 +50,14 @@ impl Log {
 
 #[derive(Debug)]
 enum PipelineStage {
-    MinknowDataResponse,
-    DoriChannelRequest,
-    DoriChannelResponse,
-    MinknowUnblockRequest
+    DoriRequest,
+    MinknowUnblock
 }
 impl PipelineStage {
     pub fn as_str_name(&self) -> &str {
         match self {
-            PipelineStage::MinknowDataResponse => "minknow_data_response",
-            PipelineStage::DoriChannelRequest => "dori_channel_request",
-            PipelineStage::DoriChannelResponse => "dori_channel_response",
-            PipelineStage::MinknowUnblockRequest => "minknow_unblock_request",
+            PipelineStage::DoriRequest => "dori",
+            PipelineStage::MinknowUnblock => "unblock",
         }
     }
 }
@@ -109,14 +105,10 @@ impl ReadUntilClient {
     }
 
     pub async fn run(
-        &mut self, 
-        position_name: &str, 
-        channel_start: &u32, 
-        channel_end: &u32, 
+        &mut self,
     ) -> Result<(), Box<dyn std::error::Error>> {
 
         let run_config = self.readuntil.clone();
-
 
         let clock = Clock::new();
 
@@ -133,9 +125,9 @@ impl ReadUntilClient {
         // ==========================================
         // MPSC message queues: senders and receivers
         // ==========================================
-        let (action_tx, mut action_rx) = tokio::sync::mpsc::channel(2048);
-        let (dori_tx, mut dori_rx) = tokio::sync::mpsc::channel(2048);
-        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4096);
+        let (action_tx, mut action_rx) = tokio::sync::mpsc::channel(4096);
+        let (dori_tx, mut dori_rx) = tokio::sync::mpsc::channel(4096);
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(10000);
 
         // =========================================================
         // Message queue receivers unpack into async request streams
@@ -214,7 +206,7 @@ impl ReadUntilClient {
 
                     // See if it's worth to spawn threads?
                     
-                    log::info!("Channel {:<5} => {}", channel, read_data);
+                    // log::info!("Channel {:<5} => {}", channel, read_data);
 
                     if run_config.unblock_all && !run_config.unblock_dori {
                         // Unblock all to test unblocking, equivalent to Readfish implementation
@@ -253,7 +245,12 @@ impl ReadUntilClient {
                         ]})
                     )}).await.expect("Failed to send stop further data request to Minknow request queue"); 
 
-                    minknow_response_log.send(Log::Latency(LatencyLog { stage: PipelineStage::DoriChannelRequest, time: minknow_response_clock.now(), channel, number: read_data.number })).await.expect("Failed to send log message from Minknow response stream");
+                    minknow_response_log.send(Log::Latency(LatencyLog { 
+                        stage: PipelineStage::DoriRequest, 
+                        time: minknow_response_clock.now(), 
+                        channel, 
+                        number: read_data.number 
+                    })).await.expect("Failed to send log message from Minknow response stream");
 
                 }
             }
@@ -271,7 +268,7 @@ impl ReadUntilClient {
         let dori_stream_handle = tokio::spawn(async move {
             while let Some(dori_response) = dori_stream.message().await.expect("Failed to get response from Dori response stream") {
 
-                log::info!("Channel {:<5} => {}", &dori_response.channel, &dori_response);
+                // log::info!("Channel {:<5} => {}", &dori_response.channel, &dori_response);
 
                 // Evaluate the Dori response - a response may be sent from different
                 // stages of the basecall-classifier pipeline at the endpoint - for
@@ -292,7 +289,12 @@ impl ReadUntilClient {
                     ]})
                 )}).await.expect("Failed to unblock request to queue");
 
-                dori_response_log.send(Log::Latency(LatencyLog { stage: PipelineStage::MinknowUnblockRequest, time: dori_response_clock.now(), channel: dori_response.channel, number: dori_response.number })).await.expect("Failed to send log message from Dori response stream");
+                dori_response_log.send(Log::Latency(LatencyLog { 
+                    stage: PipelineStage::MinknowUnblock, 
+                    time: dori_response_clock.now(), 
+                    channel: dori_response.channel, 
+                    number: dori_response.number 
+                })).await.expect("Failed to send log message from Dori response stream");
             }
         });
 
@@ -313,16 +315,12 @@ impl ReadUntilClient {
         let logging_hande = tokio::spawn(async move {
             while let Some(log) = log_rx.recv().await {
 
-                if let Log::Latency(latency) = &log {
-                    log::info!("{} {} ms {} {}", latency.stage.as_str_name(), latency.as_micros(start), latency.channel, latency.number);
-                }
-                
-
-                // Consider spawning long runing tasks here, e.g. writing to file:
-                
-                // tokio::spawn(async move {
-                //     log::info!("Log received: {}", log.as_str_name());
-                // });
+                tokio::spawn(async move {
+                    if let Log::Latency(latency) = &log {
+                        log::info!("{} {} ms {} {}", latency.stage.as_str_name(), latency.as_micros(start), latency.channel, latency.number);
+                    }
+                });
+                                
             }
         });
 

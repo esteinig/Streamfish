@@ -41,7 +41,7 @@ impl Basecaller for BasecallerService {
         
         log::info!("Initiated Dori::BasecallerService::BasecallDorado on request stream connection");
 
-        let mut minknow_client = MinKnowClient::connect(&self.config.minknow).await.expect("Failed to connect to MinKNOW from Dori");
+        let minknow_client = MinKnowClient::connect(&self.config.minknow).await.expect("Failed to connect to MinKNOW from Dori");
 
         let mut device_client = DeviceClient::from_minknow_client(
             &minknow_client, &self.config.readuntil.device_name

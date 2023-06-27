@@ -68,7 +68,7 @@ async fn test_read_until(config: &StreamfishConfig, args: &TestReadUntilArgs) ->
     log::info!("Streamfish configuration initiated: {}", config);
 
     let mut client = ReadUntilClient::connect(&config).await?;
-    client.run("MS12345", &args.channel_start, &args.channel_end).await?;
+    client.run().await?;
 
     Ok(())
 
