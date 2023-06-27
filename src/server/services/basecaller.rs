@@ -9,7 +9,7 @@ use std::pin::Pin;
 // use std::io::{Read, BufRead, BufReader, Write};
 use futures_core::Stream;
 use futures_util::StreamExt;
-use futures_util::io::BufReader;
+use futures_util::io::{BufReader, BufWriter};
 use futures_util::AsyncWriteExt;
 use futures_util::io::AsyncBufReadExt;
 use tonic::{Request as TonicRequest, Response as TonicResponse, Status as TonicStatus};
@@ -153,9 +153,10 @@ impl Basecaller for BasecallerService {
             .spawn()
             .expect("Failed to spawn basecaller process");
 
-        let basecaller_stdin = std::sync::Arc::new(tokio::sync::Mutex::new(basecaller_process.stdin.take().expect("Failed to open basecaller STDIN")));
-        let basecaller_stdout = basecaller_process.stdout.take().expect("Failed to open basecaller STDOUT");
+        let mut basecaller_stdin = basecaller_process.stdin.take().expect("Failed to open basecaller STDIN");
 
+
+        let basecaller_stdout = basecaller_process.stdout.take().expect("Failed to open basecaller STDOUT");
         let mut basecaller_lines = BufReader::new(basecaller_stdout).lines();
 
         // Classification stage - at the moment just the same outputs with the minimal basecaller
@@ -167,9 +168,9 @@ impl Basecaller for BasecallerService {
             .spawn()
             .expect("Failed to spawn basecaller process");
 
-        let classifier_stdin = std::sync::Arc::new(tokio::sync::Mutex::new(classifier_process.stdin.take().expect("Failed to open basecaller STDIN")));
-        let classifier_stdout = classifier_process.stdout.take().expect("Failed to open basecaller STDOUT");
+        let mut classifier_stdin = classifier_process.stdin.take().expect("Failed to open basecaller STDIN");
 
+        let classifier_stdout = classifier_process.stdout.take().expect("Failed to open basecaller STDOUT");
         let mut classifier_lines = BufReader::new(classifier_stdout).lines();
 
 
@@ -216,20 +217,16 @@ impl Basecaller for BasecallerService {
             while let Some(response) = minknow_stream.message().await.expect("Failed to get response from Minknow data stream on Dori") {
                     
 
-                    // Keep for logging action response states
-    
-                    // for action_response in response.action_responses {
-                    //     if action_response.response != 0 {
-                    //         log::warn!("Failed action: {} ({})", action_response.action_id, action_response.response);
-                    //     }
-                    // }
+                // Keep for logging action response states
 
-                let stdin = std::sync::Arc::clone(&basecaller_stdin); // Clone once write multiple times
+                // for action_response in response.action_responses {
+                //     if action_response.response != 0 {
+                //         log::warn!("Failed action: {} ({})", action_response.action_id, action_response.response);
+                //     }
+                // }
+
                 let minknow_action_tx = stop_read_data_tx.clone(); // Hmmmm...
 
-                tokio::spawn(async move {
-
-                    let mut inner = stdin.lock().await;
 
                     for (channel, read_data) in response.channels {
     
@@ -264,10 +261,8 @@ impl Basecaller for BasecallerService {
                             ]})
                         )}).await.expect("Failed to send stop reads action to queue");
 
-                        inner.write_all(read_data.to_stdin(&channel, &calibration.digitisation, &0).as_bytes()).await.expect("Failed to write data to basecaller input");
+                        basecaller_stdin.write_all(read_data.to_stdin(&channel, &calibration.digitisation, &0).as_bytes()).await.expect("Failed to write data to basecaller input");
                     }
-
-                });
                 
                 yield BasecallerResponse { 
                     channel: 0, 
@@ -283,14 +278,9 @@ impl Basecaller for BasecallerService {
             while let Some(line) = basecaller_lines.next().await {
                 let line = line?;
                 
-                let stdin = std::sync::Arc::clone(&classifier_stdin);
-                tokio::spawn(async move {
-                    // Repeating the basecaller test input/output for now
-                    let mut inner = stdin.lock().await;  // return is stripped
-                    inner.write_all(line.as_bytes()).await.expect("Failed to write data to classifier input");
-                    inner.write_all("\n".as_bytes()).await.expect("Failed to write data to classifier input");
-                });
-
+                classifier_stdin.write_all(line.as_bytes()).await.expect("Failed to write data to classifier input");
+                classifier_stdin.write_all("\n".as_bytes()).await.expect("Failed to write data to classifier input");
+               
                 yield BasecallerResponse { 
                     channel: 0, 
                     number: 0, 
