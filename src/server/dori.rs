@@ -5,28 +5,27 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::{Server, Endpoint, Channel};
 
-use crate::config::{StreamfishConfig};
+use crate::config::StreamfishConfig;
 use crate::server::services::basecaller::BasecallerService;
-use crate::services::dori_api::basecaller::BasecallerRequest;
 use crate::services::dori_api::basecaller::basecaller_server::BasecallerServer;
 use crate::services::dori_api::basecaller::basecaller_client::BasecallerClient;
 
 pub struct DoriServer { }
 
 impl DoriServer {
-    pub async fn run(config: &StreamfishConfig) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(config: StreamfishConfig) -> Result<(), Box<dyn std::error::Error>> {
 
-        let basecaller_service = BasecallerService::new(config);
+        let basecaller_service = BasecallerService::new(&config);
 
-        let uds_path_parent_dir = config.dori.uds_path.parent().unwrap();
+        let uds_path_parent_dir = &config.dori.uds_path.parent().unwrap();
 
         if config.dori.uds_path.exists() && config.dori.uds_path_override {
             std::fs::remove_file(&config.dori.uds_path)?;
-            log::warn!("UDS override configured! Replaced existing socket: {}", config.dori.uds_path.display());
+            log::warn!("UDS override configured! Replaced existing socket: {}", &config.dori.uds_path.display());
         }
 
         if !uds_path_parent_dir.exists() {
-            std::fs::create_dir_all(config.dori.uds_path.parent().unwrap())?;
+            std::fs::create_dir_all(&config.dori.uds_path.parent().unwrap())?;
             log::debug!("UDS parent directory created at: {}", &config.dori.uds_path.display());
         }
 
@@ -58,31 +57,5 @@ impl DoriClient {
         })).await?;
 
         Ok(Self { client: BasecallerClient::new(channel) })
-    }
-    // Dorado basecall request/response stream
-    pub async fn test_basecall_dorado(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-
-        let dorado_request_stream = async_stream::stream! {
-            let mut interval = tokio::time::interval(
-                std::time::Duration::from_secs(1)
-            );
-            loop {
-                let _ = interval.tick().await;
-                let request = BasecallerRequest { id: String::from("TestID"), data: vec![0], number: 0, channel: 0 };
-                log::info!("Sending request to Dori::BasecallDorado");
-                yield request
-            }
-        };
-
-        let mut dorado_response_stream = self.client.basecall_dorado(
-            tonic::Request::new(dorado_request_stream)
-        ).await?.into_inner();
-
-        while let Some(_) = dorado_response_stream.message().await? {
-           log::info!("Received response from Dori::BasecallDorado")
-
-        }
-
-        Ok(())
     }
 }

@@ -20,33 +20,19 @@ package dori_api.basecaller;
 service Basecaller {
   
   //
-  rpc BasecallDorado(stream BasecallerRequest) returns (stream BasecallerResponse) { }
+  rpc BasecallDorado(BasecallerRequest) returns (stream BasecallerResponse) { }
 
 }
 
 message BasecallerRequest {
-  
-  // The ID of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData` 
-  string id = 1;
-
-  // The number of the read in the channel returned in `minknow_api.data.GetLiveReadsResponse.ReadData.number` 
-  uint32 number = 2;
-
-  // The channel of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData.channels` 
-  uint32 channel = 3;
-
-  // Array of raw data values returned in `minknow_api.data.GetLiveReadsResponse.ReadData` 
-  //
-  // Raw data values must be UNCALIBRATED as set in `minknow_api.data.GetLiveReadsRequest.RawDataType` 
-  bytes data = 4;
 
 }
 
 message BasecallerResponse { 
 
   enum PipelineStage {
-    BASECALLER_INPUT = 0;
-    BASECALLER_CLASSIFIER = 1;
+    MINKNOW_DATA_RESPONSE = 0;
+    BASECALLER_OUTPUT = 1;
     CLASSIFIER_OUTPUT = 2;
   }
 

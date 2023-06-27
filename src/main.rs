@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::DoriServer ( _  ) => {
 
-            DoriServer::run(&config).await?;
+            DoriServer::run(config).await?;
 
         },
         Commands::AddDevice ( args  ) => {
@@ -68,7 +68,7 @@ async fn test_read_until(config: &StreamfishConfig, args: &TestReadUntilArgs) ->
     log::info!("Streamfish configuration initiated: {}", config);
 
     let mut client = ReadUntilClient::connect(&config).await?;
-    client.run("MS12345", &args.channel_start, &args.channel_end).await?;
+    client.run().await?;
 
     Ok(())
 
@@ -81,9 +81,9 @@ async fn test_dori_client(config: &StreamfishConfig, _: &TestDoriArgs) -> Result
     // let mk = MinKnowClient::connect(&config.minknow).await?;
     // mk.stream_channel_states_queue_log("MS12345", 1, 512).await?;
 
-    let mut client = DoriClient::connect(&config).await?;
+    let client = DoriClient::connect(&config).await?;
     
-    client.test_basecall_dorado().await?;
+    // client.test_basecall_dorado().await?;
 
     Ok(())
 
