@@ -63,13 +63,13 @@ impl ManagerClient {
         }
 
         if responses.len() > 1 {
-            log::debug!("Reefsquid::ManagerClient: too many flow cell positions were returned to fit into a single response");
-            log::debug!("Reefsquid::ManagerClient: only the first flow cell position response is returned");
+            log::debug!("Streamfish::ManagerClient: too many flow cell positions were returned to fit into a single response");
+            log::debug!("Streamfish::ManagerClient: only the first flow cell position response is returned");
         }
 
         match responses.get(0) {
             Some(position_response) => Ok(position_response.to_owned()),
-            None => panic!("Reefsquid::ManagerClient: could not obtain the required position response")
+            None => panic!("Streamfish::ManagerClient: could not obtain the required position response")
         }
     }
     // Add a simulated device

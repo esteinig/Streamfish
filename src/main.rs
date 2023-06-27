@@ -4,7 +4,7 @@
 use clap::Parser;
 
 use crate::utils::init_logger;
-use crate::config::ReefsquidConfig;
+use crate::config::StreamfishConfig;
 use crate::terminal::{App, Commands};
 use crate::client::minknow::MinKnowClient;
 use crate::client::readuntil::ReadUntilClient;
@@ -26,8 +26,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logger();
 
     let terminal = App::parse();
-    let config = ReefsquidConfig::new(terminal.global.dotenv);
-    log::info!("Reefsquid configuration initiated: {}", config);
+    let config = StreamfishConfig::new(terminal.global.dotenv);
+    log::info!("Streamfish configuration initiated: {}", config);
 
     match &terminal.command {
 
@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::DoriServer ( _  ) => {
 
-            DoriServer::run(&config.dori).await?;
+            DoriServer::run(&config).await?;
 
         },
         Commands::AddDevice ( args  ) => {
@@ -63,9 +63,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 }
 
-async fn test_read_until(config: &ReefsquidConfig, args: &TestReadUntilArgs) -> Result<(), Box<dyn std::error::Error>> {
+async fn test_read_until(config: &StreamfishConfig, args: &TestReadUntilArgs) -> Result<(), Box<dyn std::error::Error>> {
 
-    log::info!("Reefsquid configuration initiated: {}", config);
+    log::info!("Streamfish configuration initiated: {}", config);
 
     let mut client = ReadUntilClient::connect(&config).await?;
     client.run("MS12345", &args.channel_start, &args.channel_end).await?;
@@ -74,14 +74,14 @@ async fn test_read_until(config: &ReefsquidConfig, args: &TestReadUntilArgs) -> 
 
 }
 
-async fn test_dori_client(config: &ReefsquidConfig, _: &TestDoriArgs) -> Result<(), Box<dyn std::error::Error>> {
+async fn test_dori_client(config: &StreamfishConfig, _: &TestDoriArgs) -> Result<(), Box<dyn std::error::Error>> {
 
-    log::info!("Reefsquid configuration initiated: {}", config);
+    log::info!("Streamfish configuration initiated: {}", config);
 
     // let mk = MinKnowClient::connect(&config.minknow).await?;
     // mk.stream_channel_states_queue_log("MS12345", 1, 512).await?;
 
-    let mut client = DoriClient::connect(&config.dori).await?;
+    let mut client = DoriClient::connect(&config).await?;
     
     client.test_basecall_dorado().await?;
 

@@ -1,11 +1,11 @@
 [package]
-name = "reefsquid"
+name = "streamfish"
 version = "0.1.0"
 authors = ["esteinig <eike.steinig@unimelb.edu.au>"]
-description = "Reefsquid: a squishy adaptive sampling library for nanopore devices"
-documentation = "https://github.com/esteinig/reefsquid"
-homepage = "https://github.com/meta-gp/reefsquid"
-repository = "https://github.com/meta-gp/reefsquid"
+description = "Streamfish: a squishy adaptive sampling library for nanopore devices"
+documentation = "https://github.com/esteinig/streamfish"
+homepage = "https://github.com/meta-gp/streamfish"
+repository = "https://github.com/meta-gp/streamfish"
 readme = "README.md"
 keywords = ["nanopore", "adaptive-sampling", "read-until", "minknow", "grpc"]
 categories = ["science"]
@@ -28,6 +28,7 @@ futures = "0.3.28"
 futures-core = "0.3.28"
 futures-util = "0.3.28"
 indoc = "2.0.1"
+itertools = "0.11.0"
 log = "0.4.19"
 prost = "0.11.9"
 prost-types = "0.11"
@@ -52,5 +53,5 @@ float_eq = "0.6.1"
 tempfile = "3.5"
 
 [[bin]]
-name = "reefsquid"
+name = "streamfish"
 path = "src/main.rs"

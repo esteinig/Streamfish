@@ -1,5 +1,7 @@
 
-use crate::config::DoriConfig;
+use crate::client::minknow::MinKnowClient;
+use crate::client::services::device::DeviceClient;
+use crate::config::{DoriConfig, StreamfishConfig};
 use crate::services::dori_api::basecaller::basecaller_server::Basecaller;
 use crate::services::dori_api::basecaller::{BasecallerRequest, BasecallerResponse, basecaller_response::PipelineStage};
 
@@ -13,12 +15,13 @@ use futures_util::io::AsyncBufReadExt;
 use tonic::{Request, Response, Status};
 // use std::process::{Command, Stdio};
 use async_process::{Command, Stdio};
+use itertools::join;
 
 pub struct BasecallerService {
-    config: DoriConfig
+    config: StreamfishConfig
 }
 impl BasecallerService {
-    pub fn new(config: &DoriConfig) -> Self {
+    pub fn new(config: &StreamfishConfig) -> Self {
 
         Self { config: config.clone() }
     }
@@ -37,6 +40,21 @@ impl Basecaller for BasecallerService {
     ) -> Result<Response<Self::BasecallDoradoStream>, Status> {
         
         log::info!("Initiated Dori::BasecallerService::BasecallDorado on request stream connection");
+
+        let mut minknow_client = MinKnowClient::connect(&self.config.minknow).await.expect("Failed to connect to MinKNOW from Dori");
+
+        let mut device_client = DeviceClient::from_minknow_client(
+            &minknow_client, &self.config.readuntil.device_name
+        ).await.expect("Failed to connect to initiate device client on Dori");
+
+        let sample_rate = device_client.get_sample_rate().await.expect("Failed to get sample rate from MinKNOW on Dori");
+        let calibration = device_client.get_calibration(&self.config.readuntil.channel_start, &self.config.readuntil.channel_end).await.expect("Failed to connect to get calibration from MinKNOW on Dori");
+
+        log::info!("Sample rate: {} | Digitisation: {}", sample_rate, calibration.digitisation);
+
+        // Ok does this mean we can actually get the whole stream from here??
+
+
 
         // Ok so my understanding now is that input and output stream have to be linked - the request
         // stream must unpack into either a queue sending into the response stream from an async thread
@@ -62,7 +80,7 @@ impl Basecaller for BasecallerService {
 
         // Basecall stage
 
-        let mut basecaller_process = Command::new(self.config.dorado_path.as_os_str())
+        let mut basecaller_process = Command::new(self.config.dori.dorado_path.as_os_str())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -76,7 +94,7 @@ impl Basecaller for BasecallerService {
         // Classification stage - at the moment just the same outputs with the minimal basecaller
         // input/output program to measure effects on latency
 
-        let mut classifier_process = Command::new(self.config.dorado_path.as_os_str())
+        let mut classifier_process = Command::new(self.config.dori.dorado_path.as_os_str())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -94,11 +112,8 @@ impl Basecaller for BasecallerService {
             while let Some(dorado_request) = request_stream.next().await {
                 let dorado_request = dorado_request?;
 
-                let read = BasecallerRead::from(dorado_request.clone()) ;
+                basecaller_stdin.write_all(dorado_request.to_stdin().as_bytes()).await?;
 
-                basecaller_stdin.write_all(
-                    format!("{}\n", serde_json::to_string(&read).unwrap()).as_bytes()
-                ).await?;
 
                 let response = BasecallerResponse { 
                     channel: 0, 
@@ -113,36 +128,15 @@ impl Basecaller for BasecallerService {
         let basecaller_output_classifier_input_response_stream = async_stream::try_stream! {
             while let Some(line) = basecaller_lines.next().await {
                 let line = line?;
-
-                // Here we unpack the output of the C++ JSON parser which
-                // currently stands-in for Dorado and for latency testing - 
-                // important because we want the channel and read number in 
-                // channel to send back a potential unblock request
-                let content: Vec<&str> = line.trim().split_whitespace().collect();
                 
-                let number = content[1].parse::<u32>().unwrap();
-                let channel = content[2].parse::<u32>().unwrap();
-
-                // log::info!("{:?}", content);
-
-                // Repeating the basecaller test input/output for now, without data
-                // but with simulated long read identifier mimicking sequence reads of
-                // ~ 180 bp * 2 (includes quality values) for ~ 800 signal values 
-                let read = BasecallerRead {
-                    number,
-                    channel,
-                    id: "A".repeat(360),  // this might introduce latency, let's see
-                    data: Vec::new()
-                };
-
-                classifier_stdin.write_all(
-                    format!("{}\n", serde_json::to_string(&read).unwrap()).as_bytes()
-                ).await?;
+                // Repeating the basecaller test input/output for now
+                classifier_stdin.write_all(line.as_bytes()).await?;  // return is stripped
+                classifier_stdin.write_all("\n".as_bytes()).await?;
 
 
                 let response = BasecallerResponse { 
-                    channel, 
-                    number, 
+                    channel: 0, 
+                    number: 0, 
                     id: "stdout-basecaller".to_string(),
                     stage: PipelineStage::BasecallerClassifier.into()
                 };
@@ -160,9 +154,9 @@ impl Basecaller for BasecallerService {
                 // important because we want the channel and read number in 
                 // channel to send back a potential unblock request
                 let content: Vec<&str> = line.trim().split_whitespace().collect();
-                
-                let number = content[1].parse::<u32>().unwrap();
-                let channel = content[2].parse::<u32>().unwrap();
+
+                let channel = content[1].parse::<u32>().unwrap();
+                let number = content[2].parse::<u32>().unwrap();
 
                 let response = BasecallerResponse { 
                     channel, 
@@ -195,15 +189,8 @@ impl Basecaller for BasecallerService {
 
 }
 
-#[derive(serde::Serialize, Debug)]
-struct BasecallerRead {
-    id: String,
-    data: Vec<u8>,
-    channel: u32,
-    number: u32
-}
-impl BasecallerRead {
-    pub fn from(req: BasecallerRequest) -> Self {
-        Self { id: req.id, data: req.data, channel: req.channel, number: req.number }
+impl BasecallerRequest {
+    pub fn to_stdin(&self) -> String {
+        format!("{} {} {} {} {} {}\n", self.id, self.channel, self.number, 0, 0, join(&self.data, " "))
     }
 }

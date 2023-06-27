@@ -1,7 +1,7 @@
 FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
 
 ENV PATH="${PATH}:/opt/bin"
-WORKDIR /usr/src/reefsquid/dorado 
+WORKDIR /usr/src/streamfish/dorado 
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \

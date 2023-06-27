@@ -1,9 +1,9 @@
 use clap::{Args, Parser, Subcommand};
 
-/// Reefsquid: a squishy adaptive sampling client
+/// Streamfish: a streamy adaptive sampling client
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
-#[clap(name = "reefsquid", version)]
+#[clap(name = "streamfish", version)]
 pub struct App {
     #[clap(flatten)]
     pub global: GlobalOptions,

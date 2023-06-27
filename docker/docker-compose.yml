@@ -10,11 +10,11 @@ services:
   # For testing the terminal client while the development container
   # is running enter the running service container with:
   #
-  #   docker exec -it <project>-reefsquid-dev-1 /bin/bash
+  #   docker exec -it <project>-streamfish-dev-1 /bin/bash
   #
   # The compiled executable is copied to /usr/bin and available:
   #
-  #   reefsquid test --help
+  #   streamfish test --help
 
 
   # This development container requires MinKnow to run on the host, it will
@@ -22,29 +22,29 @@ services:
   # connect to the MinKnow API. This requires to set the configuration 
   # environmental variable:
   #
-  # REEFSQUID_MINKNOW_HOST=minknow_host
+  # STREAMFISH_MINKNOW_HOST=minknow_host
   #
   # This is done here with the environment variable which overrides the
   # configuration file (.env) from the shared directory tree
 
-  reefsquid-dev:
+  streamfish-dev:
     profiles:
       - dev
       - minknow
-    image: reefsquid:latest
+    image: streamfish:latest
     build:
       context: ..
       dockerfile: ./docker/Dockerfile.dev
     environment:
-      - REEFSQUID_MINKNOW_HOST=minknow_host
+      - STREAMFISH_MINKNOW_HOST=minknow_host
     extra_hosts:
       - "minknow_host:host-gateway"
     networks:
-      - reefsquid
+      - streamfish
     volumes:
-      - ../:/usr/src/reefsquid
+      - ../:/usr/src/streamfish
       - /opt/ont/minknow/conf/rpc-certs/:/opt/ont/minknow/conf/rpc-certs/
-    command: cargo watch -w src -w proto -w build.rs -w Cargo.toml -x "build --target x86_64-unknown-linux-musl --release && cp /usr/src/reefsquid/target/x86_64-unknown-linux-musl/release/reefsquid /usr/bin"
+    command: cargo watch -w src -w proto -w build.rs -w Cargo.toml -x "build --target x86_64-unknown-linux-musl --release -j4 && cp /usr/src/streamfish/target/x86_64-unknown-linux-musl/release/streamfish /usr/bin"
 
   dorado-dev:
     profiles:
@@ -63,7 +63,7 @@ services:
               capabilities: [gpu]
     tty: true   
     volumes:
-      - ../dorado:/usr/src/reefsquid/dorado
+      - ../dorado:/usr/src/streamfish/dorado
 
 networks:
-  reefsquid:
+  streamfish:

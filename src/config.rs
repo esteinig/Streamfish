@@ -26,6 +26,9 @@ pub struct MinKnowConfig {
 // A run configuration for ReadUntilClient::run - some can be configured on command-line execution
 #[derive(Debug, Clone)]
 pub struct ReadUntilConfig {
+    pub device_name: String,  // allows server to have access to Minknow
+    pub channel_start: u32,
+    pub channel_end: u32,
     pub unblock_all: bool, 
     pub unblock_dori: bool,
     pub unblock_duration: f64, 
@@ -49,8 +52,8 @@ pub struct DoriConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReefsquidConfig {
-    // Reefsquid version
+pub struct StreamfishConfig {
+    // Streamfish version
     pub version: String,
     // Dori server configuration
     pub dori: DoriConfig,
@@ -60,8 +63,8 @@ pub struct ReefsquidConfig {
     pub readuntil: ReadUntilConfig,
 }
 
-impl ReefsquidConfig {
-    pub fn new(dot_env: bool) -> ReefsquidConfig {
+impl StreamfishConfig {
+    pub fn new(dot_env: bool) -> StreamfishConfig {
 
         if dot_env {
             dotenvy::dotenv().expect("Could not find '.env' file in directory tree");
@@ -70,13 +73,16 @@ impl ReefsquidConfig {
         Self {
             version: crate_version!().to_string(),
             minknow: MinKnowConfig {
-                host: get_env_var("REEFSQUID_MINKNOW_HOST"),
-                port: get_env_var("REEFSQUID_MINKNOW_PORT").parse::<i32>().unwrap(),
-                token: get_env_var("REEFSQUID_MINKNOW_TOKEN"),
-                tls_cert_path: get_env_var("REEFSQUID_MINKNOW_TLS_CERT_PATH").into(),
+                host: get_env_var("STREAMFISH_MINKNOW_HOST"),
+                port: get_env_var("STREAMFISH_MINKNOW_PORT").parse::<i32>().unwrap(),
+                token: get_env_var("STREAMFISH_MINKNOW_TOKEN"),
+                tls_cert_path: get_env_var("STREAMFISH_MINKNOW_TLS_CERT_PATH").into(),
             },
             readuntil: ReadUntilConfig {
-                unblock_all: false,
+                device_name: "MS12345".to_string(),
+                channel_start: 1,
+                channel_end: 512,
+                unblock_all: true,
                 unblock_dori: false,
                 unblock_duration: 0.1,
                 raw_data_type: RawDataType::Uncalibrated,
@@ -88,23 +94,23 @@ impl ReefsquidConfig {
                 logging_queue_buffer: 4096
             },
             dori: DoriConfig {
-                uds_path: get_env_var("REEFSQUID_DORI_UDS_PATH").into(),
-                uds_path_override: get_env_var("REEFSQUID_DORI_UDS_PATH_OVERRIDE").trim().parse().unwrap(),
-                dorado_path: get_env_var("REEFSQUID_DORI_DORADO_PATH").into(),
-                dorado_args:  get_env_var("REEFSQUID_DORI_DORADO_ARGS"),
+                uds_path: get_env_var("STREAMFISH_DORI_UDS_PATH").into(),
+                uds_path_override: get_env_var("STREAMFISH_DORI_UDS_PATH_OVERRIDE").trim().parse().unwrap(),
+                dorado_path: get_env_var("STREAMFISH_DORI_DORADO_PATH").into(),
+                dorado_args:  get_env_var("STREAMFISH_DORI_DORADO_ARGS"),
 
             }
         }
     }
 }
 
-impl std::fmt::Display for ReefsquidConfig {
+impl std::fmt::Display for StreamfishConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let s = formatdoc! {"
 
 
         =======================
-        Reefsquid configuration
+        Streamfish configuration
         =======================
 
         MinKnow Host    {minknow_host}

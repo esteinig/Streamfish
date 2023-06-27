@@ -1,8 +1,9 @@
 use uuid::Uuid;
 use::colored::*;
+use quanta::{Clock, Instant};
 
 use crate::config::{
-    ReefsquidConfig, 
+    StreamfishConfig, 
     ReadUntilConfig
 };
 
@@ -38,17 +39,48 @@ enum Log {
     Status(StatusLog)
 }
 impl Log {
-    pub fn as_str_name(&self) -> String {
+    pub fn as_str_name(&self) -> &str {
         match self {
-            Log::Latency(_) => "LatencyLog".to_string(),
-            Log::Status(_) => "StatusLog".to_string()
+            Log::Latency(_) => "log_latency",
+            Log::Status(_) => "log_status"
+        }
+    }
+}
+
+
+#[derive(Debug)]
+enum PipelineStage {
+    MinknowDataResponse,
+    DoriChannelRequest,
+    DoriChannelResponse,
+    MinknowUnblockRequest
+}
+impl PipelineStage {
+    pub fn as_str_name(&self) -> &str {
+        match self {
+            PipelineStage::MinknowDataResponse => "minknow_data_response",
+            PipelineStage::DoriChannelRequest => "dori_channel_request",
+            PipelineStage::DoriChannelResponse => "dori_channel_response",
+            PipelineStage::MinknowUnblockRequest => "minknow_unblock_request",
         }
     }
 }
 
 #[derive(Debug)]
 pub struct LatencyLog {
-
+    stage: PipelineStage,
+    time: Instant,
+    // Using channel and read number identification as these are u32 instead of String
+    // NOTE: read numbers always increment throughout the experiment, and are unique per 
+    // channel - however they are not necessarily contiguous (i.e. can be used for ID, 
+    // but not sequential inferences)
+    channel: u32,
+    number: u32
+}
+impl LatencyLog {
+    pub fn as_micros(&self, start: Instant) -> u128 {
+        self.time.duration_since(start).as_micros()
+    } 
 }
 
 #[derive(Debug)]
@@ -62,12 +94,15 @@ pub struct ReadUntilClient {
     pub readuntil: ReadUntilConfig,
 }
 
+// Do not use Strings when it can be avoided, introduces too much latency, use static strings (&str) or enumerations
+// this introducted a bit of latency into the logging as string name conversion
+
 impl ReadUntilClient {
 
-    pub async fn connect(config: &ReefsquidConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn connect(config: &StreamfishConfig) -> Result<Self, Box<dyn std::error::Error>> {
 
         Ok(Self { 
-            dori: DoriClient::connect(&config.dori).await?, 
+            dori: DoriClient::connect(&config).await?, 
             minknow: MinKnowClient::connect(&config.minknow).await?,
             readuntil: config.readuntil.clone(),
         })
@@ -82,30 +117,18 @@ impl ReadUntilClient {
 
         let run_config = self.readuntil.clone();
 
+
+        let clock = Clock::new();
+
         // ==============================
         // MinKnow DataService connection
         // ==============================
 
         let mut data_client = DataClient::from_minknow_client(
-            &self.minknow, position_name
+            &self.minknow, &run_config.device_name
         ).await?;
 
-        let mut device_client = DeviceClient::from_minknow_client(
-            &self.minknow, position_name
-        ).await?;
-
-        let read_classifications = 
-            AnalysisConfigurationClient::from_minknow_client(
-                &self.minknow, position_name
-            )
-            .await?
-            .get_read_classifications().await?;
-
-        let sample_rate = device_client.get_sample_rate().await?;
-        let calibration = device_client.get_calibration(channel_start, channel_end).await?;
-
-        log::info!("Sample rate: {} | Digitisation: {}", sample_rate, calibration.digitisation);
-        log::info!("Read classifications {:#?}", read_classifications);
+        // log::info!("Read classifications {:#?}", read_classifications);
 
         // ==========================================
         // MPSC message queues: senders and receivers
@@ -140,8 +163,8 @@ impl ReadUntilClient {
 
         // Setup the initial request to setup the data stream ...
         let init_action = GetLiveReadsRequest { request: Some(Request::Setup(StreamSetup { 
-                first_channel: *channel_start, 
-                last_channel: *channel_end, 
+                first_channel: run_config.channel_start, 
+                last_channel: run_config.channel_end, 
                 raw_data_type: run_config.raw_data_type.into(), 
                 sample_minimum_chunk_size: run_config.sample_minimum_chunk_size,
                 accepted_first_chunk_classifications: run_config.accepted_first_chunk_classifications, 
@@ -149,34 +172,36 @@ impl ReadUntilClient {
             }))
         };
 
-
-        // Send it into the action queue that unpacks into the request stream
+        // Send it into the action queue that unpacks into the request stream 
+        // - this must happen before the request to MinKNOW
         let init_action_stream_tx = action_tx.clone();
         init_action_stream_tx.send(init_action.clone()).await?;
 
-        // Data stream initiation log
-        log_tx.send(Log::Status(StatusLog { msg: "Initiated data stream from MinKNOW".into() })).await?;
-
-        // DataService response stream is initiated with the data request stream
-        let action_request = tonic::Request::new(data_request_stream);
-        let mut data_stream = data_client.client.get_live_reads(action_request).await?.into_inner();
-
+        // DataService response stream is initiated with the data request stream to MinKNOW
+        let minknow_request = tonic::Request::new(data_request_stream);
+        let mut minknow_stream = data_client.client.get_live_reads(minknow_request).await?.into_inner();
 
         // BasecallService response stream is initiated with the dori request stream
         let dori_request = tonic::Request::new(dori_request_stream);
         let mut dori_stream = self.dori.client.basecall_dorado(dori_request).await?.into_inner();
         
+        let start = clock.now();
+        log::info!("Starting streaming loop for adaptive sampling");
 
         // =================================================
         // MinKnow::DataService response stream is processed
         // =================================================
 
-        let data_action_tx = action_tx.clone(); // unpacks stop further data action requests into data request stream
+        let minknow_response_log = log_tx.clone();
+        let minknow_response_clock = clock.clone();
+
+        let minknow_action_tx = action_tx.clone(); // unpacks stop further data action requests into data request stream
         let dori_basecall_tx = dori_tx.clone(); // unpacks dori basecall action requests into dori request stream
 
         let action_stream_handle = tokio::spawn(async move {
-            while let Some(response) = data_stream.message().await.expect("Failed to get message from stream") {
+            while let Some(response) = minknow_stream.message().await.expect("Failed to get response from Minknow data stream") {
                 
+
                 // Keep for logging action response states
 
                 // for action_response in response.action_responses {
@@ -184,24 +209,26 @@ impl ReadUntilClient {
                 //         log::warn!("Failed action: {} ({})", action_response.action_id, action_response.response);
                 //     }
                 // }
-
+                
                 for (channel, read_data) in response.channels {
+
+                    // See if it's worth to spawn threads?
                     
                     log::info!("Channel {:<5} => {}", channel, read_data);
 
                     if run_config.unblock_all && !run_config.unblock_dori {
                         // Unblock all to test unblocking, equivalent to Readfish implementation
                         // do not send a request to the Dori::BasecallerService stream
-                        data_action_tx.send(GetLiveReadsRequest { request: Some(
+                        minknow_action_tx.send(GetLiveReadsRequest { request: Some(
                             Request::Actions(Actions { actions: vec![
                                 Action {
-                                    action_id: Uuid::new_v4().to_string(),
+                                    action_id: Uuid::new_v4().to_string(),  // do the action ids matter?
                                     read: Some(action::Read::Number(read_data.number)),
                                     action: Some(action::Action::Unblock(UnblockAction { duration: run_config.unblock_duration })),
                                     channel: channel,
                                 }
                             ]})
-                        )}).await.expect("Failed to unblock request to queue");
+                        )}).await.expect("Failed to send unblock request to Minknow request queue");
 
                     } else {
                         // Otherwise always send the request to the basecaller request stream,
@@ -211,11 +238,11 @@ impl ReadUntilClient {
                             channel: channel,
                             number: read_data.number,
                             data: read_data.raw_data,
-                        }).await.expect("Failed to send basecall requests to queue")
+                        }).await.expect("Failed to send basecall requests to Dori request queue")
                     }
 
                     // Always request to stop further data from the current read
-                    data_action_tx.send(GetLiveReadsRequest { request: Some(
+                    minknow_action_tx.send(GetLiveReadsRequest { request: Some(
                         Request::Actions(Actions { actions: vec![
                             Action {
                                 action_id: Uuid::new_v4().to_string(),
@@ -224,9 +251,9 @@ impl ReadUntilClient {
                                 channel: channel,
                             }
                         ]})
-                    )}).await.expect("Failed to send stop further data request to queue"); 
+                    )}).await.expect("Failed to send stop further data request to Minknow request queue"); 
 
-                    log_tx.send(Log::Status(StatusLog { msg: "Sent read data to Dori".into() })).await.expect("Failed to send log message from action stream");
+                    minknow_response_log.send(Log::Latency(LatencyLog { stage: PipelineStage::DoriChannelRequest, time: minknow_response_clock.now(), channel, number: read_data.number })).await.expect("Failed to send log message from Minknow response stream");
 
                 }
             }
@@ -236,12 +263,15 @@ impl ReadUntilClient {
         // DoriService response stream is processed
         // ========================================
 
-        let dori_action_tx = action_tx.clone();
+        let dori_response_log = log_tx.clone();
+        let dori_response_clock = clock.clone();
+
+        let minknow_dori_action_tx = action_tx.clone();
 
         let dori_stream_handle = tokio::spawn(async move {
-            while let Some(dori_response) = dori_stream.message().await.expect("Failed to get message from stream") {
+            while let Some(dori_response) = dori_stream.message().await.expect("Failed to get response from Dori response stream") {
 
-                log::info!("Channel {:<5} => {}", dori_response.channel, dori_response);
+                log::info!("Channel {:<5} => {}", &dori_response.channel, &dori_response);
 
                 // Evaluate the Dori response - a response may be sent from different
                 // stages of the basecall-classifier pipeline at the endpoint - for
@@ -251,7 +281,7 @@ impl ReadUntilClient {
                     continue;
                 }
 
-                dori_action_tx.send(GetLiveReadsRequest { request: Some(
+                minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
                     Request::Actions(Actions { actions: vec![
                         Action {
                             action_id: Uuid::new_v4().to_string(),
@@ -261,6 +291,8 @@ impl ReadUntilClient {
                         }
                     ]})
                 )}).await.expect("Failed to unblock request to queue");
+
+                dori_response_log.send(Log::Latency(LatencyLog { stage: PipelineStage::MinknowUnblockRequest, time: dori_response_clock.now(), channel: dori_response.channel, number: dori_response.number })).await.expect("Failed to send log message from Dori response stream");
             }
         });
 
@@ -276,11 +308,15 @@ impl ReadUntilClient {
 
         // Queue size it was most likely. I also think latency may be introduced
         // when the Rust compiler runs on all threads in the background, might be
-        // hard to check through
+        // hard to check through (cargo-watch build --release)
     
         let logging_hande = tokio::spawn(async move {
             while let Some(log) = log_rx.recv().await {
-                log::info!("Log received: {}", log.as_str_name());
+
+                if let Log::Latency(latency) = &log {
+                    log::info!("{} {} ms {} {}", latency.stage.as_str_name(), latency.as_micros(start), latency.channel, latency.number);
+                }
+                
 
                 // Consider spawning long runing tasks here, e.g. writing to file:
                 

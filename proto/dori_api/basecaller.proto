@@ -3,7 +3,7 @@ syntax="proto3";
 package dori_api.basecaller;
 
 
-// Basecall reads streamed from the Reefsquid::ReadUntilClient
+// Basecall reads streamed from the Streamfish::ReadUntilClient
 //
 // This service implements a single endpoint to basecall reads with Dorado, because
 // there is not avilable server implementation (for now) and it is not clear if the 

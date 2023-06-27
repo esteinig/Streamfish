@@ -2,7 +2,7 @@ FROM rust:1.69-bookworm
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
-WORKDIR /usr/src/reefsquid
+WORKDIR /usr/src/streamfish
 
 RUN apt update && apt-get -y install make cmake libprotobuf-dev protobuf-compiler musl-tools
 RUN rustup target add x86_64-unknown-linux-musl
