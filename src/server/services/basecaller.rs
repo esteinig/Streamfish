@@ -212,6 +212,9 @@ impl Basecaller for BasecallerService {
         let unblock_all = run_config.readuntil.unblock_all;
         let unblock_duration = run_config.readuntil.unblock_duration;
 
+        // I wonder if it's possible / better to place the input stream / stdin/stdout loops into their own threads and send response
+        // to a message queue that drains into a single return stream? Is that even possible with the mut spawned processes?
+
         let minknow_data_stream = async_stream::try_stream! {
 
             while let Some(response) = minknow_stream.message().await.expect("Failed to get response from Minknow data stream on Dori") {
