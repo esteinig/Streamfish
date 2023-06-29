@@ -312,7 +312,7 @@ impl ReadUntilClient {
         // when the Rust compiler runs on all threads in the background, might be
         // hard to check through (cargo-watch build --release)
     
-        let logging_hande = tokio::spawn(async move {
+        let logging_handle = tokio::spawn(async move {
             while let Some(log) = log_rx.recv().await {
 
                 tokio::spawn(async move {
@@ -331,7 +331,7 @@ impl ReadUntilClient {
         for handle in [
             action_stream_handle,
             dori_stream_handle,
-            logging_hande
+            logging_handle
         ] {
             handle.await?
         };

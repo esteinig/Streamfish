@@ -50,7 +50,7 @@ services:
     profiles:
       - dev
       - dorado
-    image: dorado:latest
+    image: dorado:latest   
     build:
       context: ..
       dockerfile: ./docker/Dockerfile.dorado.dev
@@ -61,7 +61,7 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    tty: true   
+    command: bash -c "cmake -S . -B cmake-build && echo 'Running CMAKE buildfer' && cmake --build cmake-build --config Release -j4 && cmake --install cmake-build --prefix /opt && tail -f /dev/null"
     volumes:
       - ../dorado:/usr/src/streamfish/dorado
 
