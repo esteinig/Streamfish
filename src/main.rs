@@ -26,18 +26,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logger();
 
     let terminal = App::parse();
-    let config = StreamfishConfig::new(terminal.global.dotenv);
+    let mut config = StreamfishConfig::new(terminal.global.dotenv);
     log::info!("Streamfish configuration initiated: {}", config);
 
     match &terminal.command {
 
         Commands::TestReadUntil ( args  ) => {
 
-            test_read_until(&config, args).await?;
+            test_read_until(&mut config, args).await?;
         },
         Commands::TestDori ( args  ) => {
 
-            test_dori_client(&config, args).await?;
+            test_dori_client(&mut config, args).await?;
 
         },
         Commands::DoriServer ( _  ) => {
@@ -63,18 +63,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 }
 
-async fn test_read_until(config: &StreamfishConfig, args: &TestReadUntilArgs) -> Result<(), Box<dyn std::error::Error>> {
+async fn test_read_until(config: &mut StreamfishConfig, args: &TestReadUntilArgs) -> Result<(), Box<dyn std::error::Error>> {
 
-    log::info!("Streamfish configuration initiated: {}", config);
+    // log::info!("Streamfish configuration initiated: {}", config);
 
-    let mut client = ReadUntilClient::connect(&config).await?;
+    let mut client = ReadUntilClient::connect(config, &args.log_latency).await?;
     client.run().await?;
 
     Ok(())
 
 }
 
-async fn test_dori_client(config: &StreamfishConfig, _: &TestDoriArgs) -> Result<(), Box<dyn std::error::Error>> {
+async fn test_dori_client(config: &mut StreamfishConfig, _: &TestDoriArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Streamfish configuration initiated: {}", config);
 

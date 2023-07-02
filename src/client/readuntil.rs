@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use uuid::Uuid;
 use::colored::*;
 use quanta::{Clock, Instant};
@@ -10,8 +12,6 @@ use crate::config::{
 use crate::server::dori::DoriClient;
 use crate::client::minknow::MinKnowClient;
 use crate::client::services::data::DataClient;
-use crate::client::services::device::DeviceClient;
-use crate::client::services::analysis::AnalysisConfigurationClient;
 
 use crate::services::minknow_api::data::GetLiveReadsRequest;
 use crate::services::minknow_api::data::get_live_reads_request::action;
@@ -30,42 +30,32 @@ use crate::services::minknow_api::data::get_live_reads_request::{
     Request
 }; 
 
-// Allows for multiple different log
-// types to be sent to logging queue
-
-#[derive(Debug)]
-enum Log {
-    Latency(LatencyLog),
-    Status(StatusLog)
-}
-impl Log {
-    pub fn as_str_name(&self) -> &str {
-        match self {
-            Log::Latency(_) => "log_latency",
-            Log::Status(_) => "log_status"
-        }
-    }
-}
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 
 
 #[derive(Debug)]
 enum PipelineStage {
     DoriRequest,
-    MinknowUnblock
+    DoriUnblock,
+    MinKnowUnblock
 }
 impl PipelineStage {
     pub fn as_str_name(&self) -> &str {
         match self {
-            PipelineStage::DoriRequest => "dori",
-            PipelineStage::MinknowUnblock => "unblock",
+            PipelineStage::DoriRequest => "dori_request",
+            PipelineStage::DoriUnblock => "dori_unblock",
+            PipelineStage::MinKnowUnblock => "minknow_unblock",
         }
     }
 }
 
 #[derive(Debug)]
-pub struct LatencyLog {
+pub struct ClientLog {
     stage: PipelineStage,
     time: Instant,
+    // For tracing purposes mainly
+    read_id: Option<String>,
     // Using channel and read number identification as these are u32 instead of String
     // NOTE: read numbers always increment throughout the experiment, and are unique per 
     // channel - however they are not necessarily contiguous (i.e. can be used for ID, 
@@ -73,11 +63,21 @@ pub struct LatencyLog {
     channel: u32,
     number: u32
 }
-impl LatencyLog {
-    pub fn as_micros(&self, start: Instant) -> u128 {
+impl ClientLog {
+    pub fn millis_since_start(&self, start: Instant) -> u128 {
+        self.time.duration_since(start).as_millis()
+    } 
+    pub fn micros_since_start(&self, start: Instant) -> u128 {
         self.time.duration_since(start).as_micros()
     } 
+    pub fn nanos_since_start(&self, start: Instant) -> u128 {
+        self.time.duration_since(start).as_nanos()
+    } 
+    pub fn entry(&self, start: Instant) -> String {
+        format!("{} {} {} {} {}\n", self.stage.as_str_name(), match &self.read_id { Some(id) => &id, None => "-" }, self.channel, self.number,  self.micros_since_start(start))
+    }
 }
+
 
 #[derive(Debug)]
 pub struct StatusLog {
@@ -95,7 +95,13 @@ pub struct ReadUntilClient {
 
 impl ReadUntilClient {
 
-    pub async fn connect(config: &StreamfishConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn connect(config: &mut StreamfishConfig, log_latency: &Option<PathBuf>) -> Result<Self, Box<dyn std::error::Error>> {
+
+        // Some configurations can be set fromn the command-line
+        // and are overwritten before connection of the clients
+        if let Some(_) = log_latency {
+            config.readuntil.log_latency = log_latency.clone()
+        }
 
         Ok(Self { 
             dori: DoriClient::connect(&config).await?, 
@@ -104,9 +110,7 @@ impl ReadUntilClient {
         })
     }
 
-    pub async fn run(
-        &mut self,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
 
         let run_config = self.readuntil.clone();
 
@@ -168,6 +172,7 @@ impl ReadUntilClient {
         // - this must happen before the request to MinKNOW
         let init_action_stream_tx = action_tx.clone();
         init_action_stream_tx.send(init_action.clone()).await?;
+        log::info!("Initiated data streams with MinKNOW");
 
         // DataService response stream is initiated with the data request stream to MinKNOW
         let minknow_request = tonic::Request::new(data_request_stream);
@@ -176,9 +181,11 @@ impl ReadUntilClient {
         // BasecallService response stream is initiated with the dori request stream
         let dori_request = tonic::Request::new(dori_request_stream);
         let mut dori_stream = self.dori.client.basecall_dorado(dori_request).await?.into_inner();
+
+        log::info!("Initiated data streams with Dori");
         
         let start = clock.now();
-        log::info!("Starting streaming loop for adaptive sampling");
+        log::info!("Started streaming loop for adaptive sampling");
 
         // =================================================
         // MinKnow::DataService response stream is processed
@@ -207,6 +214,7 @@ impl ReadUntilClient {
                     // See if it's worth to spawn threads?
                     
                     // log::info!("Channel {:<5} => {}", channel, read_data);
+                    // log::info!("Chunk length: {}", read_data.chunk_length);
 
                     if run_config.unblock_all && !run_config.unblock_dori {
                         // Unblock all to test unblocking, equivalent to Readfish implementation
@@ -245,12 +253,13 @@ impl ReadUntilClient {
                         ]})
                     )}).await.expect("Failed to send stop further data request to Minknow request queue"); 
 
-                    minknow_response_log.send(Log::Latency(LatencyLog { 
+                    minknow_response_log.send(ClientLog { 
                         stage: PipelineStage::DoriRequest, 
                         time: minknow_response_clock.now(), 
-                        channel, 
+                        read_id: None,
+                        channel: channel, 
                         number: read_data.number 
-                    })).await.expect("Failed to send log message from Minknow response stream");
+                    }).await.expect("Failed to send log message from Minknow response stream");
 
                 }
             }
@@ -289,39 +298,45 @@ impl ReadUntilClient {
                     ]})
                 )}).await.expect("Failed to unblock request to queue");
 
-                dori_response_log.send(Log::Latency(LatencyLog { 
-                    stage: PipelineStage::MinknowUnblock, 
+                dori_response_log.send(ClientLog { 
+                    stage: PipelineStage::DoriUnblock, 
+                    read_id: Some(dori_response.id),
                     time: dori_response_clock.now(), 
                     channel: dori_response.channel, 
                     number: dori_response.number 
-                })).await.expect("Failed to send log message from Dori response stream");
+                }).await.expect("Failed to send log message from Dori response stream");
             }
         });
 
-        // Adding a logging thread seems increase latency by quite a bit? 10-15 bp
-
-        // Not sure if the queue size is responsible? Notable blocking of actions
-        // after around 20m - not terrible, but introduces stream loop lag and 
-        // additional small peak at ~400 bp during unblock testing
-
-        // Test if the block is less pronounced when spawning a task within the 
-        // main task? This seems to work very well, might apply to other sections
-        // test if it was queue size that influenced it.
-
-        // Queue size it was most likely. I also think latency may be introduced
-        // when the Rust compiler runs on all threads in the background, might be
-        // hard to check through (cargo-watch build --release)
     
         let logging_handle = tokio::spawn(async move {
-            while let Some(log) = log_rx.recv().await {
 
-                tokio::spawn(async move {
-                    if let Log::Latency(latency) = &log {
-                        log::info!("{} {} ms {} {}", latency.stage.as_str_name(), latency.as_micros(start), latency.channel, latency.number);
+            // Routine when specifing a log file in configuration:
+            if let Some(path) = run_config.log_latency {
+
+                let mut log_file = File::create(&path).await.expect(
+                    &format!("Failed to open log file {}", &path.display())
+                );
+
+                while let Some(log) = log_rx.recv().await {
+                    log::info!("{} {} {}", log.stage.as_str_name(), log.channel, log.number);
+                    log_file.write_all(log.entry(start).as_bytes()).await.expect("Failed to write entry to log file");
+                }
+                
+            } else {
+                if run_config.print_latency {
+                    while let Some(log) = log_rx.recv().await {
+                        println!("{}", log.entry(start))
                     }
-                });
-                                
+                } else {
+                    while let Some(log) = log_rx.recv().await {
+                        log::info!("{} {} {}", log.stage.as_str_name(), log.channel, log.number);
+                    }
+                }
+               
             }
+
+            
         });
 
         // ===================================

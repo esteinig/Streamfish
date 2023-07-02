@@ -26,11 +26,12 @@ pub struct MinKnowConfig {
 // A run configuration for ReadUntilClient::run - some can be configured on command-line execution
 #[derive(Debug, Clone)]
 pub struct ReadUntilConfig {
-    pub device_name: String,  // allows server to have access to Minknow
+    pub device_name: String,                 // Dori access to Minknow
     pub channel_start: u32,
     pub channel_end: u32,
     pub unblock_all: bool, 
     pub unblock_dori: bool,
+    pub unblock_analysis: bool,
     pub unblock_duration: f64, 
     pub raw_data_type: RawDataType,
     pub sample_minimum_chunk_size: u64,
@@ -38,6 +39,8 @@ pub struct ReadUntilConfig {
     pub action_stream_queue_buffer: usize,
     pub dori_stream_queue_buffer: usize,
     pub logging_queue_buffer: usize,
+    pub log_latency: Option<PathBuf>,           // log latency output to file - adds latency! (1-2 bp)
+    pub print_latency: bool,                    // if no latency file specified, print latency to console, otherwise standard log is used without latency
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +51,9 @@ pub struct DoriConfig {
     pub uds_path: PathBuf,
     pub uds_path_override: bool,
     pub dorado_path: PathBuf,
-    pub dorado_args: String,
+    pub dorado_args: Vec<String>,
+    pub classifier_path: PathBuf,
+    pub classifier_args: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +74,9 @@ impl StreamfishConfig {
         if dot_env {
             dotenvy::dotenv().expect("Could not find '.env' file in directory tree");
         }
+
+        let dori_dorado_args = get_env_var("STREAMFISH_DORI_DORADO_ARGS").split_whitespace().map(str::to_string).collect();
+        let dori_classifier_args = get_env_var("STREAMFISH_DORI_CLASSIFIER_ARGS").split_whitespace().map(str::to_string).collect();
         
         Self {
             version: crate_version!().to_string(),
@@ -82,22 +90,29 @@ impl StreamfishConfig {
                 device_name: "MS12345".to_string(),
                 channel_start: 1,
                 channel_end: 512,
+                // Unblock settings
                 unblock_all: false,
-                unblock_dori: false,
+                unblock_dori: false,      // send unblock-all through Dori
+                unblock_analysis: false,  // send unblock-all through analysis stack on Dori
                 unblock_duration: 0.1,
-                raw_data_type: RawDataType::Uncalibrated,
+                // Signal data settings
                 sample_minimum_chunk_size: 200,
+                raw_data_type: RawDataType::Uncalibrated,
                 accepted_first_chunk_classifications: vec![83, 65],
                 // May need to increase these for larger pore arrays
                 action_stream_queue_buffer: 2048,
                 dori_stream_queue_buffer: 2048,
-                logging_queue_buffer: 4096
+                logging_queue_buffer: 4096,
+                log_latency: None,
+                print_latency: false
             },
             dori: DoriConfig {
                 uds_path: get_env_var("STREAMFISH_DORI_UDS_PATH").into(),
                 uds_path_override: get_env_var("STREAMFISH_DORI_UDS_PATH_OVERRIDE").trim().parse().unwrap(),
                 dorado_path: get_env_var("STREAMFISH_DORI_DORADO_PATH").into(),
-                dorado_args:  get_env_var("STREAMFISH_DORI_DORADO_ARGS"),
+                dorado_args: dori_dorado_args,
+                classifier_path: get_env_var("STREAMFISH_DORI_CLASSIFIER_PATH").into(),
+                classifier_args: dori_classifier_args
 
             }
         }
@@ -109,9 +124,9 @@ impl std::fmt::Display for StreamfishConfig {
         let s = formatdoc! {"
 
 
-        =======================
+        ========================
         Streamfish configuration
-        =======================
+        ========================
 
         MinKnow Host    {minknow_host}
         MinKnow Port    {minknow_port}

@@ -3,29 +3,27 @@ version: "3.8"
 services:
 
   # This builds a development container which mirrors the repository 
-  # for cargo-watch auto-building on every change during development
+  # for cargo-watch auto-building on every change during development.
   #
-  #   docker-compose -f <compose-file> --profile dev --profile minknow --project-name <project> up <--build>
+  # We must build the containers with the UID and GID specified in the environment file
+  # and run the containers with these variables as well - this allows permissions to be
+  # shared correctly between user and host
   #
-  # For testing the terminal client while the development container
-  # is running enter the running service container with:
-  #
-  #   docker exec -it <project>-streamfish-dev-1 /bin/bash
-  #
-  # The compiled executable is copied to /usr/bin and available:
-  #
-  #   streamfish test --help
-
-
-  # This development container requires MinKnow to run on the host, it will
+  # docker-compose --env-file .env -f docker-compose.yml --profile dev --project-name <project> up [--build]
+  
+  # This development container requires MinKNOW to run on the host, it will
   # map the host ports into the container on `minknow_host` so that we can
-  # connect to the MinKnow API. This requires to set the configuration 
+  # connect to the MinKNOW API. This requires to set the configuration 
   # environmental variable:
   #
   # STREAMFISH_MINKNOW_HOST=minknow_host
   #
   # This is done here with the environment variable which overrides the
-  # configuration file (.env) from the shared directory tree
+  # configuration file (.env) from the shared directory tree.
+  #
+  # At the moment the setup requires the ReadUntil client to run on the
+  # host - this is due to mounting the UDS path for the Dori connection
+  # into the container from the host to enable faster data transfer!
 
   streamfish-dev:
     profiles:
@@ -35,25 +33,65 @@ services:
     build:
       context: ..
       dockerfile: ./docker/Dockerfile.dev
+      args:
+        - "UID=${UID:-1000}"
+        - "GID=${GID:-1000}"
+        - "USERNAME=${USERNAME:-streamfish}"
     environment:
-      - STREAMFISH_MINKNOW_HOST=minknow_host
+      - STREAMFISH_MINKNOW_HOST=minknow_host  # overrides env file at runtime
     extra_hosts:
       - "minknow_host:host-gateway"
     networks:
       - streamfish
     volumes:
       - ../:/usr/src/streamfish
+      - streamfish:/opt/streamfish/bin
       - /opt/ont/minknow/conf/rpc-certs/:/opt/ont/minknow/conf/rpc-certs/
-    command: cargo watch -w src -w proto -w build.rs -w Cargo.toml -x "build --target x86_64-unknown-linux-musl --release -j4 && cp /usr/src/streamfish/target/x86_64-unknown-linux-musl/release/streamfish /usr/bin"
+    command: cargo watch -w src -w proto -w build.rs -w Cargo.toml -x "build --target x86_64-unknown-linux-musl --release -j4 && if [ -f /opt/streamfish/bin/streamfish ]; then rm /opt/streamfish/bin/streamfish; fi && cp /usr/src/streamfish/target/x86_64-unknown-linux-musl/release/streamfish /opt/streamfish/bin/"
+    depends_on:
+      change-vol-ownership:
+        # Wait for the ownership to change
+        condition: service_completed_successfully
 
-  dorado-dev:
+  # Dori container with mounted host paths and ports
+
+  # Note that when the GPU does not have sufficient free memory (hard to tell how much) for example
+  # when `guppy_basecall_server` is running concurrently, then Dorado basecalling may result in weird 
+  # CUDA and segfaults - these are usually fixed by clearing the stupid auto-run of Guppy from the GPU
+  # and making memory available (tested on a GTX3060 Driver: 470.182.03 with CUDNN8 and CUDA 11.4.3)
+
+  # In fact there are some weird things like this where errors occurr in the data stream basecalling,
+  # something causes this to be unstable. I can't pinpoint it because it seems to occurr randomly,
+  # usually after starting the container, and then disappears after a couple of test runs?
+
+  # This container must be run with correct host user permissions ecause running the server inside
+  # creates the UDS path that should be accessible for the streamfish readuntil client which is
+  # excuted on host
+  
+  dori-dev:
     profiles:
       - dev
-      - dorado
-    image: dorado:latest   
+      - dori
+    image: doradori:latest   
     build:
       context: ..
-      dockerfile: ./docker/Dockerfile.dorado.dev
+      dockerfile: ./docker/Dockerfile.doradori.dev
+      args:
+        - "UID=${UID:-1000}"
+        - "GID=${GID:-1000}"
+        - "USERNAME=${USERNAME:-streamfish}"
+    environment:
+      - STREAMFISH_MINKNOW_HOST=minknow_host                                                # access to minknow port
+    extra_hosts:
+      - "minknow_host:host-gateway"                                                         # access to minknow port
+    networks:
+      - streamfish
+    volumes:
+      - /tmp:/tmp                                                                           # access to dori uds socket from host streamfish client
+      - ../:/usr/src/streamfish                                                             # access to development files and config, workign dir inside container
+      - streamfish:/opt/streamfish/bin                                                      # access to development streamfish executable from streamfish-dev
+      - /opt/ont/minknow/conf/rpc-certs/:/opt/ont/minknow/conf/rpc-certs/                   # access to minknow tls certificate
+      - /data/dev/dorado/dorado/module-tests/:/data/dev/dorado/dorado/module-tests/         # access to executable for latency testing
     deploy:
       resources:
         reservations:
@@ -61,9 +99,29 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    command: bash -c "cmake -S . -B cmake-build && echo 'Running CMAKE buildfer' && cmake --build cmake-build --config Release -j4 && cmake --install cmake-build --prefix /opt && tail -f /dev/null"
+    tty: true
+    depends_on:
+      change-vol-ownership:
+        # Wait for the ownership to change
+        condition: service_completed_successfully
+
+
+  # Fix ownership of shared volume directory to access updated `streamfish` executable on Dori
+  change-vol-ownership:
+    # We can use any image we want as long as we can chown
+    image: ubuntu
+    # Need a user priviliged enough to chown
+    user: "root"
+    # Specify the group in question
+    group_add:
+      - '${GID}'
     volumes:
-      - ../dorado:/usr/src/streamfish/dorado
+      # The volume to chown
+      - streamfish:/opt/streamfish/bin   
+    command: chown -R ${UID}:${GID} /opt/streamfish/bin 
 
 networks:
+  streamfish:
+
+volumes:
   streamfish:

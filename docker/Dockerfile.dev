@@ -2,8 +2,27 @@ FROM rust:1.69-bookworm
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
+# Because we want to run the container as host user
+# and hot-reload the Cargo builds, the user must be
+# active during builds otherwise we run into 
+# permission issues
+
+ARG USERNAME
+ARG UID
+ARG GID
+
+RUN groupadd -g ${GID} ${USERNAME} && useradd -u ${UID} -g ${GID} -s /bin/sh ${USERNAME}
+
 WORKDIR /usr/src/streamfish
 
+# Protoc needs to be specific version for the MinKNOW API to compile (3.12) which is not available
+# in the standard repositories on Ubunut 20.04 LTS - we are using a Debian container for this here
+
+# Run as root
 RUN apt update && apt-get -y install make cmake libprotobuf-dev protobuf-compiler musl-tools
+
+# Run as host user, modify permissions of Cargo (container image)
+USER ${USERNAME}
+
 RUN rustup target add x86_64-unknown-linux-musl
 RUN cargo install cargo-watch

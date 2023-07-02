@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand};
 
 /// Streamfish: a streamy adaptive sampling client
@@ -50,6 +52,10 @@ pub struct TestReadUntilArgs {
    /// Channel end for adaptive sampling
    #[clap(long, short, default_value="512")]
    pub channel_end: u32,
+
+   /// Latency log file
+   #[clap(long, short)]
+   pub log_latency: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

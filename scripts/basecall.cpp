@@ -1,48 +1,58 @@
 using namespace std;
 
-#include <boost/json/src.hpp>
+#include <sstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <vector>
 
+// Simple text string, no dependencies
+int main() {
 
-// JSON stream parser - should be faster than normal parser
-boost::json::value read_json( std::istream& is, std::error_code& ec )
-{
-    boost::json::stream_parser p;
+    bool classifier = false;
+    
     std::string line;
-
-    while( std::getline( is, line ) && !line.empty())
-    {
-        p.write( line, ec );
-        if( ec )
-            return nullptr;
-    }
-    p.finish( ec );
-    if( ec )
-        return nullptr;
-
-    return p.release();
-}
-
-int main()
-{
-
-    std::error_code ec;
-    boost::json::object req;
-
     std::string req_id;
-    std::vector<uint16_t> req_data;
+    
+    std::int32_t req_channel;
+    std::int32_t req_number;
 
-    boost::json::value data = read_json(std::cin, ec);
-    if( data == nullptr ) {
-        std::cout << "Failed to parse basecall request: " << ec.message() << std::endl;
-    } else {
-        req_id = data.at("id").as_string();
-        req_data = boost::json::value_to<std::vector<uint16_t>>(data.at("data"));
+    float req_digitisation;
+    float req_offset;
+    float req_range;
 
-        std::cout << req_id << std::endl;
-    } 
+    std::uint64_t req_sample_rate;
+    
+    std::vector<int16_t> req_data;  // uncalibrated signal data from byte data out of minknow
+
+    while(std::getline( std::cin, line ) && !line.empty()){  
+
+
+        if (classifier) {
+             std::cout << line;  // read the line back out, this is simulating fastq input from basecaller
+        } else {
+
+            std::istringstream text_stream(line);
+            
+            text_stream >> req_id; 
+            text_stream >> req_channel;
+            text_stream >> req_number; 
+            text_stream >> req_digitisation; 
+            text_stream >> req_offset;
+            text_stream >> req_range;
+            text_stream >> req_sample_rate;
+
+            std::vector<std::int16_t> req_data( 
+                ( std::istream_iterator<std::int16_t>( text_stream ) ),
+                ( std::istream_iterator<std::int16_t>() ) 
+            );
+
+            std::cout << req_id << " " << req_channel << " " << req_number << " " << req_digitisation << " " << req_offset << " " << req_range << " " << req_sample_rate << std::endl;  // for basic testing
+        }
         
- 
+        std::cerr << "STDERR logging on Dori" << std::endl;
+
+    }
+
 }
+
