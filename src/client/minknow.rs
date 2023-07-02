@@ -10,6 +10,8 @@ use crate::client::services::data::DataClient;
 use crate::client::services::manager::ManagerClient;
 use crate::{config::MinKnowConfig, services::minknow_api::manager::FlowCellPosition};
 
+use super::services::device::{DeviceClient, DeviceCalibration};
+
 
 
 #[derive(Error, Debug)]
@@ -236,6 +238,16 @@ impl MinKnowClient {
         }
 
         Ok(())
+    }
+    // Get sample rate and calibration for a device
+    pub async fn get_device_data(&self, position_name: &str, first_channel: &u32, last_channel: &u32) -> Result<(u32, DeviceCalibration), Box<dyn std::error::Error>> {
+
+        let mut device_client = DeviceClient::from_minknow_client(&self, position_name).await?;
+
+        let sample_rate = device_client.get_sample_rate().await?;
+        let calibration = device_client.get_calibration(first_channel, last_channel).await?;
+
+        Ok((sample_rate, calibration))
     }
     
 }

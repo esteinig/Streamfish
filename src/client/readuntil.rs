@@ -13,6 +13,7 @@ use crate::server::dori::DoriClient;
 use crate::client::minknow::MinKnowClient;
 use crate::client::services::data::DataClient;
 
+use crate::services::dori_api::basecaller::basecaller_response::Decision;
 use crate::services::minknow_api::data::GetLiveReadsRequest;
 use crate::services::minknow_api::data::get_live_reads_request::action;
 use crate::services::minknow_api::data::get_live_reads_response::ReadData;
@@ -97,10 +98,20 @@ impl ReadUntilClient {
 
     pub async fn connect(config: &mut StreamfishConfig, log_latency: &Option<PathBuf>) -> Result<Self, Box<dyn std::error::Error>> {
 
-        // Some configurations can be set fromn the command-line
+        // Some configurations can be set from the command-line
         // and are overwritten before connection of the clients
         if let Some(_) = log_latency {
             config.readuntil.log_latency = log_latency.clone()
+        }
+
+        if config.readuntil.unblock_all {
+            log::warn!("Immediate unblocking of all reads is active!");
+        }
+        if config.readuntil.unblock_all_dori {
+            log::warn!("Dori response unblocking of all reads is active!");
+        }
+        if config.readuntil.unblock_all_process {
+            log::warn!("Dori process response unblocking of all reads is active!");
         }
 
         Ok(Self { 
@@ -112,8 +123,10 @@ impl ReadUntilClient {
 
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
 
-        let run_config = self.readuntil.clone();
+        let unblock_decision: i32 = Decision::Unblock.into();
 
+
+        let run_config = self.readuntil.clone();
         let clock = Clock::new();
 
         // ==============================
@@ -216,13 +229,13 @@ impl ReadUntilClient {
                     // log::info!("Channel {:<5} => {}", channel, read_data);
                     // log::info!("Chunk length: {}", read_data.chunk_length);
 
-                    if run_config.unblock_all && !run_config.unblock_dori {
+                    if run_config.unblock_all {
                         // Unblock all to test unblocking, equivalent to Readfish implementation
                         // do not send a request to the Dori::BasecallerService stream
                         minknow_action_tx.send(GetLiveReadsRequest { request: Some(
                             Request::Actions(Actions { actions: vec![
                                 Action {
-                                    action_id: Uuid::new_v4().to_string(),  // do the action ids matter?
+                                    action_id: Uuid::new_v4().to_string(), 
                                     read: Some(action::Read::Number(read_data.number)),
                                     action: Some(action::Action::Unblock(UnblockAction { duration: run_config.unblock_duration })),
                                     channel: channel,
@@ -242,6 +255,7 @@ impl ReadUntilClient {
                     }
 
                     // Always request to stop further data from the current read
+                    // as we are currently not accumulating in caches
                     minknow_action_tx.send(GetLiveReadsRequest { request: Some(
                         Request::Actions(Actions { actions: vec![
                             Action {
@@ -283,7 +297,7 @@ impl ReadUntilClient {
                 // stages of the basecall-classifier pipeline at the endpoint - for
                 // now we will unblock at the second stage, after classifier output
 
-                if dori_response.stage != 2 { // PipelineStage::ClassifierOutput
+                if dori_response.decision != unblock_decision {
                     continue;
                 }
 

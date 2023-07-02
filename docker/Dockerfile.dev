@@ -11,7 +11,7 @@ ARG USERNAME
 ARG UID
 ARG GID
 
-RUN groupadd -g ${GID} ${USERNAME} && useradd -u ${UID} -g ${GID} -s /bin/sh ${USERNAME}
+RUN groupadd -g ${GID} ${USERNAME} && useradd -u ${UID} -g ${GID} -s /bin/sh ${USERNAME} && mkdir -p /home/${USERNAME} && chown ${UID}:${GID} /home/${USERNAME}
 
 WORKDIR /usr/src/streamfish
 

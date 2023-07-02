@@ -58,11 +58,12 @@ services:
   # Note that when the GPU does not have sufficient free memory (hard to tell how much) for example
   # when `guppy_basecall_server` is running concurrently, then Dorado basecalling may result in weird 
   # CUDA and segfaults - these are usually fixed by clearing the stupid auto-run of Guppy from the GPU
-  # and making memory available (tested on a GTX3060 Driver: 470.182.03 with CUDNN8 and CUDA 11.4.3)
+  # and making memory available (tested on a RTX 3060 Driver: 470.182.03 with CUDNN8 and CUDA 11.4.3)
 
-  # In fact there are some weird things like this where errors occurr in the data stream basecalling,
+  # In fact it seems unrelated to GPU MEM usage? Errors can occur on intitial execution of Dorado,
   # something causes this to be unstable. I can't pinpoint it because it seems to occurr randomly,
-  # usually after starting the container, and then disappears after a couple of test runs?
+  # usually after starting the container, and then disappears after a couple of test runs? Might
+  # just not be very stable on my GPU
 
   # This container must be run with correct host user permissions ecause running the server inside
   # creates the UDS path that should be accessible for the streamfish readuntil client which is
@@ -77,8 +78,8 @@ services:
       context: ..
       dockerfile: ./docker/Dockerfile.doradori.dev
       args:
-        - "UID=${UID:-1000}"
-        - "GID=${GID:-1000}"
+        - "UID=${UID}"
+        - "GID=${GID}"
         - "USERNAME=${USERNAME:-streamfish}"
     environment:
       - STREAMFISH_MINKNOW_HOST=minknow_host                                                # access to minknow port

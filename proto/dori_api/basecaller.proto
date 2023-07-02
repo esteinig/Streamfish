@@ -50,6 +50,13 @@ message BasecallerResponse {
     CLASSIFIER_OUTPUT = 2;
   }
 
+  enum Decision {
+    PASS = 0;
+    CONTINUE = 1;
+    UNBLOCK = 2;
+    NONE = 3;
+  }
+
   // The ID of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData` 
   string id = 1;
 
@@ -60,6 +67,8 @@ message BasecallerResponse {
   uint32 channel = 3;
 
   PipelineStage stage = 4;
+
+  Decision decision = 5;
 
   
 
