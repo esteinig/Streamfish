@@ -88,6 +88,7 @@ services:
     networks:
       - streamfish
     volumes:
+      - /data/data/dori:/data                                                               # access to data for dori e.g. basecall models etc
       - /tmp:/tmp                                                                           # access to dori uds socket from host streamfish client
       - ../:/usr/src/streamfish                                                             # access to development files and config, workign dir inside container
       - streamfish:/opt/streamfish/bin                                                      # access to development streamfish executable from streamfish-dev
