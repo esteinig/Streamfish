@@ -1,5 +1,9 @@
+use std::char::MAX;
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use tokio::sync::Mutex;
 use uuid::Uuid;
 use::colored::*;
 use quanta::{Clock, Instant};
@@ -32,7 +36,15 @@ use crate::services::minknow_api::data::get_live_reads_request::{
 }; 
 
 use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
+use tokio::io::AsyncWriteExt as TokioAsyncWriteExt;
+
+
+use futures_util::StreamExt;
+use futures_util::AsyncWriteExt;
+use futures_util::io::{BufReader, Lines};
+use futures_util::io::AsyncBufReadExt;
+use async_process::{Command, Stdio, ChildStdout, ChildStdin};
+use itertools::join;
 
 
 #[derive(Debug)]
@@ -79,16 +91,14 @@ impl ClientLog {
     }
 }
 
-
 #[derive(Debug)]
 pub struct StatusLog {
     msg: String
 }
 
 pub struct ReadUntilClient {
-    pub dori: DoriClient,
     pub minknow: MinKnowClient,
-    pub readuntil: ReadUntilConfig,
+    pub config: StreamfishConfig,
 }
 
 // Do not use Strings when it can be avoided, introduces too much latency, use static strings (&str) or enumerations
@@ -115,19 +125,23 @@ impl ReadUntilClient {
         }
 
         Ok(Self { 
-            dori: DoriClient::connect(&config).await?, 
             minknow: MinKnowClient::connect(&config.minknow).await?,
-            readuntil: config.readuntil.clone(),
+            config: config.clone(),
         })
     }
 
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
 
-        let unblock_decision: i32 = Decision::Unblock.into();
+        let run_config = self.config.readuntil.clone();
 
-
-        let run_config = self.readuntil.clone();
         let clock = Clock::new();
+
+
+        let (sample_rate, calibration) = self.minknow.get_device_data(
+            &run_config.device_name, 
+            &run_config.channel_start,  
+            &run_config.channel_end
+        ).await.expect("Failed to get device calibration from MinKNOW");
 
         // ==============================
         // MinKnow DataService connection
@@ -143,7 +157,6 @@ impl ReadUntilClient {
         // MPSC message queues: senders and receivers
         // ==========================================
         let (action_tx, mut action_rx) = tokio::sync::mpsc::channel(4096);
-        let (dori_tx, mut dori_rx) = tokio::sync::mpsc::channel(4096);
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(10000);
 
         // =========================================================
@@ -158,14 +171,6 @@ impl ReadUntilClient {
             }
         };
 
-        // Setup the basecall request stream from this client - this stream reveives 
-        // messages from the basecall queue (`GetLiveReadsRequests`)
-        let dori_request_stream = async_stream::stream! {
-            while let Some(dori_request) = dori_rx.recv().await {
-                yield dori_request;
-            }
-        };
-
         // ==========================================
         // Request and response streams are initiated
         // ==========================================
@@ -176,7 +181,7 @@ impl ReadUntilClient {
                 last_channel: run_config.channel_end, 
                 raw_data_type: run_config.raw_data_type.into(), 
                 sample_minimum_chunk_size: run_config.sample_minimum_chunk_size,
-                accepted_first_chunk_classifications: run_config.accepted_first_chunk_classifications, 
+                accepted_first_chunk_classifications: run_config.accepted_first_chunk_classifications.clone(), 
                 max_unblock_read_length: None
             }))
         };
@@ -191,12 +196,20 @@ impl ReadUntilClient {
         let minknow_request = tonic::Request::new(data_request_stream);
         let mut minknow_stream = data_client.client.get_live_reads(minknow_request).await?.into_inner();
 
-        // BasecallService response stream is initiated with the dori request stream
-        let dori_request = tonic::Request::new(dori_request_stream);
-        let mut dori_stream = self.dori.client.basecall_dorado(dori_request).await?.into_inner();
 
-        log::info!("Initiated data streams with Dori");
-        
+        // Define the decisions as <i32> - repeated into() calls in the stream processing
+        // loops introduce a tiny bit of latency! Make sure calls like this are minimized.
+        let none: i32 = Decision::None.into();
+        let pass: i32 = Decision::Pass.into();
+        let unblock: i32 = Decision::Unblock.into();
+
+        // ======================
+        // Pipeline process setup
+        // ======================
+
+        let (mut pipeline_stdin, mut pipeline_stdout) = init_pipeline(&self.config);
+
+       
         let start = clock.now();
         log::info!("Started streaming loop for adaptive sampling");
 
@@ -207,10 +220,11 @@ impl ReadUntilClient {
         let minknow_response_log = log_tx.clone();
         let minknow_response_clock = clock.clone();
 
-        let minknow_action_tx = action_tx.clone(); // unpacks stop further data action requests into data request stream
-        let dori_basecall_tx = dori_tx.clone(); // unpacks dori basecall action requests into dori request stream
+        let minknow_action_tx = action_tx.clone(); // unpacks stop further data action requests into dat
 
         let action_stream_handle = tokio::spawn(async move {
+
+
             while let Some(response) = minknow_stream.message().await.expect("Failed to get response from Minknow data stream") {
                 
 
@@ -219,6 +233,8 @@ impl ReadUntilClient {
                 // for action_response in response.action_responses {
                 //     if action_response.response != 0 {
                 //         log::warn!("Failed action: {} ({})", action_response.action_id, action_response.response);
+                //     } else {
+                //         log::info!("Action response: {:?}", action_response)
                 //     }
                 // }
                 
@@ -244,36 +260,57 @@ impl ReadUntilClient {
                         )}).await.expect("Failed to send unblock request to Minknow request queue");
 
                     } else {
-                        // Otherwise always send the request to the basecaller request stream,
-                        // where the unblock request is put in the queue from the response stream
-                        dori_basecall_tx.send(BasecallerRequest {
-                            id: read_data.id, 
-                            channel: channel,
-                            number: read_data.number,
-                            data: read_data.raw_data,
-                        }).await.expect("Failed to send basecall requests to Dori request queue")
+                        let channel_index = (channel-1) as usize;
+
+                        // Use this to generate a test dataset to pipe into Dorado STDIN
+
+                        // println!("{}", dorado_request.to_stdin(
+                        //     calibration.offsets[channel_index],
+                        //     calibration.pa_ranges[channel_index],
+                        //     calibration.digitisation,
+                        //     sample_rate
+                        // ).trim());
+
+                        // Writing as block of reads not in channel loop does not decrease 
+                        // latency in tests, but may need to be revisited
+                        
+                        pipeline_stdin.write_all(
+                            to_stdin(
+                                &read_data.id,
+                                &read_data.raw_data,
+                                channel,
+                                read_data.number,
+                                calibration.offsets[channel_index],
+                                calibration.pa_ranges[channel_index],
+                                calibration.digitisation,
+                                sample_rate
+                            ).as_bytes()
+                        ).await.expect("Failed to write read data to pipeline");
+                        
+                        
+
                     }
 
-                    // Always request to stop further data from the current read
-                    // as we are currently not accumulating in caches
-                    minknow_action_tx.send(GetLiveReadsRequest { request: Some(
-                        Request::Actions(Actions { actions: vec![
-                            Action {
-                                action_id: Uuid::new_v4().to_string(),
-                                read: Some(action::Read::Number(read_data.number)),
-                                action: Some(action::Action::StopFurtherData(StopFurtherData {})),
-                                channel: channel,
-                            }
-                        ]})
-                    )}).await.expect("Failed to send stop further data request to Minknow request queue"); 
+                    // // Always request to stop further data from the current read
+                    // // as we are currently not accumulating in caches
+                    // minknow_action_tx.send(GetLiveReadsRequest { request: Some(
+                    //     Request::Actions(Actions { actions: vec![
+                    //         Action {
+                    //             action_id: Uuid::new_v4().to_string(),
+                    //             read: Some(action::Read::Number(read_data.number)),
+                    //             action: Some(action::Action::StopFurtherData(StopFurtherData {})),
+                    //             channel: channel,
+                    //         }
+                    //     ]})
+                    // )}).await.expect("Failed to send stop further data request to Minknow request queue"); 
 
-                    minknow_response_log.send(ClientLog { 
-                        stage: PipelineStage::DoriRequest, 
-                        time: minknow_response_clock.now(), 
-                        read_id: None,
-                        channel: channel, 
-                        number: read_data.number 
-                    }).await.expect("Failed to send log message from Minknow response stream");
+                    // minknow_response_log.send(ClientLog { 
+                    //     stage: PipelineStage::DoriRequest, 
+                    //     time: minknow_response_clock.now(), 
+                    //     read_id: None,
+                    //     channel: channel, 
+                    //     number: read_data.number 
+                    // }).await.expect("Failed to send log message from Minknow response stream");
 
                 }
             }
@@ -287,37 +324,49 @@ impl ReadUntilClient {
         let dori_response_clock = clock.clone();
 
         let minknow_dori_action_tx = action_tx.clone();
-
+        
+        
+        let test = true; // testing conditional processing
+        
         let dori_stream_handle = tokio::spawn(async move {
-            while let Some(dori_response) = dori_stream.message().await.expect("Failed to get response from Dori response stream") {
+            
+            while let Some(line) = pipeline_stdout.next().await {
+                let line = line.expect("Failed to parse line");
 
-                // log::info!("Channel {:<5} => {}", &dori_response.channel, &dori_response);
+                if line.starts_with('@') { 
+                    continue; 
+                } 
 
-                // Evaluate the Dori response - a response may be sent from different
-                // stages of the basecall-classifier pipeline at the endpoint - for
-                // now we will unblock at the second stage, after classifier output
+                let (channel, number, decision) = match test {
+                    true => process_dorado_read_sam(&line, run_config.unblock_all_process, unblock, pass).await,
+                    false => process_dorado_read_sam(&line, run_config.unblock_all_process, unblock, pass).await
+                };
 
-                if dori_response.decision != unblock_decision {
+                if decision != unblock {
                     continue;
                 }
 
+
+                // An unblock is sent to MinKNOW
                 minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
                     Request::Actions(Actions { actions: vec![
                         Action {
                             action_id: Uuid::new_v4().to_string(),
-                            read: Some(action::Read::Number(dori_response.number)),
+                            read: Some(action::Read::Number(number)),
                             action: Some(action::Action::Unblock(UnblockAction { duration: run_config.unblock_duration })),
-                            channel: dori_response.channel,
+                            channel: channel,
                         }
                     ]})
                 )}).await.expect("Failed to unblock request to queue");
 
+                // Log this action
+
                 dori_response_log.send(ClientLog { 
                     stage: PipelineStage::DoriUnblock, 
-                    read_id: Some(dori_response.id),
+                    read_id: None,
                     time: dori_response_clock.now(), 
-                    channel: dori_response.channel, 
-                    number: dori_response.number 
+                    channel: channel, 
+                    number: number 
                 }).await.expect("Failed to send log message from Dori response stream");
             }
         });
@@ -397,3 +446,295 @@ impl std::fmt::Display for ReadData {
         )
     }
 }
+
+
+
+// Initiates the process pipeline from configuration
+fn init_pipeline(config: &StreamfishConfig) -> (ChildStdin, Lines<BufReader<ChildStdout>>) {
+
+    let process_stderr = Stdio::from(std::fs::File::create("basecaller.err").expect("Failed to create basecaller stderr file: basecaller.err"));
+
+    let mut pipeline_process = Command::new(config.dori.basecaller_path.as_os_str())
+        .args(config.dori.basecaller_args.clone())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(process_stderr)
+        .spawn()
+        .expect("Failed to spawn basecaller process");
+
+    (
+        pipeline_process.stdin.take().expect("Failed to open basecaller STDIN"),
+        BufReader::new(
+            pipeline_process.stdout.take().expect("Failed to open basecaller STDOUT")
+        ).lines()
+    )
+}
+
+
+
+// Dorado output processing - handles SAM output format from aligned reads 
+// and uses the configuration to set the unblock decision sent back to MinKNOW
+//
+// SAM specifictation for Dorado: https://github.com/nanoporetech/dorado/blob/master/documentation/SAM.md
+async fn process_dorado_read_sam(line: &str, unblock_all_process: bool, unblock_decision: i32, pass_decision: i32) -> (u32, u32, i32) {
+                
+        let content: Vec<&str> = line.split('\t').collect();
+        let identifiers: Vec<&str> = content[0].split("::").collect();
+
+        let flag = content[1].parse::<u32>().unwrap();
+        
+        let decision = match unblock_all_process {
+            true => unblock_decision,
+            false => {
+                match flag {
+                    4 => unblock_decision,     // unmapped 
+                    _ => pass_decision,        // mapped continue
+                }
+            }
+        };
+        (identifiers[1].parse::<u32>().unwrap(), identifiers[2].parse::<u32>().unwrap(), decision)
+}
+
+
+use byteorder::{LittleEndian, ByteOrder};
+
+pub fn to_stdin(id: &String, raw_data: &Vec<u8>, channel: u32, number: u32, offset: f32, range: f32, digitisation: u32, sample_rate: u32) -> String {
+
+    // UNCALBIRATED SIGNAL CONVERSON BYTES TO SIGNED INTEGERS
+    let mut signal_data: Vec<i16> = Vec::new();
+    for i in (0..raw_data.len()).step_by(2) {
+        signal_data.push(LittleEndian::read_i16(&raw_data[i..]));
+    }
+
+    // TODO CHECK EFFECTS: Float formatting precision - POD5 inspection suggest 13 digits for range (PYTHON) - not sure if necessary
+    format!("{} {} {} {} {:.1} {:.11} {} {}\n", id, channel, number, digitisation, offset, range, sample_rate, join(&signal_data, " ")) 
+}
+
+
+// Total desaster on streams to use a locking shared cache - blocks the streams of course
+
+// const MAX_CACHED_CHUNKS: usize = 3;
+// const MIN_CACHED_CHUNKS: usize = 0;
+
+// let with_cache = true;
+
+// let read_cache: Arc<Mutex<hashbrown::HashMap<String, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(hashbrown::HashMap::new()));
+
+// let arch_cache1 = Arc::clone(&read_cache);
+// let action_stream_handle = tokio::spawn(async move {
+
+
+//     while let Some(response) = minknow_stream.message().await.expect("Failed to get response from Minknow data stream") {
+        
+
+//         // Keep for logging action response states
+
+//         // for action_response in response.action_responses {
+//         //     if action_response.response != 0 {
+//         //         log::warn!("Failed action: {} ({})", action_response.action_id, action_response.response);
+//         //     } else {
+//         //         log::info!("Action response: {:?}", action_response)
+//         //     }
+//         // }
+        
+//         for (channel, read_data) in response.channels {
+
+//             // See if it's worth to spawn threads?
+            
+//             // log::info!("Channel {:<5} => {}", channel, read_data);
+//             // log::info!("Chunk length: {}", read_data.chunk_length);
+
+//             if run_config.unblock_all {
+//                 // Unblock all to test unblocking, equivalent to Readfish implementation
+//                 // do not send a request to the Dori::BasecallerService stream
+//                 minknow_action_tx.send(GetLiveReadsRequest { request: Some(
+//                     Request::Actions(Actions { actions: vec![
+//                         Action {
+//                             action_id: Uuid::new_v4().to_string(), 
+//                             read: Some(action::Read::Number(read_data.number)),
+//                             action: Some(action::Action::Unblock(UnblockAction { duration: run_config.unblock_duration })),
+//                             channel: channel,
+//                         }
+//                     ]})
+//                 )}).await.expect("Failed to send unblock request to Minknow request queue");
+
+//             } else {
+//                 let channel_index = (channel-1) as usize;
+
+//                 // Use this to generate a test dataset to pipe into Dorado STDIN
+
+//                 // println!("{}", dorado_request.to_stdin(
+//                 //     calibration.offsets[channel_index],
+//                 //     calibration.pa_ranges[channel_index],
+//                 //     calibration.digitisation,
+//                 //     sample_rate
+//                 // ).trim());
+
+//                 // Writing as block of reads not in channel loop does not decrease 
+//                 // latency in tests, but may need to be revisited
+                
+
+//                 // Look up the read cache if we have seen this read already - the 
+//                 // lookup itself adds around 5 bp N50 in an unblock-all through analyis
+//                 // (without testing the actual caching since reads are rejected
+//                 // after the first iteration)
+                
+//                 if with_cache {
+
+//                     let mut cache = arch_cache1.lock().await;
+
+//                     cache.entry_ref(&read_data.id).or_insert(Vec::new()).push(read_data.raw_data);
+//                     let cached_data = cache.get(&read_data.id).expect("Could not find cached read_data");
+
+//                     let num_chunks = cached_data.len();
+
+//                     if num_chunks >= MAX_CACHED_CHUNKS {
+//                         // If we have reached the limit of chunks for analysis remove
+//                         // and continue
+//                         cache.remove(&read_data.id);
+//                         continue
+//                     } else if num_chunks <= MIN_CACHED_CHUNKS {
+//                         continue                            
+//                     } else if num_chunks == 1 {
+
+//                         pipeline_stdin.write_all(
+//                             to_stdin(
+//                                 &read_data.id,
+//                                 &cached_data[0],
+//                                 channel,
+//                                 read_data.number,
+//                                 calibration.offsets[channel_index],
+//                                 calibration.pa_ranges[channel_index],
+//                                 calibration.digitisation,
+//                                 sample_rate
+//                             ).as_bytes()
+//                         ).await.expect("Failed to write read data to pipeline");
+                        
+//                     } else {
+
+                    
+//                         pipeline_stdin.write_all(
+//                             to_stdin(
+//                                 &read_data.id,
+//                                 &cached_data.concat(),
+//                                 channel,
+//                                 read_data.number,
+//                                 calibration.offsets[channel_index],
+//                                 calibration.pa_ranges[channel_index],
+//                                 calibration.digitisation,
+//                                 sample_rate
+//                             ).as_bytes()
+//                         ).await.expect("Failed to write read data to pipeline");
+
+//                     }
+//                 } else {
+//                     pipeline_stdin.write_all(
+//                         to_stdin(
+//                             &read_data.id,
+//                             &read_data.raw_data,
+//                             channel,
+//                             read_data.number,
+//                             calibration.offsets[channel_index],
+//                             calibration.pa_ranges[channel_index],
+//                             calibration.digitisation,
+//                             sample_rate
+//                         ).as_bytes()
+//                     ).await.expect("Failed to write read data to pipeline");
+//                 }
+                
+
+//             }
+
+//             // // Always request to stop further data from the current read
+//             // // as we are currently not accumulating in caches
+//             // minknow_action_tx.send(GetLiveReadsRequest { request: Some(
+//             //     Request::Actions(Actions { actions: vec![
+//             //         Action {
+//             //             action_id: Uuid::new_v4().to_string(),
+//             //             read: Some(action::Read::Number(read_data.number)),
+//             //             action: Some(action::Action::StopFurtherData(StopFurtherData {})),
+//             //             channel: channel,
+//             //         }
+//             //     ]})
+//             // )}).await.expect("Failed to send stop further data request to Minknow request queue"); 
+
+//             // minknow_response_log.send(ClientLog { 
+//             //     stage: PipelineStage::DoriRequest, 
+//             //     time: minknow_response_clock.now(), 
+//             //     read_id: None,
+//             //     channel: channel, 
+//             //     number: read_data.number 
+//             // }).await.expect("Failed to send log message from Minknow response stream");
+
+//         }
+//     }
+// });
+
+// // ========================================
+// // DoriService response stream is processed
+// // ========================================
+
+// let dori_response_log = log_tx.clone();
+// let dori_response_clock = clock.clone();
+
+// let minknow_dori_action_tx = action_tx.clone();
+
+
+// let test = true; // testing conditional processing
+
+// let arch_cache2 = Arc::clone(&read_cache);
+// let dori_stream_handle = tokio::spawn(async move {
+    
+//     while let Some(line) = pipeline_stdout.next().await {
+//         let line = line.expect("Failed to parse line");
+
+//         if line.starts_with('@') { 
+//             continue; 
+//         } 
+
+//         let (id, channel, number, decision) = match test {
+//             true => process_dorado_read_sam(&line, run_config.unblock_all_process, unblock, pass).await,
+//             false => process_dorado_read_sam(&line, run_config.unblock_all_process, unblock, pass).await
+//         };
+
+//         if decision != unblock {
+//             // No message sent to MinKNOW
+//             continue;
+//         }
+
+
+//         // An unblock is sent to MinKNO and we remove this read from the cache
+//         minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
+//             Request::Actions(Actions { actions: vec![
+//                 Action {
+//                     action_id: Uuid::new_v4().to_string(),
+//                     read: Some(action::Read::Number(number)),
+//                     action: Some(action::Action::Unblock(UnblockAction { duration: run_config.unblock_duration })),
+//                     channel: channel,
+//                 }
+//             ]})
+//         )}).await.expect("Failed to unblock request to queue");
+
+//         let mut cache = arch_cache2.lock().await;
+//         cache.remove(id);
+
+//         // Log this action
+
+//         dori_response_log.send(ClientLog { 
+//             stage: PipelineStage::DoriUnblock, 
+//             read_id: None,
+//             time: dori_response_clock.now(), 
+//             channel: channel, 
+//             number: number 
+//         }).await.expect("Failed to send log message from Dori response stream");
+//     }
+// });
+
+
+// Look up the read cache if we have seen this read already - the 
+// lookup itself adds around 5 bp N50 in an unblock-all through analyis
+// (without testing the actual caching since reads are rejected
+// after the first iteration)
+
+// Maybe a cache is possible if the read is basecalled and then stored after basecalling for alignment and decision? Not sure how it would reach 
+// the concurrent implementation again, unless the read cache is on Dori and another request with cache removal is sent to Dori endpoint.

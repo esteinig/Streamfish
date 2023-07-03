@@ -106,9 +106,9 @@ impl StreamfishConfig {
                 channel_start: 1,
                 channel_end: 512,
                 // Unblock-all latency tests
-                unblock_all: false,                       // send unblock-all immediately after receipt
-                unblock_all_dori: false,                 // send unblock-all through Dori but not analysis stack
-                unblock_all_process: true,              // send unblock-all through configured processing stack on Dori
+                unblock_all: false,                     // send unblock-all immediately after receipt
+                unblock_all_dori: false,                // send unblock-all through Dori but not analysis stack
+                unblock_all_process: false,              // send unblock-all through configured processing stack on Dori
                 // Is this relevant to latency?
                 unblock_duration: 0.1,
                 // Signal data configuration
@@ -129,9 +129,9 @@ impl StreamfishConfig {
                 uds_path_override: true,
                 // Process configuration
                 basecaller: "dorado".into(),
-                basecaller_model_path: "/data/models/dna_r9.4.1_e8_fast@v3.4".into(),
+                basecaller_model_path: "/tmp/models/dna_r9.4.1_e8_fast@v3.4".into(),
                 classifier: "minimap2".into(),
-                classifier_reference_path: "/data/virosaurus.mmi".into(),
+                classifier_reference_path: "/tmp/virosaurus.mmi".into(),
                 basecaller_path: "/opt/dorado/bin/dorado".into(),
                 classifier_path: "".into(),
                 // Classifier configuration
