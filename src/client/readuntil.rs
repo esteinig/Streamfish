@@ -38,14 +38,14 @@ use tokio::io::AsyncWriteExt;
 #[derive(Debug)]
 enum PipelineStage {
     DoriRequest,
-    DoriUnblock,
+    DoriResponse,
     MinKnowUnblock
 }
 impl PipelineStage {
     pub fn as_str_name(&self) -> &str {
         match self {
             PipelineStage::DoriRequest => "dori_request",
-            PipelineStage::DoriUnblock => "dori_unblock",
+            PipelineStage::DoriResponse => "dori_response",
             PipelineStage::MinKnowUnblock => "minknow_unblock",
         }
     }
@@ -55,8 +55,6 @@ impl PipelineStage {
 pub struct ClientLog {
     stage: PipelineStage,
     time: Instant,
-    // For tracing purposes mainly
-    read_id: Option<String>,
     // Using channel and read number identification as these are u32 instead of String
     // NOTE: read numbers always increment throughout the experiment, and are unique per 
     // channel - however they are not necessarily contiguous (i.e. can be used for ID, 
@@ -75,7 +73,7 @@ impl ClientLog {
         self.time.duration_since(start).as_nanos()
     } 
     pub fn entry(&self, start: Instant) -> String {
-        format!("{} {} {} {} {}\n", self.stage.as_str_name(), match &self.read_id { Some(id) => &id, None => "-" }, self.channel, self.number,  self.micros_since_start(start))
+        format!("{} {} {} {}\n", self.stage.as_str_name(), self.channel, self.number,  self.micros_since_start(start))
     }
 }
 
@@ -269,8 +267,7 @@ impl ReadUntilClient {
 
                     minknow_response_log.send(ClientLog { 
                         stage: PipelineStage::DoriRequest, 
-                        time: minknow_response_clock.now(), 
-                        read_id: None,
+                        time: minknow_response_clock.now(),
                         channel: channel, 
                         number: read_data.number 
                     }).await.expect("Failed to send log message from Minknow response stream");
@@ -313,8 +310,7 @@ impl ReadUntilClient {
                 )}).await.expect("Failed to unblock request to queue");
 
                 dori_response_log.send(ClientLog { 
-                    stage: PipelineStage::DoriUnblock, 
-                    read_id: Some(dori_response.id),
+                    stage: PipelineStage::DoriResponse, 
                     time: dori_response_clock.now(), 
                     channel: dori_response.channel, 
                     number: dori_response.number 
@@ -373,11 +369,10 @@ impl ReadUntilClient {
 
 impl std::fmt::Display for BasecallerResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let id_short = &self.id[..8];
         write!(
             f, "{} {}", 
-            id_short.blue(),
-            self.number
+            self.number,
+            self.channel
         )
     }
 }

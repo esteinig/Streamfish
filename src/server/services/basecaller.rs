@@ -4,6 +4,7 @@ use crate::config::StreamfishConfig;
 use crate::services::dori_api::basecaller::basecaller_server::Basecaller;
 use crate::services::dori_api::basecaller::{BasecallerRequest, BasecallerResponse, basecaller_response::Decision};
 
+use std::collections::HashMap;
 use std::pin::Pin;
 use futures_core::Stream;
 use futures_util::StreamExt;
@@ -64,9 +65,9 @@ impl Basecaller for BasecallerService {
 
         // Define the decisions as <i32> - repeated into() calls in the stream processing
         // loops introduce a tiny bit of latency! Make sure calls like this are minimized.
-        let none: i32 = Decision::None.into();
-        let pass: i32 = Decision::Pass.into();
-        let unblock: i32 = Decision::Unblock.into();
+        let none_decision: i32 = Decision::None.into();
+        let continue_decision: i32 = Decision::Continue.into();
+        let unblock_decision: i32 = Decision::Unblock.into();
 
         // Connection to MinKNOW to obtain device calibration data
         let minknow_client = MinKnowClient::connect(
@@ -79,6 +80,13 @@ impl Basecaller for BasecallerService {
             &self.config.readuntil.channel_end
         ).await.expect("Failed to get device calibration from MinKNOW");
 
+        // Use channel specific caches due to not having to use a string value for lookup
+        let mut channel_caches: Vec<HashMap<u32, Vec<BasecallerRequest>>> = Vec::new();
+
+        for _ in 0..self.config.readuntil.channel_end {
+            channel_caches.push(HashMap::new())
+        }
+
         // ======================
         // Pipeline process setup
         // ======================
@@ -90,11 +98,16 @@ impl Basecaller for BasecallerService {
         // =========================
 
         let mut request_stream = request.into_inner();
+
         
         let pipeline_input_response_stream = async_stream::try_stream! {
 
             while let Some(dorado_request) = request_stream.next().await {
                 let dorado_request = dorado_request?;
+
+                let channel = dorado_request.channel.clone();
+                let number = dorado_request.number.clone();
+
                 let channel_index = (dorado_request.channel-1) as usize;
 
                 // Use this to generate a test dataset to pipe into Dorado STDIN
@@ -106,21 +119,33 @@ impl Basecaller for BasecallerService {
                 //     sample_rate
                 // ).trim());
                 
-                pipeline_stdin.write_all(
-                    dorado_request.to_stdin(
+
+                // Introduces little bit of latency when un ublock-all mode (1-5 bp)
+                // right now there are no limits or cache removals - this means the
+                // cache will grow massively as reads are streaming in
+                let read_cache = &mut channel_caches[channel_index];
+                
+                // Find cached read or insert new one, update the cache with the current read
+                read_cache.entry(dorado_request.number).or_insert(Vec::new()).push(dorado_request);
+
+                // Get the updated read and concat all chunks to data strings to send as bytes to Dorado
+                let cached = read_cache.get(&number).expect("Failed to get data from channel cache");
+                
+                let data: Vec<String> = cached.iter().map(|req| {
+                    req.to_stdin(
                         calibration.offsets[channel_index],
                         calibration.pa_ranges[channel_index],
                         calibration.digitisation,
                         sample_rate
-                    ).as_bytes()
-                ).await?;
+                    )
+                }).collect();
+
+                pipeline_stdin.write_all(data.concat().as_bytes()).await?;
 
                 let response = BasecallerResponse { 
-                    channel: dorado_request.channel, 
-                    number: dorado_request.number, 
-                    id: dorado_request.id,
-                    stage: 0, // MAKE SURE THIS STAYS CORRECT
-                    decision: match run_config_1.readuntil.unblock_all_dori { true => unblock, false => none }
+                    channel, 
+                    number,
+                    decision: match run_config_1.readuntil.unblock_all_dori { true => unblock_decision, false => none_decision }
                 };
                 yield response
             }
@@ -135,8 +160,8 @@ impl Basecaller for BasecallerService {
                     continue; 
                 } else {
                     match test {
-                        true => yield process_dorado_read_sam(&line, &run_config_2, unblock, pass).await,
-                        false => yield process_dorado_read_sam(&line, &run_config_2, unblock, pass).await
+                        true => yield process_dorado_read_sam(&line, &run_config_2, unblock_decision, continue_decision).await,
+                        false => yield process_dorado_read_sam(&line, &run_config_2, unblock_decision, continue_decision).await
                     }
                 }
             }
@@ -179,7 +204,7 @@ fn init_pipeline(config: &StreamfishConfig) -> (ChildStdin, Lines<BufReader<Chil
 // and uses the configuration to set the unblock decision sent back to MinKNOW
 //
 // SAM specifictation for Dorado: https://github.com/nanoporetech/dorado/blob/master/documentation/SAM.md
-async fn process_dorado_read_sam(line: &str, config: &StreamfishConfig, unblock_decision: i32, pass_decision: i32) -> BasecallerResponse {
+async fn process_dorado_read_sam(line: &str, config: &StreamfishConfig, unblock_decision: i32, continue_decision: i32) -> BasecallerResponse {
                 
         let content: Vec<&str> = line.split('\t').collect();
         let identifiers: Vec<&str> = content[0].split("::").collect();
@@ -191,8 +216,8 @@ async fn process_dorado_read_sam(line: &str, config: &StreamfishConfig, unblock_
             true => unblock_decision,
             false => {
                 match flag {
-                    4 => pass_decision,     // unmapped
-                    _ => unblock_decision,  // all other
+                    4 => continue_decision,     // unmapped
+                    _ => unblock_decision,      // all other
                 }
             }
         };
@@ -200,8 +225,6 @@ async fn process_dorado_read_sam(line: &str, config: &StreamfishConfig, unblock_
         BasecallerResponse { 
             channel: identifiers[1].parse::<u32>().unwrap(), 
             number: identifiers[2].parse::<u32>().unwrap(), 
-            id: identifiers[0].to_string(),
-            stage: 2, // MAKE SURE THIS STAYS CORRECT
             decision
         }
 }

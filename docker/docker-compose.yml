@@ -88,8 +88,7 @@ services:
     networks:
       - streamfish
     volumes:
-      - /data/data/dori:/data                                                               # access to data for dori e.g. basecall models etc
-      - /tmp:/tmp                                                                           # access to dori uds socket from host streamfish client
+      - /tmp:/tmp                                                                           # access to dori uds socket from host streamfish client, use ssd access - latency check on resource storage [TODO]
       - ../:/usr/src/streamfish                                                             # access to development files and config, workign dir inside container
       - streamfish:/opt/streamfish/bin                                                      # access to development streamfish executable from streamfish-dev
       - /opt/ont/minknow/conf/rpc-certs/:/opt/ont/minknow/conf/rpc-certs/                   # access to minknow tls certificate

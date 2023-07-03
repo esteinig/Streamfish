@@ -129,9 +129,9 @@ impl StreamfishConfig {
                 uds_path_override: true,
                 // Process configuration
                 basecaller: "dorado".into(),
-                basecaller_model_path: "/data/models/dna_r9.4.1_e8_fast@v3.4".into(),
+                basecaller_model_path: "/tmp/models/dna_r9.4.1_e8_fast@v3.4".into(),
                 classifier: "minimap2".into(),
-                classifier_reference_path: "/data/virosaurus.mmi".into(),
+                classifier_reference_path: "/tmp/virosaurus.mmi".into(),
                 basecaller_path: "/opt/dorado/bin/dorado".into(),
                 classifier_path: "".into(),
                 // Classifier configuration
