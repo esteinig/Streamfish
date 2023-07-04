@@ -8,8 +8,8 @@ use crate::config::StreamfishConfig;
 use crate::terminal::{App, Commands};
 use crate::client::minknow::MinKnowClient;
 use crate::client::readuntil::ReadUntilClient;
-use crate::server::dori::{DoriServer, DoriClient};
-use crate::terminal::{TestDoriArgs, TestReadUntilArgs};
+use crate::server::dori::DoriServer;
+use crate::terminal::TestReadUntilArgs;
 use crate::services::minknow_api::manager::SimulatedDeviceType;
 
 mod terminal;
@@ -27,18 +27,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let terminal = App::parse();
     let mut config = StreamfishConfig::new(terminal.global.dotenv);
-    log::info!("Streamfish configuration initiated: {}", config);
 
     match &terminal.command {
 
         Commands::TestReadUntil ( args  ) => {
 
             test_read_until(&mut config, args).await?;
-        },
-        Commands::TestDori ( args  ) => {
-
-            test_dori_client(&mut config, args).await?;
-
         },
         Commands::DoriServer ( _  ) => {
 
@@ -48,9 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::AddDevice ( args  ) => {
 
             let mut minknow_client = MinKnowClient::connect(&config.minknow).await?;
-            minknow_client.clients.manager.add_simulated_device(
-                &args.name, SimulatedDeviceType::from_cli(&args.r#type)
-            ).await?;
+            minknow_client.clients.manager.add_simulated_device(&args.name, SimulatedDeviceType::from_cli(&args.r#type)).await?;
         },
         Commands::RemoveDevice ( args  ) => {
 
@@ -65,8 +57,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn test_read_until(config: &mut StreamfishConfig, args: &TestReadUntilArgs) -> Result<(), Box<dyn std::error::Error>> {
 
-    // log::info!("Streamfish configuration initiated: {}", config);
-
     let mut client = ReadUntilClient::connect(config, &args.log_latency).await?;
     client.run().await?;
 
@@ -74,18 +64,4 @@ async fn test_read_until(config: &mut StreamfishConfig, args: &TestReadUntilArgs
 
 }
 
-async fn test_dori_client(config: &mut StreamfishConfig, _: &TestDoriArgs) -> Result<(), Box<dyn std::error::Error>> {
-
-    log::info!("Streamfish configuration initiated: {}", config);
-
-    // let mk = MinKnowClient::connect(&config.minknow).await?;
-    // mk.stream_channel_states_queue_log("MS12345", 1, 512).await?;
-
-    let mut client = DoriClient::connect(&config).await?;
-    
-    client.test_basecall_dorado().await?;
-
-    Ok(())
-
-}
 

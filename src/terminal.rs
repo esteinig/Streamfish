@@ -19,9 +19,6 @@ pub enum Commands {
     /// ReadUntilClient testing
     TestReadUntil(TestReadUntilArgs),
 
-    /// DoriClient testing
-    TestDori(TestDoriArgs),
-
     /// DoriServer launch
     DoriServer(DoriServerArgs),
 
@@ -34,12 +31,6 @@ pub enum Commands {
 #[derive(Debug, Args)]
 pub struct DoriServerArgs {
 
-}
-
-
-#[derive(Debug, Args)]
-pub struct TestDoriArgs {
-    
 }
 
 #[derive(Debug, Args)]

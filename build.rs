@@ -6,7 +6,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_client(true)
         .compile(
             &[
-                "proto/dori_api/basecaller.proto",
+                "proto/dori_api/adaptive.proto",
                 
                 "proto/minknow_api/minion_device.proto",
                 "proto/minknow_api/data.proto",

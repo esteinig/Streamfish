@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use uuid::Uuid;
-use::colored::*;
 use quanta::{Clock, Instant};
 
 use crate::config::{
@@ -13,22 +12,19 @@ use crate::server::dori::DoriClient;
 use crate::client::minknow::MinKnowClient;
 use crate::client::services::data::DataClient;
 
-use crate::services::dori_api::basecaller::basecaller_response::Decision;
+use crate::services::dori_api::adaptive::dorado_cache_request::Request as DoradoCacheDataRequest;
+use crate::services::dori_api::adaptive::dorado_cache_response::Decision;
 use crate::services::minknow_api::data::GetLiveReadsRequest;
 use crate::services::minknow_api::data::get_live_reads_request::action;
-use crate::services::minknow_api::data::get_live_reads_response::ReadData;
+use crate::services::dori_api::adaptive::DoradoCacheRequest;
 
-use crate::services::dori_api::basecaller::{
-    BasecallerRequest,
-    BasecallerResponse
-};
 use crate::services::minknow_api::data::get_live_reads_request::{
     Actions, 
     Action, 
     StopFurtherData, 
     UnblockAction, 
     StreamSetup, 
-    Request
+    Request as LiveReadsRequest
 }; 
 
 use tokio::fs::File;
@@ -121,7 +117,16 @@ impl ReadUntilClient {
 
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
 
+        // Define the decisions as <i32> - repeated into() calls in the stream processing
+        // loops introduce a tiny bit of latency! Make sure calls like this are minimized.
+        
+        // Actions sent to MinKNOW
+        let stop_decision: i32 = Decision::Stop.into();
         let unblock_decision: i32 = Decision::Unblock.into();
+
+        // No actions sent to MinKNOW
+        let _: i32 = Decision::None.into();     
+        let _: i32 = Decision::Continue.into();
 
 
         let run_config = self.readuntil.clone();
@@ -169,7 +174,7 @@ impl ReadUntilClient {
         // ==========================================
 
         // Setup the initial request to setup the data stream ...
-        let init_action = GetLiveReadsRequest { request: Some(Request::Setup(StreamSetup { 
+        let init_action = GetLiveReadsRequest { request: Some(LiveReadsRequest::Setup(StreamSetup { 
                 first_channel: run_config.channel_start, 
                 last_channel: run_config.channel_end, 
                 raw_data_type: run_config.raw_data_type.into(), 
@@ -189,9 +194,9 @@ impl ReadUntilClient {
         let minknow_request = tonic::Request::new(data_request_stream);
         let mut minknow_stream = data_client.client.get_live_reads(minknow_request).await?.into_inner();
 
-        // BasecallService response stream is initiated with the dori request stream
+        // AdaptiveSamplingService response stream is initiated with the data request stream for the DoradoCache implementation on Dori
         let dori_request = tonic::Request::new(dori_request_stream);
-        let mut dori_stream = self.dori.client.basecall_dorado(dori_request).await?.into_inner();
+        let mut dori_stream = self.dori.client.dorado_cache(dori_request).await?.into_inner();
 
         log::info!("Initiated data streams with Dori");
         
@@ -206,7 +211,7 @@ impl ReadUntilClient {
         let minknow_response_clock = clock.clone();
 
         let minknow_action_tx = action_tx.clone(); // unpacks stop further data action requests into data request stream
-        let dori_basecall_tx = dori_tx.clone(); // unpacks dori basecall action requests into dori request stream
+        let dori_data_tx = dori_tx.clone(); // unpacks dori basecall action requests into dori request stream
 
         let action_stream_handle = tokio::spawn(async move {
             while let Some(response) = minknow_stream.message().await.expect("Failed to get response from Minknow data stream") {
@@ -228,12 +233,11 @@ impl ReadUntilClient {
                     // log::info!("Chunk length: {}", read_data.chunk_length);
 
                     if run_config.unblock_all {
-                        // Unblock all to test unblocking, equivalent to Readfish implementation
-                        // do not send a request to the Dori::BasecallerService stream
+                        // Unblock all to test unblocking, equivalent to Readfish
                         minknow_action_tx.send(GetLiveReadsRequest { request: Some(
-                            Request::Actions(Actions { actions: vec![
+                            LiveReadsRequest::Actions(Actions { actions: vec![
                                 Action {
-                                    action_id: Uuid::new_v4().to_string(), 
+                                    action_id: Uuid::new_v4().to_string(), // Check if this is really costly?
                                     read: Some(action::Read::Number(read_data.number)),
                                     action: Some(action::Action::Unblock(UnblockAction { duration: run_config.unblock_duration })),
                                     channel: channel,
@@ -242,20 +246,18 @@ impl ReadUntilClient {
                         )}).await.expect("Failed to send unblock request to Minknow request queue");
 
                     } else {
-                        // Otherwise always send the request to the basecaller request stream,
-                        // where the unblock request is put in the queue from the response stream
-                        dori_basecall_tx.send(BasecallerRequest {
-                            id: read_data.id, 
+                        // Send the data for processing on Dori
+                        dori_data_tx.send(DoradoCacheRequest {
                             channel: channel,
                             number: read_data.number,
-                            data: read_data.raw_data,
+                            request: Some(DoradoCacheDataRequest::RawData(read_data.raw_data))
                         }).await.expect("Failed to send basecall requests to Dori request queue")
                     }
 
                     // Always request to stop further data from the current read
                     // as we are currently not accumulating in caches
                     minknow_action_tx.send(GetLiveReadsRequest { request: Some(
-                        Request::Actions(Actions { actions: vec![
+                        LiveReadsRequest::Actions(Actions { actions: vec![
                             Action {
                                 action_id: Uuid::new_v4().to_string(),
                                 read: Some(action::Read::Number(read_data.number)),
@@ -283,6 +285,7 @@ impl ReadUntilClient {
         let dori_response_log = log_tx.clone();
         let dori_response_clock = clock.clone();
 
+        let dori_action_tx = dori_tx.clone();
         let minknow_dori_action_tx = action_tx.clone();
 
         let dori_stream_handle = tokio::spawn(async move {
@@ -290,25 +293,54 @@ impl ReadUntilClient {
 
                 // log::info!("Channel {:<5} => {}", &dori_response.channel, &dori_response);
 
-                // Evaluate the Dori response - a response may be sent from different
-                // stages of the basecall-classifier pipeline at the endpoint - for
-                // now we will unblock at the second stage, after classifier output
+                if  dori_response.decision == unblock_decision {
+                        // Send unblock decision to stop read - also stops further data (minknow_api::data)
+                        minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
+                            LiveReadsRequest::Actions(Actions { actions: vec![
+                                Action {
+                                    action_id: Uuid::new_v4().to_string(),
+                                    read: Some(action::Read::Number(dori_response.number)),
+                                    action: Some(action::Action::Unblock(UnblockAction { duration: run_config.unblock_duration })),
+                                    channel: dori_response.channel,
+                                }
+                            ]})
+                        )}).await.expect("Failed to unblock request to queue");
 
-                if dori_response.decision != unblock_decision {
-                    continue;
+                        // Send uncache request to Dori to remove read from cache
+                        dori_action_tx.send(DoradoCacheRequest {
+                            channel: dori_response.channel,
+                            number: dori_response.number,
+                            request: Some(DoradoCacheDataRequest::Uncache(true))
+                        }).await.expect("Failed to send basecall requests to Dori request queue")
+
+                } else if dori_response.decision == stop_decision {
+
+                    // Send a stop receive further data action and let read be 
+                    // sequenced without further evaluations
+                    minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
+                        LiveReadsRequest::Actions(Actions { actions: vec![
+                            Action {
+                                action_id: Uuid::new_v4().to_string(),
+                                read: Some(action::Read::Number(dori_response.number)),
+                                action: Some(action::Action::StopFurtherData(StopFurtherData {})),
+                                channel: dori_response.channel,
+                            }
+                        ]})
+                    )}).await.expect("Failed to send stop further data request to Minknow request queue"); 
+
+                    // Send uncache request to Dori to remove read from cache
+                    dori_action_tx.send(DoradoCacheRequest {
+                        channel: dori_response.channel,
+                        number: dori_response.number,
+                        request: Some(DoradoCacheDataRequest::Uncache(true))
+                    }).await.expect("Failed to send basecall requests to Dori request queue")
+
+                } else {
+                    // Continue or none decisions are not processed, we let the client fetch
+                    // more chunks from the read to be added to cache
                 }
 
-                minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
-                    Request::Actions(Actions { actions: vec![
-                        Action {
-                            action_id: Uuid::new_v4().to_string(),
-                            read: Some(action::Read::Number(dori_response.number)),
-                            action: Some(action::Action::Unblock(UnblockAction { duration: run_config.unblock_duration })),
-                            channel: dori_response.channel,
-                        }
-                    ]})
-                )}).await.expect("Failed to unblock request to queue");
-
+                // Always send a log entry to queue
                 dori_response_log.send(ClientLog { 
                     stage: PipelineStage::DoriResponse, 
                     time: dori_response_clock.now(), 
@@ -366,29 +398,3 @@ impl ReadUntilClient {
     }
 }
 
-
-impl std::fmt::Display for BasecallerResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f, "{} {}", 
-            self.number,
-            self.channel
-        )
-    }
-}
-
-impl std::fmt::Display for ReadData {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let id_short = &self.id[..8];
-        let pid = match self.previous_read_classification {
-            80 => id_short.bright_green(),
-            83 => id_short.green(),
-            _ => id_short.white()
-        };
-        write!(
-            f, "{} {}", 
-            pid,
-            self.number
-        )
-    }
-}

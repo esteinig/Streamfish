@@ -1,1 +1,1 @@
-pub mod basecaller;
+pub mod adaptive;

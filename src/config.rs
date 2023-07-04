@@ -41,6 +41,9 @@ pub struct ReadUntilConfig {
     pub logging_queue_buffer: usize,
     pub log_latency: Option<PathBuf>,           // log latency output to file - adds latency! (1-2 bp)
     pub print_latency: bool,                    // if no latency file specified, print latency to console, otherwise standard log is used without latency
+    pub read_cache: bool,
+    pub read_cache_min_chunks: usize,
+    pub read_cache_max_chunks: usize
 }
 
 #[derive(Debug, Clone)]
@@ -48,21 +51,22 @@ pub struct DoriConfig {
     // Unix domain socket path
     pub uds_path: PathBuf,
     pub uds_path_override: bool,
-    // Supported: `dorado`
+    
+    // Basecaller supported: `dorado`
     pub basecaller: String, 
-    // Basecaller model to use
+    // Basecaller model path
     pub basecaller_model_path: PathBuf,
-    // Supported: `minimap2`, `kraken2`
+    // Classifier supported: `minimap2`, `kraken2`
     pub classifier: String,   
-    // Classifier database to use
+    // Classifier reference path
     pub classifier_reference_path: PathBuf,
-    // Dorado executable path
+
+    // Executable paths
     pub basecaller_path: PathBuf,
     pub classifier_path: PathBuf,
 
-    // Minimap2 config
-    pub minimap2_target_seqids: Vec<String>,
-    pub minimap2_sam_mapped_flags: Vec<u32>,  // currently not used can be implemented for more specific that 4 = unmapped, other = mapped
+    // Basecaller/classifier error log
+    pub stderr_log: PathBuf,
 
     // Kraken2 config
     pub kraken2_threads: u16,
@@ -121,26 +125,24 @@ impl StreamfishConfig {
                 logging_queue_buffer: 4096,
                 // Logging configuration
                 log_latency: None,
-                print_latency: false
+                print_latency: false,
+                // Use streaming read cache for raw data chunks on Dori
+                read_cache: true,
+                read_cache_min_chunks: 0,
+                read_cache_max_chunks: 3
             },
             dori: DoriConfig {
-                // UDS configuration
                 uds_path: "/tmp/.dori/test".into(),
                 uds_path_override: true,
-                // Process configuration
                 basecaller: "dorado".into(),
                 basecaller_model_path: "/tmp/models/dna_r9.4.1_e8_fast@v3.4".into(),
                 classifier: "minimap2".into(),
                 classifier_reference_path: "/tmp/virosaurus.mmi".into(),
                 basecaller_path: "/opt/dorado/bin/dorado".into(),
                 classifier_path: "".into(),
-                // Classifier configuration
+                stderr_log: "/tmp/dori.pipeline.stderr".into(),
                 kraken2_threads: 4,
                 kraken2_args: "--minimum-hit-groups 1 --threads 4 --memory-mapping".into(),
-                // Decision configuration for alignment (basic)
-                minimap2_target_seqids: vec![],
-                minimap2_sam_mapped_flags: vec![0, 2, 16, 256, 257], // common observed flags in Dorado SAM 
-                // Internal configuration
                 basecaller_args: Vec::new(),
                 classifier_args: Vec::new()
 

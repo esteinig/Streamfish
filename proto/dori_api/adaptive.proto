@@ -1,0 +1,115 @@
+syntax="proto3";
+
+package dori_api.adaptive;
+
+
+// Basecall reads streamed from the Streamfish::ReadUntilClient
+//
+// This service implements a single endpoint to basecall and align reads with Dorado,
+// as there is not available server implementation (for now) and it is not clear if  
+// the proposed "drop-in" by ONT is going to be more transparent in how things work
+// than the annopying Guppy server implementations.
+//
+// The idea behind this is that we build a bi-directional streaming endpoint that
+// runs a modified version of Dorado that takes in raw data from the endpoint
+// through a standard input stream and processes reads as they arrive - this is
+// different than the batch-wise implementation for example in Readfish and the
+// ONT implementation.
+//
+// Since 1.0
+service AdaptiveSampling {
+  
+  // A version of the Dorado pipeline that implements a request [read] cache that allows
+  // for using multiple chunks of sampled raw data to be processed in a streaming fashion
+  // which is slightly different than the batched processing with cache in Readfish.
+  rpc DoradoCache(stream DoradoCacheRequest) returns (stream DoradoCacheResponse) { }
+
+
+  // A version of the Dorado pipeline that implements single chunk stream logic which is
+  // leaner and has less latency than the cached version, but may require improvements
+  // in processing basecalled sequences for decision making due to smaller alignments
+  // - this is mainly for comparison to the cached version and running experiments
+  // leading up to the signal classification implementation 
+  rpc DoradoStream(stream DoradoStreamRequest) returns (stream DoradoStreamResponse) { }
+
+}
+
+message DoradoCacheRequest {
+  
+  // The number of the read in the channel returned in `minknow_api.data.GetLiveReadsResponse.ReadData.number` 
+  uint32 number = 1;
+
+  // The channel of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData.channels` 
+  uint32 channel = 2;
+
+  oneof request {
+
+    // Raw data values must be UNCALIBRATED as set in `minknow_api.data.GetLiveReadsRequest.RawDataType` 
+    bytes raw_data = 3;
+
+    // Whether to process the read or remove it from the cache only
+    bool uncache = 4;
+
+  }
+
+}
+
+message DoradoCacheResponse { 
+
+  enum Decision {
+    CONTINUE = 0;
+    STOP = 1;
+    UNBLOCK = 2;
+    NONE = 3;
+  }
+
+  // The number of the read in the channel returned in `minknow_api.data.GetLiveReadsResponse.ReadData.number` 
+  uint32 number = 1;
+
+  // The channel of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData.channels` 
+  uint32 channel = 2;
+
+  // Action decision for client to act on
+  Decision decision = 3;
+
+
+}
+
+message DoradoStreamRequest {
+  
+  // The ID of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData` 
+  string id = 1;
+
+  // The number of the read in the channel returned in `minknow_api.data.GetLiveReadsResponse.ReadData.number` 
+  uint32 number = 2;
+
+  // The channel of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData.channels` 
+  uint32 channel = 3;
+
+  // Array of raw data values returned in `minknow_api.data.GetLiveReadsResponse.ReadData` 
+  //
+  // Raw data values must be UNCALIBRATED as set in `minknow_api.data.GetLiveReadsRequest.RawDataType` 
+  bytes data = 4;
+
+}
+
+message DoradoStreamResponse { 
+
+  enum Decision {
+    CONTINUE = 0;
+    STOP = 1;
+    UNBLOCK = 2;
+    NONE = 3;
+  }
+
+  // The number of the read in the channel returned in `minknow_api.data.GetLiveReadsResponse.ReadData.number` 
+  uint32 number = 1;
+
+  // The channel of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData.channels` 
+  uint32 channel = 2;
+
+  // Action decision for client to act on
+  Decision decision = 4;
+
+
+}

@@ -5,18 +5,17 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::{Server, Endpoint, Channel};
 
-use crate::config::{StreamfishConfig};
-use crate::server::services::basecaller::BasecallerService;
-use crate::services::dori_api::basecaller::BasecallerRequest;
-use crate::services::dori_api::basecaller::basecaller_server::BasecallerServer;
-use crate::services::dori_api::basecaller::basecaller_client::BasecallerClient;
+use crate::config::StreamfishConfig;
+use crate::server::services::adaptive::AdaptiveSamplingService;
+use crate::services::dori_api::adaptive::adaptive_sampling_server::AdaptiveSamplingServer;
+use crate::services::dori_api::adaptive::adaptive_sampling_client::AdaptiveSamplingClient;
 
 pub struct DoriServer { }
 
 impl DoriServer {
     pub async fn run(config: &StreamfishConfig) -> Result<(), Box<dyn std::error::Error>> {
 
-        let basecaller_service = BasecallerService::new(config);
+        let service = AdaptiveSamplingService::new(config);
 
         let uds_path_parent_dir = config.dori.uds_path.parent().unwrap();
 
@@ -34,7 +33,7 @@ impl DoriServer {
         let uds_stream = UnixListenerStream::new(uds);
 
         Server::builder()
-            .add_service(BasecallerServer::new(basecaller_service))
+            .add_service(AdaptiveSamplingServer::new(service))
             .serve_with_incoming(uds_stream)
             .await?;
 
@@ -43,7 +42,7 @@ impl DoriServer {
 }
 
 pub struct DoriClient { 
-    pub client: BasecallerClient<Channel>
+    pub client: AdaptiveSamplingClient<Channel>
 }
 
 impl DoriClient {
@@ -57,32 +56,6 @@ impl DoriClient {
                 UnixStream::connect(uds_path.clone()) 
         })).await?;
 
-        Ok(Self { client: BasecallerClient::new(channel) })
-    }
-    // Dorado basecall request/response stream
-    pub async fn test_basecall_dorado(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-
-        let dorado_request_stream = async_stream::stream! {
-            let mut interval = tokio::time::interval(
-                std::time::Duration::from_secs(1)
-            );
-            loop {
-                let _ = interval.tick().await;
-                let request = BasecallerRequest { id: String::from("TestID"), data: vec![0], number: 0, channel: 0 };
-                log::info!("Sending request to Dori::BasecallDorado");
-                yield request
-            }
-        };
-
-        let mut dorado_response_stream = self.client.basecall_dorado(
-            tonic::Request::new(dorado_request_stream)
-        ).await?.into_inner();
-
-        while let Some(_) = dorado_response_stream.message().await? {
-           log::info!("Received response from Dori::BasecallDorado")
-
-        }
-
-        Ok(())
+        Ok(Self { client: AdaptiveSamplingClient::new(channel) })
     }
 }
