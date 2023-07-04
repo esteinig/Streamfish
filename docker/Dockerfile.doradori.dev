@@ -22,7 +22,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     automake \
     python3
 
-
 WORKDIR /usr/src/dorado 
 
 ADD https://github.com/Kitware/CMake/releases/download/v3.27.0-rc3/cmake-3.27.0-rc3-linux-x86_64.sh /cmake-3.27.0-rc3-linux-x86_64.sh 
@@ -36,10 +35,15 @@ RUN cmake --version
 # server inside Dorado compatible environment -
 # this uses the Dori STDIN fork (Dorado v0.3.1)
 
-RUN git clone --single-branch --branch dori-stdin-v0.3.1 https://github.com/esteinig/dorado
-RUN cd dorado && git config --global --add safe.directory "*" && \
-    cmake -S . -B cmake-build && cmake --build cmake-build --config Release -j4 && \ 
+# This uses the latest commit checkout specifically due to need to rebuild image for this
+
+RUN git clone --single-branch --branch dori-stdin-v0.3.1 https://github.com/esteinig/dorado && \   
+    cd dorado && git checkout f08d3aed27818e44d1637f76e8b9cb00c7c79a6b && \
+    git config --global --add safe.directory "*" && \
+    cmake -S . -B cmake-build && \
+    cmake --build cmake-build --config Release -j4 && \ 
     cmake --install cmake-build --prefix /opt/dorado 
+
 RUN ln -s /opt/dorado/bin/dorado /usr/local/bin/dorado
 
 # Host user 

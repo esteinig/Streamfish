@@ -2,6 +2,7 @@ syntax="proto3";
 
 package dori_api.adaptive;
 
+import "minknow_api/data.proto";
 
 // Basecall reads streamed from the Streamfish::ReadUntilClient
 //
@@ -36,21 +37,23 @@ service AdaptiveSampling {
 
 message DoradoCacheRequest {
   
-  // The number of the read in the channel returned in `minknow_api.data.GetLiveReadsResponse.ReadData.number` 
-  uint32 number = 1;
-
-  // The channel of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData.channels` 
-  uint32 channel = 2;
-
-  oneof request {
-
-    // Raw data values must be UNCALIBRATED as set in `minknow_api.data.GetLiveReadsRequest.RawDataType` 
-    bytes raw_data = 3;
-
-    // Whether to process the read or remove it from the cache only
-    bool uncache = 4;
-
+  enum Request {
+    INIT = 0;
+    DATA = 1;
+    CACHE = 2;
   }
+
+  // Type of request being made
+  Request request = 1;
+
+  // Any uncalibrated channel data from the data stream
+  map<uint32, minknow_api.data.GetLiveReadsResponse.ReadData> channels = 2;
+
+  // Channel for cache request
+  uint32 channel = 3;
+
+  // Number for cache request
+  uint32 number = 4;
 
 }
 

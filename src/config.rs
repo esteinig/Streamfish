@@ -128,8 +128,17 @@ impl StreamfishConfig {
                 print_latency: false,
                 // Use streaming read cache for raw data chunks on Dori
                 read_cache: true,
-                read_cache_min_chunks: 0,
-                read_cache_max_chunks: 3
+                // There is some limit here where I think the UDS connection
+                // becomes overloaded and breaks Need to test two solutions:
+                // fist it maybe due to UDS instability so replace with TCP
+                // second, send sampled channel chunks in one go to Dori,
+                // instead of for each channel [unblock all process config]
+                // We maybe need to throttle the loops if using a larger
+                // cache (which is not the point of this implementation though
+                // mainly yo show it works and how we can make things with less
+                // latency)
+                read_cache_min_chunks: 10,
+                read_cache_max_chunks: 10
             },
             dori: DoriConfig {
                 uds_path: "/tmp/.dori/test".into(),
@@ -169,6 +178,7 @@ impl StreamfishConfig {
                 // Minimap2 configuration integrated with Dorado - add window/k-mer options [TODO]
                 streamfish_config.dori.basecaller_args = Vec::from([
                     "basecaller".to_string(),
+                    "--verbose".to_string(), 
                     "--reference".to_string(), 
                     format!("{}", streamfish_config.dori.classifier_reference_path.display()), 
                     "--emit-sam".to_string(),
