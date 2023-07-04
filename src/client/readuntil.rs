@@ -13,11 +13,11 @@ use crate::server::dori::DoriClient;
 use crate::client::minknow::MinKnowClient;
 use crate::client::services::data::DataClient;
 
-use crate::services::dori_api::adaptive::dorado_cache_request::{Request as DoradoCacheRequestType};
+use crate::services::dori_api::adaptive::DoradoCacheRequestType;
 use crate::services::dori_api::adaptive::dorado_cache_response::Decision;
 use crate::services::minknow_api::data::GetLiveReadsRequest;
 use crate::services::minknow_api::data::get_live_reads_request::action;
-use crate::services::dori_api::adaptive::DoradoCacheRequest;
+use crate::services::dori_api::adaptive::DoradoCacheBatchRequest;
 
 use crate::services::minknow_api::data::get_live_reads_request::{
     Actions, 
@@ -202,7 +202,7 @@ impl ReadUntilClient {
 
         // AdaptiveSamplingService response stream is initiated with the data request stream for the DoradoCache implementation on Dori
         let dori_request = tonic::Request::new(dori_request_stream);
-        let mut dori_stream = self.dori.client.dorado_cache(dori_request).await?.into_inner();
+        let mut dori_stream = self.dori.client.dorado_cache_batch(dori_request).await?.into_inner();
 
         log::info!("Initiated data streams with Dori");
         
@@ -254,7 +254,7 @@ impl ReadUntilClient {
                     // choke sometimes but the distribution at 10 chunks is a solid 1.8kb N50
                     // seems more sensitive to system load though - other processses running 
                     // wil lchoke the stream more than individual requests sent.
-                    dori_data_tx.send(DoradoCacheRequest {
+                    dori_data_tx.send(DoradoCacheBatchRequest {
                         channels: response.channels,
                         channel: 0,
                         number: 0,
@@ -296,7 +296,7 @@ impl ReadUntilClient {
                         )}).await.expect("Failed to unblock request to queue");
 
                         // Send uncache request to Dori to remove read from cache
-                        dori_action_tx.send(DoradoCacheRequest {
+                        dori_action_tx.send(DoradoCacheBatchRequest {
                             channel: dori_response.channel,
                             number: dori_response.number,
                             request: cache_request,
@@ -321,7 +321,7 @@ impl ReadUntilClient {
                     )}).await.expect("Failed to send stop further data request to Minknow request queue"); 
 
                     // Send uncache request to Dori to remove read from cache
-                    dori_action_tx.send(DoradoCacheRequest {
+                    dori_action_tx.send(DoradoCacheBatchRequest {
                         channel: dori_response.channel,
                         number: dori_response.number,
                         request: cache_request,

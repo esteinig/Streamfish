@@ -23,7 +23,10 @@ service AdaptiveSampling {
   // A version of the Dorado pipeline that implements a request [read] cache that allows
   // for using multiple chunks of sampled raw data to be processed in a streaming fashion
   // which is slightly different than the batched processing with cache in Readfish.
-  rpc DoradoCache(stream DoradoCacheRequest) returns (stream DoradoCacheResponse) { }
+  rpc DoradoCacheBatch(stream DoradoCacheBatchRequest) returns (stream DoradoCacheResponse) { }
+
+
+  rpc DoradoCacheChannel(stream DoradoCacheChannelRequest) returns (stream DoradoCacheResponse) { }
 
 
   // A version of the Dorado pipeline that implements single chunk stream logic which is
@@ -35,19 +38,41 @@ service AdaptiveSampling {
 
 }
 
-message DoradoCacheRequest {
+
+enum DoradoCacheRequestType {
+  INIT = 0;
+  DATA = 1;
+  CACHE = 2;
+}
+
+
+// Streaming as batch
+message DoradoCacheBatchRequest {
   
-  enum Request {
-    INIT = 0;
-    DATA = 1;
-    CACHE = 2;
-  }
 
   // Type of request being made
-  Request request = 1;
+  DoradoCacheRequestType request = 1;
 
   // Any uncalibrated channel data from the data stream
   map<uint32, minknow_api.data.GetLiveReadsResponse.ReadData> channels = 2;
+
+  // Channel for cache request
+  uint32 channel = 3;
+
+  // Number for cache request
+  uint32 number = 4;
+
+}
+
+// Streaming by channel
+message DoradoCacheChannelRequest {
+  
+
+  // Type of request being made
+  DoradoCacheRequestType request = 1;
+
+  // Data for a particular channel
+  bytes data = 2;
 
   // Channel for cache request
   uint32 channel = 3;

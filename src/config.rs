@@ -137,8 +137,8 @@ impl StreamfishConfig {
                 // cache (which is not the point of this implementation though
                 // mainly yo show it works and how we can make things with less
                 // latency)
-                read_cache_min_chunks: 10,
-                read_cache_max_chunks: 10
+                read_cache_min_chunks: 1,
+                read_cache_max_chunks: 1
             },
             dori: DoriConfig {
                 uds_path: "/tmp/.dori/test".into(),
