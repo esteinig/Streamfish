@@ -1,3 +1,4 @@
+pub mod acquisition;
 pub mod analysis;
 pub mod manager;
 pub mod device;

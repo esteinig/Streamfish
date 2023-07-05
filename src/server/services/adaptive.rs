@@ -10,7 +10,6 @@ use crate::services::dori_api::adaptive::{
     dorado_cache_response::Decision, 
     DoradoCacheRequestType
 };
-use crate::client::services::device::DeviceCalibration;
 
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -22,7 +21,6 @@ use futures_util::io::AsyncBufReadExt;
 use tonic::{Request, Response, Status};
 use async_process::{Command, Stdio, ChildStdout, ChildStdin};
 use itertools::join;
-use async_stream::__private::AsyncStream;
 
 pub struct AdaptiveSamplingService {
     config: StreamfishConfig
@@ -39,8 +37,8 @@ impl AdaptiveSamplingService {
             panic!("Classifier reference/database path does not exist")
         }
 
-        if config.readuntil.unblock_all {
-            log::warn!("Immediate unblocking of all reads is active!");
+        if config.readuntil.unblock_all_client {
+            log::warn!("Immediate unblocking of all reads on client is active!");
         }
         if config.readuntil.unblock_all_dori {
             log::warn!("Dori response unblocking of all reads is active!");
@@ -49,8 +47,8 @@ impl AdaptiveSamplingService {
             log::warn!("Dori process response unblocking of all reads is active!");
         }
         
-        log::info!("Basecaller: {} Path: {:?} Args: {:?}", config.dori.basecaller, config.dori.basecaller_path, config.dori.basecaller_args);
-        log::info!("Classifier: {} Path: {:?} Args: {:?}", config.dori.classifier, config.dori.classifier_path, config.dori.classifier_args);
+        log::info!("Basecaller: {} Path: {:?} Args: {:?}", config.dori.basecaller, config.dori.basecaller_path, config.dori.basecaller_args.join(" "));
+        log::info!("Classifier: {} Path: {:?} Args: {:?}", config.dori.classifier, config.dori.classifier_path, config.dori.classifier_args.join(" "));
 
         Self { config: config.clone() }
     }
@@ -74,21 +72,208 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
     }
 
-    // Adaptive sampling with Dorado basecalling and no request/read cache - single request/read processing only
-    async fn dorado_cache_channel(&self, _: Request<tonic::Streaming<DoradoCacheChannelRequest>>) -> Result<Response<Self::DoradoCacheChannelStream>, Status> {
+    // Distinct cache single/batch endpoints because modularizing the stream generators causes tons of latency
 
-        log::info!("Initiated Dori::AdaptiveSamplingService::DoradoStream RPC");
+    // Adaptive sampling with Dorado basecalling and request/read cache implementation - single channel data transmission
+    async fn dorado_cache_channel(&self, request: Request<tonic::Streaming<DoradoCacheChannelRequest>>) -> Result<Response<Self::DoradoCacheChannelStream>, Status> {
 
-        unimplemented!("No implemented yet")
+        log::info!("Initiated Dori::AdaptiveSamplingService::DoradoCacheChannel RPC");
+
+        // Used in generators, needs distinct clones
+        let run_config_1 = self.config.clone();
+        let run_config_2 = self.config.clone();
+
+        // Define the decisions as <i32> - repeated into() calls in the stream processing
+        // loops introduce a tiny bit of latency! Make sure calls like this are minimized.
+        
+        // Action sent to MinKNOW
+        let stop_decision: i32 = Decision::Stop.into();
+        let unblock_decision: i32 = Decision::Unblock.into();
+
+        // No action sent to MinKNOW 
+        let continue_decision: i32 = Decision::Continue.into();
+
+        // Request types
+        let init_request: i32 = DoradoCacheRequestType::Init.into();
+        let cache_request: i32 = DoradoCacheRequestType::Cache.into();
+
+        // Connection to MinKNOW to obtain device calibration data
+        let minknow_client = MinKnowClient::connect(
+            &self.config.minknow
+        ).await.expect("Failed to connect to MinKNOW");
+
+        let (sample_rate, calibration) = minknow_client.get_device_data(
+            &self.config.readuntil.device_name, 
+            &self.config.readuntil.channel_start,  
+            &self.config.readuntil.channel_end
+        ).await.expect("Failed to get device calibration from MinKNOW");
+        
+        // Use channel specific caches due to not having to use a string value for lookup
+        let mut channel_caches: Vec<HashMap<u32, Vec<Vec<u8>>>> = Vec::new();
+
+        for _ in 0..self.config.readuntil.channel_end {
+            channel_caches.push(HashMap::new())
+        }
+
+        // ======================
+        // Pipeline process setup
+        // ======================
+
+        let (mut pipeline_stdin, mut pipeline_stdout) = init_pipeline(&self.config);
+
+        // =========================
+        // Request stream processing
+        // =========================
+     
+        // DO NOT PUT STREAM GENERATOR INTO DISTINCT FUNCTION - SEVERELY IMPACTS LATENCY (> 100 bp)
+
+        let mut request_stream = request.into_inner();
+        
+        let request_response_stream = async_stream::try_stream! {
+    
+            while let Some(dorado_request) = request_stream.next().await {
+                let dorado_request = dorado_request?;
+                
+                let channel = dorado_request.channel;
+                let number = dorado_request.number;
+    
+                if dorado_request.request == init_request {
+                    // No action, continue and wait for data stream
+                    log::info!("Waiting {} seconds for pipeline initialisation ...", &run_config_1.readuntil.init_delay);
+                    tokio::time::sleep(tokio::time::Duration::new(run_config_1.readuntil.init_delay, 0)).await;
+                    continue;
+                }
+    
+                let channel_index = (channel-1) as usize; // need to cast
+                let read_cache = &mut channel_caches[channel_index];
+                
+                // Boolean value is just placeholer for `prost` syntax around `oneof`
+                if dorado_request.request == cache_request {
+                    // If the request is a remove-read-from-cache request, do this
+                    // before any further processing - this gets around the mutable
+                    // borrow issue below and allows for other decisions to send
+                    // cache removal requests later
+                    log::info!("Received remove from cache request: {} {}", &channel, &number);
+                    read_cache.remove(&number);
+
+                    continue;
+
+                } else {
+
+                    // Find cached read or insert new one, update the cache with the current read
+                    read_cache.entry(number).or_insert(Vec::new()).push(dorado_request.data);
+
+                    // Get the updated read and the number of chunks in the cache
+                    let cached = read_cache.get(&number).expect("Failed to get data from channel cache");
+                    let num_chunks = cached.len();
+
+                    if num_chunks < run_config_1.readuntil.read_cache_min_chunks {
+                        // If we have less chunks than the minimum number required
+                        // send a continue response for more data acquisition on 
+                        // this read (no action)
+                        continue
+
+                    } else if num_chunks > run_config_1.readuntil.read_cache_max_chunks {
+                        // If we have reached the maximum chunks in cache,
+                        // do not process and send a stop response for
+                        // ceasing data acquisition. This will also send
+                        // a remove from cache request as we cannot do this
+                        // below because ofthe required mutable borrow of the cache
+
+                        // read_cache.remove(&number); not possible!
+
+                        log::info!("Sending stop data decision: {} {} (chunks = {})", &channel, &number, &num_chunks);
+
+                        let response = DoradoCacheResponse { 
+                            channel, 
+                            number,
+                            decision: stop_decision
+                        };
+                        yield response
+
+                    } else {
+                        // If we have an acceptable number of chunks between the limits, process 
+                        // the read by concatenating the chunks and sending it into the basecall
+                        // and alignment pipeline 
+                        
+                        // If unblock-all testing is active, send
+                        // response after channel cache decisions
+                        if run_config_1.readuntil.unblock_all_dori {
+                            yield DoradoCacheResponse { 
+                                channel, 
+                                number,
+                                decision: unblock_decision
+                            }
+                        } else {
+                            log::info!("Processing cached read: {} {} (chunks = {})", &channel, &number, &num_chunks);
+
+                            let data: Vec<String> = cached.iter().map(|raw_data| {
+                                get_dorado_input_string(
+                                    raw_data.to_vec(),
+                                    channel,
+                                    number,
+                                    calibration.offsets[channel_index],
+                                    calibration.pa_ranges[channel_index],
+                                    calibration.digitisation,
+                                    sample_rate
+                                )
+                            }).collect();
+
+                            pipeline_stdin.write_all(data.concat().as_bytes()).await?;
+
+                            // Send a none decision response to take no action after writing into process
+                            // this response is mainly for logging 
+                            continue
+                        }
+                    }
+                }
+            }
+        };
+
+
+        // =========================
+        // Process stream processing
+        // =========================
+
+        let test = true;
+        let pipeline_response_stream = async_stream::try_stream! {
+
+            while let Some(line) = pipeline_stdout.next().await {
+                let line = line?;
+
+                // log::info!("Reading line output from pipeline");
+                if line.starts_with('@') { 
+                    continue; 
+                } else {
+                    match test {
+                        true => yield cache_process_dorado_read_sam(&line, &run_config_2, unblock_decision, continue_decision).await,
+                        false => yield cache_process_dorado_read_sam(&line, &run_config_2, unblock_decision, continue_decision).await
+                    }
+                }
+            }
+        };
+
+
+        // =========================
+        // Response stream merge
+        // =========================
+
+        let response_stream = futures::stream::select(
+            request_response_stream,
+            pipeline_response_stream, 
+        );
+
+        Ok(Response::new(Box::pin(response_stream) as Self::DoradoCacheChannelStream))
 
     }
 
-    // Adaptive sampling with Dorado basecalling and request/read cache implementation
+    // Adaptive sampling with Dorado basecalling and request/read cache implementation - batched channel data transmission
     async fn dorado_cache_batch(&self, request: Request<tonic::Streaming<DoradoCacheBatchRequest>>) -> Result<Response<Self::DoradoCacheBatchStream>, Status> {
         
-        log::info!("Initiated Dori::AdaptiveSamplingService::DoradoCache RPC");
+        log::info!("Initiated Dori::AdaptiveSamplingService::DoradoCacheBatch RPC");
 
         // Used in generators, needs distinct clones
+        let run_config_1 = self.config.clone();
         let run_config_2 = self.config.clone();
 
         // Define the decisions as <i32> - repeated into() calls in the stream processing
@@ -127,17 +312,126 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         // Pipeline process setup
         // ======================
 
-        let (pipeline_stdin, mut pipeline_stdout) = init_pipeline(&self.config);
+        let (mut pipeline_stdin, mut pipeline_stdout) = init_pipeline(&self.config);
 
         // =========================
         // Request stream processing
         // =========================
      
-        let request_response_stream = request_stream_cache_batch(
-            request, channel_caches, pipeline_stdin, 
-            init_request, cache_request, stop_decision, 
-            self.config.clone(), calibration, sample_rate
-        );
+        // DO NOT PUT STREAM GENERATOR INTO DISTINCT FUNCTION - SEVERELY IMPACTS LATENCY (> 100 bp)
+
+        let mut request_stream = request.into_inner();
+        
+        let request_response_stream = async_stream::try_stream! {
+    
+    
+            while let Some(dorado_request) = request_stream.next().await {
+                let dorado_request = dorado_request?;
+                
+                let request_type = dorado_request.request;
+    
+                if request_type == init_request {
+                    // No action, continue and wait for data stream
+                    log::info!("Waiting {} seconds for pipeline initialisation ...", &run_config_1.readuntil.init_delay);
+                    tokio::time::sleep(tokio::time::Duration::new(run_config_1.readuntil.init_delay, 0)).await;
+                    continue;
+                }
+    
+                // Per channel processing
+                for (channel, read_data) in dorado_request.channels {
+    
+                    let channel_index = (channel-1) as usize; // need to cast
+                    let read_cache = &mut channel_caches[channel_index];
+                    
+                    // Boolean value is just placeholer for `prost` syntax around `oneof`
+                    if request_type == cache_request {
+                        // If the request is a remove-read-from-cache request, do this
+                        // before any further processing - this gets around the mutable
+                        // borrow issue below and allows for other decisions to send
+                        // cache removal requests later
+                        log::info!("Received remove from cache request: {} {}", &channel, &read_data.number);
+                        read_cache.remove(&read_data.number);
+    
+                        continue;
+    
+                    } else {
+    
+                        let number = read_data.number;
+    
+                        // Find cached read or insert new one, update the cache with the current read
+                        read_cache.entry(read_data.number).or_insert(Vec::new()).push(read_data.raw_data);
+    
+                        // Get the updated read and the number of chunks in the cache
+                        let cached = read_cache.get(&number).expect("Failed to get data from channel cache");
+                        let num_chunks = cached.len();
+    
+                        if num_chunks < run_config_1.readuntil.read_cache_min_chunks {
+                            // If we have less chunks than the minimum number required
+                            // send a continue response for more data acquisition on 
+                            // this read (no action)
+                            continue
+    
+                        } else if num_chunks > run_config_1.readuntil.read_cache_max_chunks {
+                            // If we have reached the maximum chunks in cache,
+                            // do not process and send a stop response for
+                            // ceasing data acquisition. This will also send
+                            // a remove from cache request as we cannot do this
+                            // below because of the required mutable borrow of the cache
+    
+                            // read_cache.remove(&number); not possible!
+    
+                            log::info!("Sending stop data decision: {} {} (chunks = {})", &channel, &number, &num_chunks);
+    
+                            let response = DoradoCacheResponse { 
+                                channel, 
+                                number,
+                                decision: stop_decision
+                            };
+                            yield response
+    
+                        } else {
+                            // If we have an acceptable number of chunks between the limits, process 
+                            // the read by concatenating the chunks and sending it into the basecall
+                            // and alignment pipeline 
+
+
+                            // If unblock-all testing is active, send
+                            // response after channel cache decisions
+                            if run_config_1.readuntil.unblock_all_dori {
+                                yield DoradoCacheResponse { 
+                                    channel, 
+                                    number,
+                                    decision: unblock_decision
+                                }
+                            } else {
+
+                                log::info!("Processing cached read: {} {} (chunks = {})", &channel, &number, &num_chunks);
+    
+                                let data: Vec<String> = cached.iter().map(|raw_data| {
+                                    get_dorado_input_string(
+                                        raw_data.to_vec(),
+                                        channel,
+                                        number,
+                                        calibration.offsets[channel_index],
+                                        calibration.pa_ranges[channel_index],
+                                        calibration.digitisation,
+                                        sample_rate
+                                    )
+                                }).collect();
+        
+                                pipeline_stdin.write_all(data.concat().as_bytes()).await?;
+        
+                                // Send a none decision response to take no action after writing into process
+                                // this response is mainly for logging 
+                                continue
+                            }
+                            
+                            
+                        }
+                    }
+                }
+            }
+        };
         
 
         // =========================
@@ -180,6 +474,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
 // Initiates the process pipeline from configuration
 fn init_pipeline(config: &StreamfishConfig) -> (ChildStdin, Lines<BufReader<ChildStdout>>) {
+
+    log::info!("Spawned analysis pipeline...");
 
     let process_stderr = Stdio::from(std::fs::File::create("basecaller.err").expect("Failed to create basecaller stderr file: basecaller.err"));
 
@@ -293,117 +589,3 @@ pub fn get_dorado_input_string(raw_data: Vec<u8>, channel: u32, number: u32, off
 //         format!("{} {} {} {} {:.1} {:.11} {} {}\n", self.id, self.channel, self.number, digitisation, offset, range, sample_rate, join(&signal_data, " ")) 
 //     }
 // }
-
-fn request_stream_cache_batch(
-    request_stream: Request<tonic::Streaming<DoradoCacheBatchRequest>>,
-    mut channel_caches: Vec<HashMap<u32, Vec<Vec<u8>>>>,
-    mut pipeline_stdin: ChildStdin,
-    init_request: i32,
-    cache_request: i32,
-    stop_decision: i32,
-    config: StreamfishConfig,
-    calibration: DeviceCalibration,
-    sample_rate: u32
-) -> AsyncStream<Result<DoradoCacheResponse, Status>, impl futures::Future<Output = ()>> {
-
-    let mut request_stream = request_stream.into_inner();
-
-    async_stream::try_stream! {
-
-
-        while let Some(dorado_request) = request_stream.next().await {
-            let dorado_request = dorado_request?;
-            
-            let request_type = dorado_request.request;
-
-            if request_type == init_request {
-                // No action, continue and wait for data stream
-                continue
-            }
-
-            // Per channel processing
-            for (channel, read_data) in dorado_request.channels {
-
-                let channel_index = (channel-1) as usize; // need to cast
-                let read_cache = &mut channel_caches[channel_index];
-                
-                // Boolean value is just placeholer for `prost` syntax around `oneof`
-                if request_type == cache_request {
-                    // If the request is a remove-read-from-cache request, do this
-                    // before any further processing - this gets around the mutable
-                    // borrow issue below and allows for other decisions to send
-                    // cache removal requests later
-                    log::info!("Received remove from cache request: {} {}", &channel, &read_data.number);
-                    read_cache.remove(&read_data.number);
-
-                    continue;
-
-                } else {
-
-                    // If request is not uncache or initialize, process the input data,
-                    // this cloning is annoying but neccessary for the cache operations
-
-                    let number = read_data.number.clone();
-
-                    // Find cached read or insert new one, update the cache with the current read
-                    read_cache.entry(read_data.number).or_insert(Vec::new()).push(read_data.raw_data);
-
-                    // Get the updated read and the number of chunks in the cache
-                    let cached = read_cache.get(&number).expect("Failed to get data from channel cache");
-                    let num_chunks = cached.len();
-
-                    if num_chunks < config.readuntil.read_cache_min_chunks {
-                        // If we have less chunks than the minimum number required
-                        // send a continue response for more data acquisition on 
-                        // this read (no action)
-                        continue
-
-                    } else if num_chunks > config.readuntil.read_cache_max_chunks {
-                        // If we have reached the maximum chunks in cache,
-                        // do not process and send a stop response for
-                        // ceasing data acquisition. This will also send
-                        // a remove from cache request as we cannot do this
-                        // below because ofthe required mutable borrow of the cache
-
-                        // read_cache.remove(&number); not possible!
-
-                        log::info!("Sending stop data decision: {} {} {}", &channel, &number, &num_chunks);
-
-                        let response = DoradoCacheResponse { 
-                            channel, 
-                            number,
-                            decision: stop_decision
-                        };
-                        yield response
-
-                    } else {
-                        // If we have an acceptable number of chunks between the limits, process 
-                        // the read by concatenating the chunks and sending it into the basecall
-                        // and alignment pipeline 
-                        
-                        log::info!("Processing cached read: {} {} {}", &channel, &number, &num_chunks);
-
-                        let data: Vec<String> = cached.iter().map(|raw_data| {
-                            get_dorado_input_string(
-                                raw_data.to_vec(),
-                                channel,
-                                number,
-                                calibration.offsets[channel_index],
-                                calibration.pa_ranges[channel_index],
-                                calibration.digitisation,
-                                sample_rate
-                            )
-                        }).collect();
-
-                        pipeline_stdin.write_all(data.concat().as_bytes()).await?;
-
-                        // Send a none decision response to take no action after writing into process
-                        // this response is mainly for logging 
-                        continue
-                    }
-                }
-            }
-        }
-    }
-
-}
