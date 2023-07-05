@@ -58,7 +58,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn test_read_until(config: &mut StreamfishConfig, args: &TestReadUntilArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut client = ReadUntilClient::connect(config, &args.log_latency).await?;
-    client.run().await?;
+    if config.readuntil.read_cache && config.readuntil.read_cache_batch_rpc {
+        client.run_dorado_cache_batch().await?;
+    } else if config.readuntil.read_cache && !config.readuntil.read_cache_batch_rpc {
+        client.run_dorado_cache_channel().await?;
+    } else {
+        unimplemented!("Pure streaming RPC not implemented on this branch")
+    }
 
     Ok(())
 

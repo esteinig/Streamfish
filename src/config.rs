@@ -29,7 +29,8 @@ pub struct ReadUntilConfig {
     pub device_name: String,                 // Dori access to Minknow
     pub channel_start: u32,
     pub channel_end: u32,
-    pub unblock_all: bool, 
+    pub init_delay: u64,
+    pub unblock_all_client: bool, 
     pub unblock_all_dori: bool,
     pub unblock_all_process: bool,
     pub unblock_duration: f64, 
@@ -42,6 +43,7 @@ pub struct ReadUntilConfig {
     pub log_latency: Option<PathBuf>,           // log latency output to file - adds latency! (1-2 bp)
     pub print_latency: bool,                    // if no latency file specified, print latency to console, otherwise standard log is used without latency
     pub read_cache: bool,
+    pub read_cache_batch_rpc: bool,
     pub read_cache_min_chunks: usize,
     pub read_cache_max_chunks: usize
 }
@@ -67,6 +69,11 @@ pub struct DoriConfig {
 
     // Basecaller/classifier error log
     pub stderr_log: PathBuf,
+
+    // Dorado config
+    pub dorado_batch_size: u32,
+    pub dorado_mm_kmer_size: u32,
+    pub dorado_mm_window_size: u32,
 
     // Kraken2 config
     pub kraken2_threads: u16,
@@ -109,9 +116,12 @@ impl StreamfishConfig {
                 device_name: "MS12345".to_string(),
                 channel_start: 1,
                 channel_end: 512,
+                // Initiation of streams, delay to let 
+                // analysis pipeline load models / indices
+                init_delay: 10,
                 // Unblock-all latency tests
-                unblock_all: false,                       // send unblock-all immediately after receipt
-                unblock_all_dori: false,                 // send unblock-all through Dori but not analysis stack
+                unblock_all_client: false,               // send unblock-all immediately after receipt
+                unblock_all_dori: false,                  // send unblock-all through Dori but not analysis stack
                 unblock_all_process: true,              // send unblock-all through configured processing stack on Dori
                 // Is this relevant to latency?
                 unblock_duration: 0.1,
@@ -120,25 +130,33 @@ impl StreamfishConfig {
                 raw_data_type: RawDataType::Uncalibrated,
                 accepted_first_chunk_classifications: vec![83, 65],
                 // May need to increase these for larger pore arrays
-                action_stream_queue_buffer: 2048,
-                dori_stream_queue_buffer: 2048,
-                logging_queue_buffer: 4096,
+                // and for stream stability - looks like in the cached
+                // endpoints with multiple responses we might cause
+                // instability
+                action_stream_queue_buffer: 10000,
+                dori_stream_queue_buffer: 20000,
+                logging_queue_buffer: 10000,
                 // Logging configuration
                 log_latency: None,
                 print_latency: false,
                 // Use streaming read cache for raw data chunks on Dori
                 read_cache: true,
+                // Send data as batched request to Dori cache RPC, otherwise single channel requests
+                read_cache_batch_rpc: true,
                 // There is some limit here where I think the UDS connection
                 // becomes overloaded and breaks Need to test two solutions:
                 // fist it maybe due to UDS instability so replace with TCP
                 // second, send sampled channel chunks in one go to Dori,
-                // instead of for each channel [unblock all process config]
-                // We maybe need to throttle the loops if using a larger
-                // cache (which is not the point of this implementation though
-                // mainly yo show it works and how we can make things with less
-                // latency)
-                read_cache_min_chunks: 10,
-                read_cache_max_chunks: 10
+                // instead of for each channel [unblock all process]
+                //
+                // I thinl it's mainly the by-channel implementation that can
+                // overload the UDS connection - empirically it seems to happen
+                // when we process by single chunks and send individually by
+                // channel... but not always, maybe some instability expected.
+                // 
+                // Still make sure to test TCP
+                read_cache_min_chunks: 1,
+                read_cache_max_chunks: 1
             },
             dori: DoriConfig {
                 uds_path: "/tmp/.dori/test".into(),
@@ -150,6 +168,9 @@ impl StreamfishConfig {
                 basecaller_path: "/opt/dorado/bin/dorado".into(),
                 classifier_path: "".into(),
                 stderr_log: "/tmp/dori.pipeline.stderr".into(),
+                dorado_batch_size: 64,
+                dorado_mm_kmer_size: 15,
+                dorado_mm_window_size: 10,
                 kraken2_threads: 4,
                 kraken2_args: "--minimum-hit-groups 1 --threads 4 --memory-mapping".into(),
                 basecaller_args: Vec::new(),
@@ -176,24 +197,21 @@ impl StreamfishConfig {
             // Construct arguments and set into config
             if streamfish_config.dori.basecaller == "dorado"  && streamfish_config.dori.classifier == "minimap2" {
                 // Minimap2 configuration integrated with Dorado - add window/k-mer options [TODO]
-                streamfish_config.dori.basecaller_args = Vec::from([
-                    "basecaller".to_string(),
-                    "--verbose".to_string(), 
-                    "--reference".to_string(), 
-                    format!("{}", streamfish_config.dori.classifier_reference_path.display()), 
-                    "--emit-sam".to_string(),
-                    format!("{}", streamfish_config.dori.basecaller_model_path.display()), 
-                    "-".to_string()
-                ]);       
+                streamfish_config.dori.basecaller_args = format!(
+                    "basecaller --verbose --batchsize {} --reference {} -k {} -w {} --emit-sam {} -",
+                    streamfish_config.dori.dorado_batch_size,
+                    streamfish_config.dori.classifier_reference_path.display(),
+                    streamfish_config.dori.dorado_mm_kmer_size,
+                    streamfish_config.dori.dorado_mm_window_size,
+                    streamfish_config.dori.basecaller_model_path.display()
+                ).split_whitespace().map(String::from).collect();  
             } else if streamfish_config.dori.basecaller == "dorado" && streamfish_config.dori.classifier == "kraken2" {
                 // Basecalling only configuration with stdout pipe from Dorado
-                streamfish_config.dori.basecaller_args = Vec::from([
-                    "basecaller".to_string(),
-                    "--emit-fastq".to_string(),
-                    format!("{}", streamfish_config.dori.basecaller_model_path.display()), 
-                    "-".to_string()
-                ]);  
-
+                streamfish_config.dori.basecaller_args = format!(
+                    "basecaller --verbose --batchsize {} --emit-fastq {} -",
+                    streamfish_config.dori.dorado_batch_size,
+                    streamfish_config.dori.basecaller_model_path.display()
+                ).split_whitespace().map(String::from).collect();
             } else {
                 panic!("Classifier configuration not supported")
             }
