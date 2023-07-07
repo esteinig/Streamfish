@@ -9,7 +9,7 @@ use quanta::{
 
 use crate::config::{
     StreamfishConfig, 
-    ReadUntilConfig
+    ReadUntilConfig, ExperimentConfig
 };
 
 use crate::server::dori::DoriClient;
@@ -93,9 +93,10 @@ pub struct ReadUntilClient {
     pub dori: DoriClient,
     pub minknow: MinKnowClient,
     pub readuntil: ReadUntilConfig,
+    pub experiment: ExperimentConfig,
 }
 
-// Do not use Strings when it can be avoided, introduces too much latency, use static strings (&str) or enumerations
+// Do not use Strings when it can be avoided, introduces too much latency, use str refs (&str) or enumerations
 // this introducted a bit of latency into the logging as string name conversion
 
 impl ReadUntilClient {
@@ -122,6 +123,7 @@ impl ReadUntilClient {
             dori: DoriClient::connect(&config).await?, 
             minknow: MinKnowClient::connect(&config.minknow).await?,
             readuntil: config.readuntil.clone(),
+            experiment: config.experiment.clone()
         })
     }
 
@@ -578,6 +580,8 @@ impl ReadUntilClient {
         let action_stream_handle = tokio::spawn(async move {
             while let Some(response) = minknow_stream.message().await.expect("Failed to get response from Minknow data stream") {
                 
+                log::info!("Number of channels received: {}", response.channels.len());
+
                 for (channel, read_data) in response.channels {
                     
                     if run_config.unblock_all_client {

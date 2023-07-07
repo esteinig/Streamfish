@@ -76,9 +76,7 @@ pub struct GlobalOptions {
     #[clap(long, short, global = true, default_value="0")]
     pub verbose: usize,
 
-     /// Environmental variable file (.env) for configuration.
-     /// 
-     /// File must be in current directory tree.
-     #[clap(long, short, global = true, default_value="true")]
-     pub dotenv: bool,
+     /// TOML configuration file for Streamfish.
+     #[clap(long, short, global = true, default_value="streamfish.toml")]
+     pub config: PathBuf,
 }

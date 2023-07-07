@@ -4,12 +4,51 @@
 use indoc::formatdoc;
 use std::path::PathBuf;
 use clap::crate_version;
+use serde::Deserialize;
 
 use crate::services::{minknow_api::data::get_live_reads_request::RawDataType, dori_api::adaptive::Decision};
 
-fn get_env_var(var: &str) -> String {
-    std::env::var(var).expect(&format!("Failed to load environmental variable: {}", var))
+fn get_env_var(var: &str) -> Option<String> {
+    std::env::var(var).ok()
 }
+
+
+
+
+// An exposed subset of configurable parameters for the user
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserConfig  {
+    pub meta: UserConfigMetadata,
+    pub minknow: UserConfigMinknow,
+    pub experiment: UserConfigExperiment
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserConfigMetadata {
+    pub name: String,
+    pub version: String,
+    pub description: String
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserConfigMinknow {
+    pub port: i32,
+    pub host: String,
+    pub token: String,
+    pub certificate: PathBuf
+}
+
+
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserConfigExperiment {
+    pub mode: String,
+    pub r#type: String,
+    pub reference: PathBuf,
+    pub targets: Vec<String>
+}
+
+
 
 #[derive(Debug, Clone)]
 pub struct MinKnowConfig {
@@ -55,11 +94,11 @@ pub struct DoriConfig {
     pub uds_path_override: bool,
     
     // Basecaller supported: `dorado`
-    pub basecaller: String, 
+    pub basecaller: &'static str, 
     // Basecaller model path
     pub basecaller_model_path: PathBuf,
     // Classifier supported: `minimap2`, `kraken2`
-    pub classifier: String,   
+    pub classifier: &'static str,   
     // Classifier reference path
     pub classifier_reference_path: PathBuf,
 
@@ -99,31 +138,32 @@ pub struct StreamfishConfig {
 }
 
 impl StreamfishConfig {
-    pub fn new(dot_env: bool) -> StreamfishConfig {
+    pub fn new(user_config: PathBuf) -> StreamfishConfig {
 
-        if dot_env {
-            dotenvy::dotenv().expect("Could not find '.env' file in directory tree");
-        }
+        let user_config_str = std::fs::read_to_string(user_config).expect("Failed to read user config TOML");
+        let user_config: UserConfig = toml::from_str(&user_config_str).expect("Failed to load user config TOML");
         
         let mut streamfish_config = Self {
             version: crate_version!().to_string(),
+
             minknow: MinKnowConfig {
-                host: get_env_var("STREAMFISH_MINKNOW_HOST"),
-                port: get_env_var("STREAMFISH_MINKNOW_PORT").parse::<i32>().unwrap(),
-                token: get_env_var("STREAMFISH_MINKNOW_TOKEN"),
-                tls_cert_path: get_env_var("STREAMFISH_MINKNOW_TLS_CERT_PATH").into(),
+                host: match get_env_var("STREAMFISH_MINKNOW_HOST") { Some(var) => var, None => user_config.minknow.host.clone() },  // needed for Docker container forward host
+                port: user_config.minknow.port.clone(),
+                token: user_config.minknow.token.clone(),
+                tls_cert_path: user_config.minknow.certificate.clone(),
             },
+
             readuntil: ReadUntilConfig {
                 // Device and target pore configuration
                 device_name: "MS12345".to_string(),
                 channel_start: 1,
                 channel_end: 512,
-                // Initiation of streams, delay to let 
-                // analysis pipeline load models / indices
+                // Initiation of streams, delays data transmission to let 
+                // analysis pipeline load models and indices on Dori
                 init_delay: 10,
                 // Unblock-all latency tests
                 unblock_all_client: false,               // send unblock-all immediately after receipt
-                unblock_all_dori: true,                  // send unblock-all through Dori but not analysis stack
+                unblock_all_dori: false,                 // send unblock-all through Dori but not analysis stack
                 unblock_all_process: false,              // send unblock-all through configured processing stack on Dori
                 // Is this relevant to latency?
                 unblock_duration: 0.1,
@@ -135,9 +175,9 @@ impl StreamfishConfig {
                 // and for stream stability - looks like in the cached
                 // endpoints with multiple responses we might cause
                 // instability
-                action_stream_queue_buffer: 10000,
-                dori_stream_queue_buffer: 20000,
-                logging_queue_buffer: 10000,
+                action_stream_queue_buffer: 50000,
+                dori_stream_queue_buffer: 50000,
+                logging_queue_buffer: 50000,
                 // Logging configuration
                 log_latency: None,
                 print_latency: false,
@@ -157,16 +197,25 @@ impl StreamfishConfig {
                 // channel... but not always, maybe some instability expected.
                 // 
                 // Still make sure to test TCP
+                //
+                // Maybe it's overloading the batch size / somethign in Dorado?
+                // When things fail they seem to be preceded by a long no mapping
+                // strectch through Dorado and a "slip-stream" where the stream
+                // runs really fast and not the usual slight stumbling because of
+                // Dorado processing - maybe something causes instability like
+                // too small a batch size? Maybe in combination with the fast
+                // stream channeling (but also occurs when batch channeling)
                 read_cache_min_chunks: 1,
-                read_cache_max_chunks: 1
+                read_cache_max_chunks: 12
             },
+
             dori: DoriConfig {
                 uds_path: "/tmp/.dori/test".into(),
                 uds_path_override: true,
                 basecaller: "dorado".into(),
                 basecaller_model_path: "/tmp/models/dna_r9.4.1_e8_fast@v3.4".into(),
                 classifier: "minimap2".into(),
-                classifier_reference_path: "/tmp/virosaurus.mmi".into(),
+                classifier_reference_path: user_config.experiment.reference.clone(),
                 basecaller_path: "/home/esteinig/dev/bin/dorado".into(),
                 classifier_path: "".into(),
                 stderr_log: "/tmp/dori.pipeline.stderr".into(),
@@ -177,7 +226,7 @@ impl StreamfishConfig {
                 // for more packages - not sure how to optimize, but a batch-size = 32 works
                 // better on the test data than batch-size = 64 or 16 - and works better in 
                 // batched transmission cache mode?
-                dorado_batch_size: 64,
+                dorado_batch_size: 128,
                 dorado_mm_kmer_size: 15,
                 dorado_mm_window_size: 10,
                 kraken2_threads: 4,
@@ -185,8 +234,9 @@ impl StreamfishConfig {
                 basecaller_args: Vec::new(),
                 classifier_args: Vec::new()
             },
-            // Default host depletion experiment - change or read from file!
-            experiment: ExperimentConfig::default()
+
+
+            experiment: ExperimentConfig::from(user_config),
         };
 
         // Some checks and argument construction for basecaller/classifier configurations
@@ -255,7 +305,64 @@ impl StreamfishConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+
+
+// A configuration for the experimental setup that should be dynamically
+// editable through linking a slow analysis loop into the stream loop 
+// (not quite sure how to do this yet) 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExperimentConfig {
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub config: Experiment
+}
+
+impl Default for ExperimentConfig {
+    fn default() -> Self {
+        Self {
+            name: String::from("Default"),
+            version: String::from("v0.1.0"),
+            description: String::from("Default adaptive sampling configuration uses host genome depletion with alignment"),
+            config: Experiment::MappingExperiment(
+                MappingExperiment::HostDepletion(MappingConfig::host_depletion(Vec::new())) // whole reference genome
+            )
+        }
+    }
+}
+
+impl ExperimentConfig {
+    pub fn from(user_config: UserConfig) -> Self {
+
+        let experiment = match user_config.experiment.mode.as_str() {
+            "mapping" => {  
+                match user_config.experiment.r#type.as_str() {
+                    "host_depletion" => {
+                        Experiment::MappingExperiment(
+                            MappingExperiment::HostDepletion(MappingConfig::host_depletion(user_config.experiment.targets))
+                        )
+                    },
+                    "targeted_sequencing" => {
+                        Experiment::MappingExperiment(
+                            MappingExperiment::TargetedSequencing(MappingConfig::targeted_sequencing(user_config.experiment.targets))
+                        )
+                    },
+                    _ => unimplemented!("Experiment type not implemented for mapping mode")
+                }
+            },
+            _ => unimplemented!("Experiment mode not implemented")
+        };
+
+        Self {
+            name: user_config.meta.name,
+            version: user_config.meta.version,
+            description: user_config.meta.description,
+            config: experiment
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub enum Experiment {
     // Alignment based experiment
     MappingExperiment(MappingExperiment)
@@ -265,16 +372,16 @@ pub enum Experiment {
 
 // An enumeration of `MappingConfig` variants wrapping configured structs
 // that constitute an experimental setup as in Readfish (Table 2)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub enum MappingExperiment {
     HostDepletion(MappingConfig),
     TargetedSequencing(MappingConfig)
 }
 impl MappingExperiment {
     // Region of interest for alignment: known host genome [implemented]
-    pub fn host_depletion() -> Self {
+    pub fn host_depletion(targets: Vec<String>) -> Self {
         MappingExperiment::HostDepletion(
-            MappingConfig::host_depletion()
+            MappingConfig::host_depletion(targets)
         )
     }
     // Includes experiment variants with regions of interes for alignment:
@@ -283,38 +390,32 @@ impl MappingExperiment {
     //   - Targeted coverage depth: all known genomes within the sample, tracked for coverage depth [not implemented]
     //   - Low abundance enrichment: all genomes within the sample that can be identified as well as those that cannot [not implemented]
     //
-    pub fn targeted_sequencing() -> Self {
+    pub fn targeted_sequencing(targets: Vec<String>) -> Self {
         MappingExperiment::TargetedSequencing(
-            MappingConfig::targeted_sequencing()
+            MappingConfig::targeted_sequencing(targets)
         )
     }
 }
 
 // A mapping SAM flag configuration for alignment with Dorado (minimap2)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub enum MappingFlags {
-    MultiOn,
-    MultiOff,
-    SingleOn,
-    SingleOff,
-    NoMap,
-    NoSeq
+    Multi,
+    Single,
+    None
 }
 impl MappingFlags {
     pub fn sam(self) -> Vec<u32> {
         match self {
-            Self::MultiOn => vec![],
-            Self::MultiOff => vec![],
-            Self::SingleOn => vec![],
-            Self::SingleOff => vec![],
-            Self::NoMap => vec![],
-            Self::NoSeq => vec![],
+            Self::Multi => vec![256, 257, 272],
+            Self::Single => vec![0, 1, 16],
+            Self::None => vec![4]
         }
     }
 }
 
 // Decision configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct DecisionConfig {
     // We use the enum values here during instantiation 
     // because calling .into() methods repeatedly
@@ -324,8 +425,12 @@ pub struct DecisionConfig {
 }
 
 // A mapping configuration for alignment as outlined in Readfish (Tables 1)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct MappingConfig {
+    // List of target sequence ids
+    pub targets: Vec<String>,
+    // Target all sequences in reference - used when target list is empty
+    pub target_all: bool,
     //	Read fragment maps multiple locations including region of interest.
     pub multi_on: DecisionConfig,
     // Read fragment maps to multiple locations not including region of interest.
@@ -342,31 +447,34 @@ pub struct MappingConfig {
     pub unblock_all: DecisionConfig
 }
 impl MappingConfig {
-    pub fn host_depletion() -> Self {
+    pub fn host_depletion(targets: Vec<String>) -> Self {
         Self {
+            targets: targets.clone(),
+            target_all: targets.is_empty(),
+
             multi_on: DecisionConfig { 
                 decision: Decision::Unblock.into(), 
-                flags: MappingFlags::MultiOn.sam() 
+                flags: MappingFlags::Multi.sam() 
             }, 
             multi_off: DecisionConfig { 
                 decision: Decision::Proceed.into(), 
-                flags: MappingFlags::MultiOff.sam() 
+                flags: MappingFlags::Multi.sam() 
             }, 
-            single_on:  DecisionConfig { 
+            single_on: DecisionConfig { 
                 decision: Decision::Unblock.into(), 
-                flags: MappingFlags::SingleOn.sam() 
+                flags: MappingFlags::Single.sam() 
             }, 
-            single_off:  DecisionConfig { 
+            single_off: DecisionConfig { 
                 decision: Decision::Proceed.into(), 
-                flags: MappingFlags::SingleOff.sam() 
+                flags: MappingFlags::Single.sam() 
             }, 
             no_map: DecisionConfig { 
                 decision: Decision::Proceed.into(), 
-                flags: MappingFlags::NoMap.sam() 
+                flags: MappingFlags::None.sam() 
             },
             no_seq: DecisionConfig { 
                 decision: Decision::Proceed.into(), 
-                flags: MappingFlags::NoSeq.sam() 
+                flags: MappingFlags::None.sam() 
             },
             unblock_all: DecisionConfig { 
                 decision: Decision::Unblock.into(), 
@@ -374,31 +482,34 @@ impl MappingConfig {
             },
         }
     }
-    pub fn targeted_sequencing() -> Self {
+    pub fn targeted_sequencing(targets: Vec<String>) -> Self {
         Self {
+            targets: targets.clone(),
+            target_all: targets.is_empty(),
+
             multi_on: DecisionConfig { 
                 decision: Decision::StopData.into(), 
-                flags: MappingFlags::MultiOn.sam() 
+                flags: MappingFlags::Multi.sam() 
             }, 
             multi_off: DecisionConfig { 
                 decision: Decision::Proceed.into(), 
-                flags: MappingFlags::MultiOff.sam() 
+                flags: MappingFlags::Multi.sam() 
             }, 
             single_on:  DecisionConfig { 
                 decision: Decision::StopData.into(), 
-                flags: MappingFlags::SingleOn.sam() 
+                flags: MappingFlags::Single.sam() 
             }, 
             single_off:  DecisionConfig { 
                 decision: Decision::Unblock.into(), 
-                flags: MappingFlags::SingleOff.sam() 
+                flags: MappingFlags::Single.sam() 
             }, 
             no_map: DecisionConfig { 
                 decision: Decision::Proceed.into(), 
-                flags: MappingFlags::NoMap.sam() 
+                flags: MappingFlags::None.sam() 
             },
             no_seq: DecisionConfig { 
                 decision: Decision::Proceed.into(), 
-                flags: MappingFlags::NoSeq.sam() 
+                flags: MappingFlags::None.sam() 
             },
             unblock_all: DecisionConfig { 
                 decision: Decision::Unblock.into(), 
@@ -406,15 +517,15 @@ impl MappingConfig {
             }
         }
     }
-    // Main method to pass a flag and get the configured experiment decision
-    pub fn decision(&self, flag: &u32) -> i32 {
-        if self.multi_on.flags.contains(flag) {
+    // Main method to pass a flag and get the configured experiment decision - contains doesn;t work with str slices
+    pub fn decision(&self, flag: &u32, tid: &str) -> i32 {
+        if self.multi_on.flags.contains(flag) && (self.target_all || self.targets.iter().any(|x| x == tid)) {
             self.multi_on.decision
-        } else if self.multi_off.flags.contains(flag) {
+        } else if self.multi_off.flags.contains(flag) && (self.target_all || !self.targets.iter().any(|x| x == tid)) {  // target all sequences active (no sequences in targets) == any sequence mapping off target as targets do not exist
             self.multi_off.decision
-        } else if self.single_on.flags.contains(flag) {
+        } else if self.single_on.flags.contains(flag) && (self.target_all || self.targets.iter().any(|x| x == tid)){
             self.single_on.decision
-        } else if self.single_off.flags.contains(flag) {
+        } else if self.single_off.flags.contains(flag) && (self.target_all || !self.targets.iter().any(|x| x == tid)) { // target all sequences active (no sequences in targets) == any sequence mapping off target as targets do not exist
             self.single_off.decision
         } else {
             // No sequence is not possible, so we otherwise 
@@ -423,45 +534,18 @@ impl MappingConfig {
         }
     }
     // A test method that returns an unblock decision for unblock-all testing
-    pub fn unblock_all(&self, flag: &u32) -> i32 {
-        if self.unblock_all.flags.contains(flag) {
-            // Not action, always return Unblock for testing
+    pub fn unblock_all(&self, flag: &u32, tid: &str) -> i32 {
+        if self.unblock_all.flags.contains(flag) && self.targets.iter().any(|x| x == tid) {
+            // No action, always return unblock for testing
         }
         self.unblock_all.decision
     }
 }
 
 
-
-
-// A configuration for the experimental setup that should be dynamically
-// editable through linking a slow analysis loop into the stream loop 
-// (not quite sure how to do this yet) 
-#[derive(Debug, Clone)]
-pub struct ExperimentConfig {
-    pub name: String,
-    pub version: String,
-    pub description: String,
-    pub config: Experiment
-}
-
-impl Default for ExperimentConfig {
-    fn default() -> Self {
-        Self {
-            name: String::from("Default"),
-            version: String::from("v0.1.0"),
-            description: String::from("Default adaptive sampling configuration uses host genome depletion with alignment"),
-            config: Experiment::MappingExperiment(
-                MappingExperiment::HostDepletion(MappingConfig::host_depletion())
-            )
-        }
-    }
-}
-
 impl std::fmt::Display for StreamfishConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let s = formatdoc! {"
-
 
         ========================
         Streamfish configuration

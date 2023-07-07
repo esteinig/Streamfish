@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logger();
 
     let terminal = App::parse();
-    let mut config = StreamfishConfig::new(terminal.global.dotenv);
+    let mut config = StreamfishConfig::new(terminal.global.config);
 
     match &terminal.command {
 

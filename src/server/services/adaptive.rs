@@ -1,6 +1,6 @@
 
 use crate::client::minknow::MinKnowClient;
-use crate::config::{StreamfishConfig, MappingExperiment, Experiment, MappingConfig};
+use crate::config::{StreamfishConfig, MappingExperiment, Experiment};
 use crate::services::dori_api::adaptive::{DoradoStreamRequest, DoradoStreamResponse};
 use crate::services::dori_api::adaptive::adaptive_sampling_server::AdaptiveSampling;
 use crate::services::dori_api::adaptive::{
@@ -87,8 +87,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let experiment = self.config.experiment.config.clone();
 
         let mapping_config = match experiment {
-            Experiment::MappingExperiment(MappingExperiment::HostDepletion(config)) => config,
-            Experiment::MappingExperiment(MappingExperiment::TargetedSequencing(config)) => config
+            Experiment::MappingExperiment(MappingExperiment::HostDepletion(host_depletion_config)) => host_depletion_config,
+            Experiment::MappingExperiment(MappingExperiment::TargetedSequencing(targeted_sequencing_config)) => targeted_sequencing_config
         };
 
         // Define the decisions as <i32> - repeated into() calls in the stream processing
@@ -148,7 +148,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                     tokio::time::sleep(tokio::time::Duration::new(run_config_1.readuntil.init_delay, 0)).await;
                     continue;
                 }
-    
+                
                 let channel_index = (channel-1) as usize; // need to cast
                 let read_cache = &mut channel_caches[channel_index];
                 
@@ -158,9 +158,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                     // before any further processing - this gets around the mutable
                     // borrow issue below and allows for other decisions to send
                     // cache removal requests later
-                    log::info!("Received remove from cache request: {} {}", &channel, &number);
+                    log::debug!("Removing chunks from cache on request: {} {}", &channel, &number);
                     read_cache.remove(&number);
-
                     continue;
 
                 } else {
@@ -176,7 +175,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                         // If we have less chunks than the minimum number required
                         // send a continue response for more data acquisition on 
                         // this read (no action)
-                        continue
+                        continue;
 
                     } else if num_chunks > run_config_1.readuntil.read_cache_max_chunks {
                         // If we have reached the maximum chunks in cache,
@@ -187,14 +186,13 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
                         // read_cache.remove(&number); not possible!
 
-                        log::info!("Sending stop data decision: {} {} (chunks = {})", &channel, &number, &num_chunks);
+                        log::debug!("Maximum chunk size exceeded, stop data decision: {} {} (chunks = {})", &channel, &number, &num_chunks);
 
-                        let response = DoradoCacheResponse { 
+                        yield  DoradoCacheResponse { 
                             channel, 
                             number,
                             decision: stop_decision
-                        };
-                        yield response
+                        }
 
                     } else {
                         // If we have an acceptable number of chunks between the limits, process 
@@ -209,8 +207,9 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                                 number,
                                 decision: unblock_decision
                             }
+
                         } else {
-                            log::info!("Processing cached read: {} {} (chunks = {})", &channel, &number, &num_chunks);
+                            log::debug!("Processing cached read: {} {} (chunks = {})", &channel, &number, &num_chunks);
 
                             let data: Vec<String> = cached.iter().map(|raw_data| {
                                 get_dorado_input_string(
@@ -228,7 +227,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
                             // Send a none decision response to take no action after writing into process
                             // this response is mainly for logging 
-                            continue
+                            continue;
                         }
                     }
                 }
@@ -256,12 +255,14 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                         let identifiers: Vec<&str> = content[0].split("::").collect();
 
                         let flag = content[1].parse::<u32>().unwrap();
-                        log::info!("TID Dorado: {} {}", &flag, content[2]);
+                        let tid = content[2];
 
                         let decision = match run_config_2.readuntil.unblock_all_process {
-                            true => mapping_config.unblock_all(&flag),
-                            false => mapping_config.decision(&flag)
+                            true => mapping_config.unblock_all(&flag, tid),
+                            false => mapping_config.decision(&flag, tid)
                         };
+
+                        log::info!("mapped={} flag={} action={}", tid, &flag, &decision);
 
                         yield DoradoCacheResponse { 
                             channel: identifiers[1].parse::<u32>().unwrap(), 
@@ -301,8 +302,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let experiment = self.config.experiment.config.clone();
 
         let mapping_config = match experiment {
-            Experiment::MappingExperiment(MappingExperiment::HostDepletion(config)) => config,
-            Experiment::MappingExperiment(MappingExperiment::TargetedSequencing(config)) => config
+            Experiment::MappingExperiment(MappingExperiment::HostDepletion(host_depletion_config)) => host_depletion_config,
+            Experiment::MappingExperiment(MappingExperiment::TargetedSequencing(targeted_sequencing_config)) => targeted_sequencing_config
         };
 
         // Define the decisions as <i32> - repeated into() calls in the stream processing
@@ -375,7 +376,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                         // before any further processing - this gets around the mutable
                         // borrow issue below and allows for other decisions to send
                         // cache removal requests later
-                        log::info!("Received remove from cache request: {} {}", &channel, &read_data.number);
+                        log::debug!("Received remove from cache request: {} {}", &channel, &read_data.number);
                         read_cache.remove(&read_data.number);
     
                         continue;
@@ -395,7 +396,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                             // If we have less chunks than the minimum number required
                             // send a continue response for more data acquisition on 
                             // this read (no action)
-                            continue
+                            continue;
     
                         } else if num_chunks > run_config_1.readuntil.read_cache_max_chunks {
                             // If we have reached the maximum chunks in cache,
@@ -405,15 +406,13 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                             // below because of the required mutable borrow of the cache
     
                             // read_cache.remove(&number); not possible!
-    
-                            log::info!("Sending stop data decision: {} {} (chunks = {})", &channel, &number, &num_chunks);
-    
-                            let response = DoradoCacheResponse { 
+                            log::debug!("Sending stop data decision: {} {} (chunks = {})", &channel, &number, &num_chunks);
+
+                            yield  DoradoCacheResponse { 
                                 channel, 
                                 number,
                                 decision: stop_decision
-                            };
-                            yield response
+                            }
     
                         } else {
                             // If we have an acceptable number of chunks between the limits, process 
@@ -430,8 +429,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                                     decision: unblock_decision
                                 }
                             } else {
-
-                                log::info!("Processing cached read: {} {} (chunks = {})", &channel, &number, &num_chunks);
+                                log::debug!("Processing cached read: {} {} (chunks = {})", &channel, &number, &num_chunks);
     
                                 let data: Vec<String> = cached.iter().map(|raw_data| {
                                     get_dorado_input_string(
@@ -449,7 +447,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         
                                 // Send a none decision response to take no action after writing into process
                                 // this response is mainly for logging 
-                                continue
+                                continue;
                             }
                             
                         }
@@ -479,12 +477,15 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                         let identifiers: Vec<&str> = content[0].split("::").collect();
 
                         let flag = content[1].parse::<u32>().unwrap();
-                        log::info!("TID Dorado: {} {}", &flag, content[2]);
+                        let tid = content[2];
+
 
                         let decision = match run_config_2.readuntil.unblock_all_process {
-                            true => mapping_config.unblock_all(&flag),
-                            false => mapping_config.decision(&flag)
+                            true => mapping_config.unblock_all(&flag, tid),
+                            false => mapping_config.decision(&flag, tid)
                         };
+
+                        log::info!("mapped={} flag={} action={}", tid, &flag, &decision);
 
                         yield DoradoCacheResponse { 
                             channel: identifiers[1].parse::<u32>().unwrap(), 
