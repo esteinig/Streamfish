@@ -384,7 +384,7 @@ impl MappingExperiment {
             MappingConfig::host_depletion(targets)
         )
     }
-    // Includes experiment variants with regions of interes for alignment:
+    // Includes experiment variants with regions of interest for alignment:
     //
     //   - Tageted regions: known regions from one or more genomes [implemented]
     //   - Targeted coverage depth: all known genomes within the sample, tracked for coverage depth [not implemented]
@@ -517,7 +517,7 @@ impl MappingConfig {
             }
         }
     }
-    // Main method to pass a flag and get the configured experiment decision - contains doesn;t work with str slices
+    // Main method to pass a flag and get the configured experiment decision - contains doesn not work with str slices
     pub fn decision(&self, flag: &u32, tid: &str) -> i32 {
         if self.multi_on.flags.contains(flag) && (self.target_all || self.targets.iter().any(|x| x == tid)) {
             self.multi_on.decision
