@@ -46,6 +46,14 @@ enum DoradoCacheRequestType {
 }
 
 
+enum Decision {
+  PROCEED = 0;
+  STOP_DATA = 1;
+  UNBLOCK = 2;
+  NONE = 3;
+}
+
+
 // Streaming as batch
 message DoradoCacheBatchRequest {
   
@@ -84,13 +92,6 @@ message DoradoCacheChannelRequest {
 
 message DoradoCacheResponse { 
 
-  enum Decision {
-    CONTINUE = 0;
-    STOP = 1;
-    UNBLOCK = 2;
-    NONE = 3;
-  }
-
   // The number of the read in the channel returned in `minknow_api.data.GetLiveReadsResponse.ReadData.number` 
   uint32 number = 1;
 
@@ -122,13 +123,6 @@ message DoradoStreamRequest {
 }
 
 message DoradoStreamResponse { 
-
-  enum Decision {
-    CONTINUE = 0;
-    STOP = 1;
-    UNBLOCK = 2;
-    NONE = 3;
-  }
 
   // The number of the read in the channel returned in `minknow_api.data.GetLiveReadsResponse.ReadData.number` 
   uint32 number = 1;

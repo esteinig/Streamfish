@@ -5,7 +5,7 @@ use indoc::formatdoc;
 use std::path::PathBuf;
 use clap::crate_version;
 
-use crate::services::minknow_api::data::get_live_reads_request::RawDataType;
+use crate::services::{minknow_api::data::get_live_reads_request::RawDataType, dori_api::adaptive::Decision};
 
 fn get_env_var(var: &str) -> String {
     std::env::var(var).expect(&format!("Failed to load environmental variable: {}", var))
@@ -94,6 +94,8 @@ pub struct StreamfishConfig {
     pub minknow: MinKnowConfig,
     // ReadUntil client configuration
     pub readuntil: ReadUntilConfig,
+    // Adaptive sampling experiment configuration
+    pub experiment: ExperimentConfig
 }
 
 impl StreamfishConfig {
@@ -121,8 +123,8 @@ impl StreamfishConfig {
                 init_delay: 10,
                 // Unblock-all latency tests
                 unblock_all_client: false,               // send unblock-all immediately after receipt
-                unblock_all_dori: false,                  // send unblock-all through Dori but not analysis stack
-                unblock_all_process: true,              // send unblock-all through configured processing stack on Dori
+                unblock_all_dori: true,                  // send unblock-all through Dori but not analysis stack
+                unblock_all_process: false,              // send unblock-all through configured processing stack on Dori
                 // Is this relevant to latency?
                 unblock_duration: 0.1,
                 // Signal data configuration
@@ -142,14 +144,14 @@ impl StreamfishConfig {
                 // Use streaming read cache for raw data chunks on Dori
                 read_cache: true,
                 // Send data as batched request to Dori cache RPC, otherwise single channel requests
-                read_cache_batch_rpc: true,
+                read_cache_batch_rpc: false,
                 // There is some limit here where I think the UDS connection
                 // becomes overloaded and breaks Need to test two solutions:
                 // fist it maybe due to UDS instability so replace with TCP
                 // second, send sampled channel chunks in one go to Dori,
                 // instead of for each channel [unblock all process]
                 //
-                // I thinl it's mainly the by-channel implementation that can
+                // I think it's mainly the by-channel implementation that can
                 // overload the UDS connection - empirically it seems to happen
                 // when we process by single chunks and send individually by
                 // channel... but not always, maybe some instability expected.
@@ -165,9 +167,16 @@ impl StreamfishConfig {
                 basecaller_model_path: "/tmp/models/dna_r9.4.1_e8_fast@v3.4".into(),
                 classifier: "minimap2".into(),
                 classifier_reference_path: "/tmp/virosaurus.mmi".into(),
-                basecaller_path: "/opt/dorado/bin/dorado".into(),
+                basecaller_path: "/home/esteinig/dev/bin/dorado".into(),
                 classifier_path: "".into(),
                 stderr_log: "/tmp/dori.pipeline.stderr".into(),
+                // There are some diminishing returns for batch size reduction - it probably 
+                // depend on the number of pores sequencing at the time - too small a batch 
+                // size and latency increases because the stream is pushing too many packets
+                // too big a batch size and latency increases because basecaller is waiting 
+                // for more packages - not sure how to optimize, but a batch-size = 32 works
+                // better on the test data than batch-size = 64 or 16 - and works better in 
+                // batched transmission cache mode?
                 dorado_batch_size: 64,
                 dorado_mm_kmer_size: 15,
                 dorado_mm_window_size: 10,
@@ -175,8 +184,9 @@ impl StreamfishConfig {
                 kraken2_args: "--minimum-hit-groups 1 --threads 4 --memory-mapping".into(),
                 basecaller_args: Vec::new(),
                 classifier_args: Vec::new()
-
-            }
+            },
+            // Default host depletion experiment - change or read from file!
+            experiment: ExperimentConfig::default()
         };
 
         // Some checks and argument construction for basecaller/classifier configurations
@@ -198,7 +208,7 @@ impl StreamfishConfig {
             if streamfish_config.dori.basecaller == "dorado"  && streamfish_config.dori.classifier == "minimap2" {
                 // Minimap2 configuration integrated with Dorado - add window/k-mer options [TODO]
                 streamfish_config.dori.basecaller_args = format!(
-                    "basecaller --verbose --batchsize {} --reference {} -k {} -w {} --emit-sam {} -",
+                    "basecaller --verbose --batchsize {} --reference {} -k {} -w {} -g 8 --emit-sam {} -",
                     streamfish_config.dori.dorado_batch_size,
                     streamfish_config.dori.classifier_reference_path.display(),
                     streamfish_config.dori.dorado_mm_kmer_size,
@@ -242,6 +252,209 @@ impl StreamfishConfig {
 
         return streamfish_config
 
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Experiment {
+    // Alignment based experiment
+    MappingExperiment(MappingExperiment)
+}
+
+
+
+// An enumeration of `MappingConfig` variants wrapping configured structs
+// that constitute an experimental setup as in Readfish (Table 2)
+#[derive(Debug, Clone)]
+pub enum MappingExperiment {
+    HostDepletion(MappingConfig),
+    TargetedSequencing(MappingConfig)
+}
+impl MappingExperiment {
+    // Region of interest for alignment: known host genome [implemented]
+    pub fn host_depletion() -> Self {
+        MappingExperiment::HostDepletion(
+            MappingConfig::host_depletion()
+        )
+    }
+    // Includes experiment variants with regions of interes for alignment:
+    //
+    //   - Tageted regions: known regions from one or more genomes [implemented]
+    //   - Targeted coverage depth: all known genomes within the sample, tracked for coverage depth [not implemented]
+    //   - Low abundance enrichment: all genomes within the sample that can be identified as well as those that cannot [not implemented]
+    //
+    pub fn targeted_sequencing() -> Self {
+        MappingExperiment::TargetedSequencing(
+            MappingConfig::targeted_sequencing()
+        )
+    }
+}
+
+// A mapping SAM flag configuration for alignment with Dorado (minimap2)
+#[derive(Debug, Clone)]
+pub enum MappingFlags {
+    MultiOn,
+    MultiOff,
+    SingleOn,
+    SingleOff,
+    NoMap,
+    NoSeq
+}
+impl MappingFlags {
+    pub fn sam(self) -> Vec<u32> {
+        match self {
+            Self::MultiOn => vec![],
+            Self::MultiOff => vec![],
+            Self::SingleOn => vec![],
+            Self::SingleOff => vec![],
+            Self::NoMap => vec![],
+            Self::NoSeq => vec![],
+        }
+    }
+}
+
+// Decision configuration
+#[derive(Debug, Clone)]
+pub struct DecisionConfig {
+    // We use the enum values here during instantiation 
+    // because calling .into() methods repeatedly
+    // introduces latency
+    pub decision: i32, 
+    pub flags: Vec<u32>
+}
+
+// A mapping configuration for alignment as outlined in Readfish (Tables 1)
+#[derive(Debug, Clone)]
+pub struct MappingConfig {
+    //	Read fragment maps multiple locations including region of interest.
+    pub multi_on: DecisionConfig,
+    // Read fragment maps to multiple locations not including region of interest.
+    pub multi_off: DecisionConfig,
+    // Read fragment only maps to region of interest.
+    pub single_on: DecisionConfig,
+    // Read fragment maps to one location but it is not a region of interest.
+    pub single_off: DecisionConfig,
+    // Read fragment does not map to the reference.
+    pub no_map: DecisionConfig,
+    // No sequence was obtained for the signal fragment.
+    pub no_seq: DecisionConfig,
+    // No sequence was obtained for the signal fragment.
+    pub unblock_all: DecisionConfig
+}
+impl MappingConfig {
+    pub fn host_depletion() -> Self {
+        Self {
+            multi_on: DecisionConfig { 
+                decision: Decision::Unblock.into(), 
+                flags: MappingFlags::MultiOn.sam() 
+            }, 
+            multi_off: DecisionConfig { 
+                decision: Decision::Proceed.into(), 
+                flags: MappingFlags::MultiOff.sam() 
+            }, 
+            single_on:  DecisionConfig { 
+                decision: Decision::Unblock.into(), 
+                flags: MappingFlags::SingleOn.sam() 
+            }, 
+            single_off:  DecisionConfig { 
+                decision: Decision::Proceed.into(), 
+                flags: MappingFlags::SingleOff.sam() 
+            }, 
+            no_map: DecisionConfig { 
+                decision: Decision::Proceed.into(), 
+                flags: MappingFlags::NoMap.sam() 
+            },
+            no_seq: DecisionConfig { 
+                decision: Decision::Proceed.into(), 
+                flags: MappingFlags::NoSeq.sam() 
+            },
+            unblock_all: DecisionConfig { 
+                decision: Decision::Unblock.into(), 
+                flags: vec![4, 0, 10]  // NOT USED - tests latency for unblock-all
+            },
+        }
+    }
+    pub fn targeted_sequencing() -> Self {
+        Self {
+            multi_on: DecisionConfig { 
+                decision: Decision::StopData.into(), 
+                flags: MappingFlags::MultiOn.sam() 
+            }, 
+            multi_off: DecisionConfig { 
+                decision: Decision::Proceed.into(), 
+                flags: MappingFlags::MultiOff.sam() 
+            }, 
+            single_on:  DecisionConfig { 
+                decision: Decision::StopData.into(), 
+                flags: MappingFlags::SingleOn.sam() 
+            }, 
+            single_off:  DecisionConfig { 
+                decision: Decision::Unblock.into(), 
+                flags: MappingFlags::SingleOff.sam() 
+            }, 
+            no_map: DecisionConfig { 
+                decision: Decision::Proceed.into(), 
+                flags: MappingFlags::NoMap.sam() 
+            },
+            no_seq: DecisionConfig { 
+                decision: Decision::Proceed.into(), 
+                flags: MappingFlags::NoSeq.sam() 
+            },
+            unblock_all: DecisionConfig { 
+                decision: Decision::Unblock.into(), 
+                flags: vec![4, 0, 10]  // NOT USED - tests latency for unblock-all
+            }
+        }
+    }
+    // Main method to pass a flag and get the configured experiment decision
+    pub fn decision(&self, flag: &u32) -> i32 {
+        if self.multi_on.flags.contains(flag) {
+            self.multi_on.decision
+        } else if self.multi_off.flags.contains(flag) {
+            self.multi_off.decision
+        } else if self.single_on.flags.contains(flag) {
+            self.single_on.decision
+        } else if self.single_off.flags.contains(flag) {
+            self.single_off.decision
+        } else {
+            // No sequence is not possible, so we otherwise 
+            // return no mapping status decision
+            self.no_map.decision
+        }
+    }
+    // A test method that returns an unblock decision for unblock-all testing
+    pub fn unblock_all(&self, flag: &u32) -> i32 {
+        if self.unblock_all.flags.contains(flag) {
+            // Not action, always return Unblock for testing
+        }
+        self.unblock_all.decision
+    }
+}
+
+
+
+
+// A configuration for the experimental setup that should be dynamically
+// editable through linking a slow analysis loop into the stream loop 
+// (not quite sure how to do this yet) 
+#[derive(Debug, Clone)]
+pub struct ExperimentConfig {
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub config: Experiment
+}
+
+impl Default for ExperimentConfig {
+    fn default() -> Self {
+        Self {
+            name: String::from("Default"),
+            version: String::from("v0.1.0"),
+            description: String::from("Default adaptive sampling configuration uses host genome depletion with alignment"),
+            config: Experiment::MappingExperiment(
+                MappingExperiment::HostDepletion(MappingConfig::host_depletion())
+            )
+        }
     }
 }
 

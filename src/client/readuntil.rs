@@ -2,21 +2,31 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use uuid::Uuid;
-use quanta::{Clock, Instant};
+use quanta::{
+    Clock, 
+    Instant
+};
 
-use crate::config::{StreamfishConfig, ReadUntilConfig};
+use crate::config::{
+    StreamfishConfig, 
+    ReadUntilConfig
+};
 
 use crate::server::dori::DoriClient;
 use crate::client::minknow::MinKnowClient;
 use crate::client::services::data::DataClient;
 
-use crate::services::dori_api::adaptive::{DoradoCacheRequestType, DoradoCacheChannelRequest};
-use crate::services::dori_api::adaptive::dorado_cache_response::Decision;
-use crate::services::minknow_api::data::get_live_reads_request::action;
-use crate::services::dori_api::adaptive::DoradoCacheBatchRequest;
+use crate::services::dori_api::adaptive::{
+    DoradoCacheRequestType, 
+    DoradoCacheChannelRequest
+};
+
+use crate::services::dori_api::adaptive::Decision;
 use crate::client::services::acquisition::AcquisitionClient;
-use crate::services::minknow_api::acquisition::MinknowStatus;
 use crate::services::minknow_api::data::GetLiveReadsRequest;
+use crate::services::minknow_api::acquisition::MinknowStatus;
+use crate::services::dori_api::adaptive::DoradoCacheBatchRequest;
+use crate::services::minknow_api::data::get_live_reads_request::action;
 
 use crate::services::minknow_api::data::get_live_reads_request::{
     Actions, 
@@ -121,12 +131,12 @@ impl ReadUntilClient {
         // loops introduce a tiny bit of latency! Make sure calls like this are minimized.
         
         // Actions sent to MinKNOW
-        let stop_decision: i32 = Decision::Stop.into();
+        let stop_decision: i32 = Decision::StopData.into();
         let unblock_decision: i32 = Decision::Unblock.into();
 
         // No actions sent to MinKNOW
         let _: i32 = Decision::None.into();     
-        let _: i32 = Decision::Continue.into();
+        let _: i32 = Decision::Proceed.into();
 
         // Request type to Dori
         let data_request: i32 = DoradoCacheRequestType::Data.into();
@@ -431,12 +441,12 @@ impl ReadUntilClient {
         // loops introduce a tiny bit of latency! Make sure calls like this are minimized.
         
         // Actions sent to MinKNOW
-        let stop_decision: i32 = Decision::Stop.into();
+        let stop_decision: i32 = Decision::StopData.into();
         let unblock_decision: i32 = Decision::Unblock.into();
 
         // No actions sent to MinKNOW
         let _: i32 = Decision::None.into();     
-        let _: i32 = Decision::Continue.into();
+        let _: i32 = Decision::Proceed.into();
 
         // Request type to Dori
         let data_request: i32 = DoradoCacheRequestType::Data.into();

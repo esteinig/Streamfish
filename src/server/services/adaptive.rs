@@ -1,13 +1,13 @@
 
 use crate::client::minknow::MinKnowClient;
-use crate::config::StreamfishConfig;
+use crate::config::{StreamfishConfig, MappingExperiment, Experiment, MappingConfig};
 use crate::services::dori_api::adaptive::{DoradoStreamRequest, DoradoStreamResponse};
 use crate::services::dori_api::adaptive::adaptive_sampling_server::AdaptiveSampling;
 use crate::services::dori_api::adaptive::{
     DoradoCacheBatchRequest, 
     DoradoCacheChannelRequest, 
     DoradoCacheResponse, 
-    dorado_cache_response::Decision, 
+    Decision, 
     DoradoCacheRequestType
 };
 
@@ -83,15 +83,20 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let run_config_1 = self.config.clone();
         let run_config_2 = self.config.clone();
 
+        // Adaptive sampling experiment configuration
+        let experiment = self.config.experiment.config.clone();
+
+        let mapping_config = match experiment {
+            Experiment::MappingExperiment(MappingExperiment::HostDepletion(config)) => config,
+            Experiment::MappingExperiment(MappingExperiment::TargetedSequencing(config)) => config
+        };
+
         // Define the decisions as <i32> - repeated into() calls in the stream processing
         // loops introduce a tiny bit of latency! Make sure calls like this are minimized.
         
         // Action sent to MinKNOW
-        let stop_decision: i32 = Decision::Stop.into();
+        let stop_decision: i32 = Decision::StopData.into();
         let unblock_decision: i32 = Decision::Unblock.into();
-
-        // No action sent to MinKNOW 
-        let continue_decision: i32 = Decision::Continue.into();
 
         // Request types
         let init_request: i32 = DoradoCacheRequestType::Init.into();
@@ -241,14 +246,30 @@ impl AdaptiveSampling for AdaptiveSamplingService {
             while let Some(line) = pipeline_stdout.next().await {
                 let line = line?;
 
-                // log::info!("Reading line output from pipeline");
-                if line.starts_with('@') { 
-                    continue; 
-                } else {
-                    match test {
-                        true => yield cache_process_dorado_read_sam(&line, &run_config_2, unblock_decision, continue_decision).await,
-                        false => yield cache_process_dorado_read_sam(&line, &run_config_2, unblock_decision, continue_decision).await
-                    }
+                match test {
+                    // SAM HEADER OUTPUTS - MAPPING CONFIGURATION
+                    true => {
+                        if line.starts_with('@') { 
+                            continue; 
+                        }
+                        let content: Vec<&str> = line.split('\t').collect();
+                        let identifiers: Vec<&str> = content[0].split("::").collect();
+
+                        let flag = content[1].parse::<u32>().unwrap();
+                        log::info!("TID Dorado: {} {}", &flag, content[2]);
+
+                        let decision = match run_config_2.readuntil.unblock_all_process {
+                            true => mapping_config.unblock_all(&flag),
+                            false => mapping_config.decision(&flag)
+                        };
+
+                        yield DoradoCacheResponse { 
+                            channel: identifiers[1].parse::<u32>().unwrap(), 
+                            number: identifiers[2].parse::<u32>().unwrap(), 
+                            decision
+                        }
+                    },
+                    false => continue
                 }
             }
         };
@@ -276,15 +297,20 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let run_config_1 = self.config.clone();
         let run_config_2 = self.config.clone();
 
+        // Experiment config - see how to update this one
+        let experiment = self.config.experiment.config.clone();
+
+        let mapping_config = match experiment {
+            Experiment::MappingExperiment(MappingExperiment::HostDepletion(config)) => config,
+            Experiment::MappingExperiment(MappingExperiment::TargetedSequencing(config)) => config
+        };
+
         // Define the decisions as <i32> - repeated into() calls in the stream processing
         // loops introduce a tiny bit of latency! Make sure calls like this are minimized.
         
         // Action sent to MinKNOW
-        let stop_decision: i32 = Decision::Stop.into();
+        let stop_decision: i32 = Decision::StopData.into();
         let unblock_decision: i32 = Decision::Unblock.into();
-
-        // No action sent to MinKNOW 
-        let continue_decision: i32 = Decision::Continue.into();
 
         // Request types
         let init_request: i32 = DoradoCacheRequestType::Init.into();
@@ -426,7 +452,6 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                                 continue
                             }
                             
-                            
                         }
                     }
                 }
@@ -444,16 +469,32 @@ impl AdaptiveSampling for AdaptiveSamplingService {
             while let Some(line) = pipeline_stdout.next().await {
                 let line = line?;
 
-                // log::info!("Reading line output from pipeline");
-                if line.starts_with('@') { 
-                    continue; 
-                } else {
-                    match test {
-                        true => yield cache_process_dorado_read_sam(&line, &run_config_2, unblock_decision, continue_decision).await,
-                        false => yield cache_process_dorado_read_sam(&line, &run_config_2, unblock_decision, continue_decision).await
-                    }
+                match test {
+                    // SAM HEADER OUTPUTS - MAPPING CONFIGURATION
+                    true => {
+                        if line.starts_with('@') { 
+                            continue; 
+                        }
+                        let content: Vec<&str> = line.split('\t').collect();
+                        let identifiers: Vec<&str> = content[0].split("::").collect();
+
+                        let flag = content[1].parse::<u32>().unwrap();
+                        log::info!("TID Dorado: {} {}", &flag, content[2]);
+
+                        let decision = match run_config_2.readuntil.unblock_all_process {
+                            true => mapping_config.unblock_all(&flag),
+                            false => mapping_config.decision(&flag)
+                        };
+
+                        yield DoradoCacheResponse { 
+                            channel: identifiers[1].parse::<u32>().unwrap(), 
+                            number: identifiers[2].parse::<u32>().unwrap(), 
+                            decision
+                        }
+                    },
+                    false => continue
                 }
-            }
+        }
         };
 
 
@@ -475,9 +516,11 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 // Initiates the process pipeline from configuration
 fn init_pipeline(config: &StreamfishConfig) -> (ChildStdin, Lines<BufReader<ChildStdout>>) {
 
-    log::info!("Spawned analysis pipeline...");
+    log::info!("Spawning processes in analysis pipeline...");
 
-    let process_stderr = Stdio::from(std::fs::File::create("basecaller.err").expect("Failed to create basecaller stderr file: basecaller.err"));
+    let process_stderr = Stdio::from(std::fs::File::create(config.dori.stderr_log.clone()).expect(
+        &format!("Failed to create basecaller stderr file: {}", config.dori.stderr_log.display())
+    ));
 
     let mut pipeline_process = Command::new(config.dori.basecaller_path.as_os_str())
         .args(config.dori.basecaller_args.clone())
@@ -495,64 +538,6 @@ fn init_pipeline(config: &StreamfishConfig) -> (ChildStdin, Lines<BufReader<Chil
     )
 }
 
-
-// Dorado output processing - handles SAM output format from aligned reads 
-// and uses the configuration to set the unblock decision sent back to MinKNOW
-//
-// SAM specifictation for Dorado: https://github.com/nanoporetech/dorado/blob/master/documentation/SAM.md
-async fn cache_process_dorado_read_sam(line: &str, config: &StreamfishConfig, unblock_decision: i32, continue_decision: i32) -> DoradoCacheResponse {
-                
-        let content: Vec<&str> = line.split('\t').collect();
-        let identifiers: Vec<&str> = content[0].split("::").collect();
-
-        let flag = content[1].parse::<u32>().unwrap();
-        log::info!("TID Dorado: {} {}", &flag, content[2]);
-
-        let decision = match config.readuntil.unblock_all_process {
-            true => unblock_decision,
-            false => {
-                match flag {
-                    4 => continue_decision,     // unmapped
-                    _ => unblock_decision,      // all other
-                }
-            }
-        };
-
-        DoradoCacheResponse { 
-            channel: identifiers[1].parse::<u32>().unwrap(), 
-            number: identifiers[2].parse::<u32>().unwrap(), 
-            decision
-        }
-}
-
-// Dorado output processing - handles SAM output format from aligned reads 
-// and uses the configuration to set the unblock decision sent back to MinKNOW
-//
-// SAM specifictation for Dorado: https://github.com/nanoporetech/dorado/blob/master/documentation/SAM.md
-// async fn stream_process_dorado_read_sam(line: &str, config: &StreamfishConfig, unblock_decision: i32, continue_decision: i32) -> DoradoStreamResponse {
-                
-//     let content: Vec<&str> = line.split('\t').collect();
-//     let identifiers: Vec<&str> = content[0].split("::").collect();
-
-//     let flag = content[1].parse::<u32>().unwrap();
-//     log::info!("TID Dorado: {} {}", &flag, content[2]);
-
-//     let decision = match config.readuntil.unblock_all_process {
-//         true => unblock_decision,
-//         false => {
-//             match flag {
-//                 4 => continue_decision,     // unmapped
-//                 _ => unblock_decision,      // all other
-//             }
-//         }
-//     };
-
-//     DoradoStreamResponse { 
-//         channel: identifiers[1].parse::<u32>().unwrap(), 
-//         number: identifiers[2].parse::<u32>().unwrap(), 
-//         decision
-//     }
-// }
 
 
 

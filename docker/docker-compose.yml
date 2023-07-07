@@ -93,6 +93,7 @@ services:
       - streamfish:/opt/streamfish/bin                                                      # access to development streamfish executable from streamfish-dev
       - /opt/ont/minknow/conf/rpc-certs/:/opt/ont/minknow/conf/rpc-certs/                   # access to minknow tls certificate
       - /data/dev/dorado/dorado/module-tests/:/data/dev/dorado/dorado/module-tests/         # access to executable for latency testing
+      - /data/dev/meta-gp/forks/dorado/:/data/dev/meta-gp/forks/dorado                      # access to dorado fork for modification testing
     deploy:
       resources:
         reservations:

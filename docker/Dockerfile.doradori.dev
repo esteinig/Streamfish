@@ -4,7 +4,7 @@ ARG USERNAME
 ARG UID
 ARG GID
 
-RUN groupadd -g ${GID} ${USERNAME} && useradd -u ${UID} -g ${GID} -s /bin/sh ${USERNAME}
+RUN groupadd -g ${GID} ${USERNAME} && useradd -u ${UID} -g ${GID} -s /bin/sh ${USERNAME} && mkdir -p /home/${USERNAME} && chown ${UID}:${GID} /home/${USERNAME}
 
 ENV PATH="${PATH}:/opt/bin"
 ENV DEBIAN_FRONTEND=noninteractive 
