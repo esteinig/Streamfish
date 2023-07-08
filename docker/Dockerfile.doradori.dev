@@ -38,7 +38,7 @@ RUN cmake --version
 # This uses the latest commit checkout specifically due to need to rebuild image for this
 
 RUN git clone --single-branch --branch dori-stdin-v0.3.1 https://github.com/esteinig/dorado && \   
-    cd dorado && git checkout f08d3aed27818e44d1637f76e8b9cb00c7c79a6b && \
+    cd dorado && git checkout c01011b29ab44f03893738d7a486174966dd5abc && \
     git config --global --add safe.directory "*" && \
     cmake -S . -B cmake-build && \
     cmake --build cmake-build --config Release -j4 && \ 
