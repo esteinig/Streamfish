@@ -41,12 +41,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::AddDevice ( args  ) => {
 
-            let mut minknow_client = MinKnowClient::connect(&config.minknow).await?;
+            let mut minknow_client = MinKnowClient::connect(&config.minknow, &config.icarust).await?;
             minknow_client.clients.manager.add_simulated_device(&args.name, SimulatedDeviceType::from_cli(&args.r#type)).await?;
         },
         Commands::RemoveDevice ( args  ) => {
 
-            let mut minknow_client = MinKnowClient::connect(&config.minknow).await?;
+            let mut minknow_client = MinKnowClient::connect(&config.minknow, &config.icarust).await?;
             minknow_client.clients.manager.remove_simulated_device(&args.name).await?;
         }
     }

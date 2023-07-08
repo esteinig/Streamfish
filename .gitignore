@@ -19,11 +19,8 @@ Cargo.lock
 # Test folder with large files
 testing/
 
-# Dorado fork
-dorado/
-
-# Deepnano fork
-deepnano-blitz/
-
 # VSCode
 .vscode/
+
+# C++
+cmake-build/

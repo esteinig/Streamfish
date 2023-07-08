@@ -104,7 +104,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
         // Connection to MinKNOW to obtain device calibration data
         let minknow_client = MinKnowClient::connect(
-            &self.config.minknow
+            &self.config.minknow, &self.config.icarust
         ).await.expect("Failed to connect to MinKNOW");
 
         let (sample_rate, calibration) = minknow_client.get_device_data(
@@ -127,29 +127,28 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
         let (mut pipeline_stdin, mut pipeline_stdout) = init_pipeline(&self.config);
 
-
         // ======================================
         // Dynamic loop for mapping config update
         // ======================================
 
-        let dynamic_mapping_config_main = std::sync::Arc::new(tokio::sync::Mutex::new(mapping_config));
-        let dynamic_mapping_config_thread = std::sync::Arc::clone(&dynamic_mapping_config_main);
-        let dynamic_mapping_config_stream = std::sync::Arc::clone(&dynamic_mapping_config_main);
+        // let dynamic_mapping_config_main = std::sync::Arc::new(tokio::sync::Mutex::new(mapping_config));
+        // let dynamic_mapping_config_thread = std::sync::Arc::clone(&dynamic_mapping_config_main);
+        // let dynamic_mapping_config_stream = std::sync::Arc::clone(&dynamic_mapping_config_main);
         
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(tokio::time::Duration::new(5, 0)).await;
+        // tokio::spawn(async move {
+        //     loop {
+        //         tokio::time::sleep(tokio::time::Duration::new(5, 0)).await;
 
-                let mut dynamic_mapping_config_lock = dynamic_mapping_config_thread.lock().await;
+        //         let mut dynamic_mapping_config_lock = dynamic_mapping_config_thread.lock().await;
                 
-                // Switches between chr1 and chr3 and chr9 and chr11 every few seconds for testing
-                if dynamic_mapping_config_lock.targets.contains(&String::from("chr1")) {
-                    dynamic_mapping_config_lock.targets = Vec::from([String::from("chr9"), String::from("chr11")]);
-                } else {
-                    dynamic_mapping_config_lock.targets = Vec::from([String::from("chr1"), String::from("chr3")]);
-                }
-            }           
-        });
+        //         // Switches between chr1 and chr3 and chr9 and chr11 every few seconds for testing
+        //         if dynamic_mapping_config_lock.targets.contains(&String::from("chr1")) {
+        //             dynamic_mapping_config_lock.targets = Vec::from([String::from("chr9"), String::from("chr11")]);
+        //         } else {
+        //             dynamic_mapping_config_lock.targets = Vec::from([String::from("chr1"), String::from("chr3")]);
+        //         }
+        //     }           
+        // });
 
         // =========================
         // Request stream processing
@@ -160,7 +159,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let mut request_stream = request.into_inner();
         
         let request_response_stream = async_stream::try_stream! {
-    
+            
             while let Some(dorado_request) = request_stream.next().await {
                 let dorado_request = dorado_request?;
                 
@@ -267,14 +266,13 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let sam_output = true;
         let pipeline_response_stream = async_stream::try_stream! {
             
-
             while let Some(line) = pipeline_stdout.next().await {
                 let line = line?;
 
                 // Dynamic mapping updates require Arc<Mutex<MappingConfig>> locks within the
                 // decision/evaluation stream- this does introduce some latency but is
                 // not as much as anticipated.
-                let dynamic_mapping_config = dynamic_mapping_config_stream.lock().await; 
+                // let dynamic_mapping_config = dynamic_mapping_config_stream.lock().await; 
 
                 match sam_output {
                     // SAM HEADER OUTPUTS - MAPPING CONFIGURATION
@@ -289,11 +287,11 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                         let tid = content[2];
 
                         let decision = match run_config_2.readuntil.unblock_all_process {
-                            true => dynamic_mapping_config.unblock_all(&flag, tid),
-                            false => dynamic_mapping_config.decision(&flag, tid)
+                            true => mapping_config.unblock_all(&flag, tid),
+                            false => mapping_config.decision(&flag, tid)
                         };
 
-                        log::info!("mapped={:<8} flag={:<4} action={:<1} targets={:?}", tid, &flag, &decision, dynamic_mapping_config.targets);
+                        log::info!("mapped={:<8} flag={:<4} action={:<1} targets={:?}", tid, &flag, &decision, mapping_config.targets);
 
                         yield DoradoCacheResponse { 
                             channel: identifiers[1].parse::<u32>().unwrap(), 
@@ -301,7 +299,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                             decision
                         }
                     },
-                    false => continue
+                     // FASTQ THROUGHPUT FOR TESTING - UNBLOCKS ALL
+                     false => continue
                 }
             }
         };
@@ -350,7 +349,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
         // Connection to MinKNOW to obtain device calibration data
         let minknow_client = MinKnowClient::connect(
-            &self.config.minknow
+            &self.config.minknow, &self.config.icarust
         ).await.expect("Failed to connect to MinKNOW");
 
         let (sample_rate, calibration) = minknow_client.get_device_data(
@@ -437,7 +436,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                             // below because of the required mutable borrow of the cache
     
                             // read_cache.remove(&number); not possible!
-                            log::debug!("Sending stop data decision: {} {} (chunks = {})", &channel, &number, &num_chunks);
+                            log::info!("Sending stop data decision: {} {} (chunks = {})", &channel, &number, &num_chunks);
 
                             yield  DoradoCacheResponse { 
                                 channel, 
@@ -524,7 +523,10 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                             decision
                         }
                     },
-                    false => continue
+                    // FASTQ THROUGHPUT FOR TESTING - UNBLOCKS ALL
+                    false =>  {
+                        continue                        
+                    }
                 }
         }
         };

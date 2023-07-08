@@ -1,0 +1,25 @@
+[meta]
+
+name            = 'streamfish-icarust-test'
+version         = '0.1.0'
+description     = 'Streamfish default configuration for Icarust testing'
+  
+[minknow]  
+  
+port            = 10000
+host            = 'localhost' 
+token           = 'ea953950-a67e-405b-ab3f-82bd728d0105'  
+certificate     = '/opt/ont/minknow/conf/rpc-certs/ca.crt'
+  
+[icarust]  
+  
+enabled         = true
+position_port   = 10001
+sample_rate     = 4000
+  
+[experiment]  
+  
+mode            = 'mapping'
+type            = 'targeted_sequencing'
+reference       = '/tmp/bacteria.mmi'
+targets         = ['NC_002516.2']                                                        # leave empty to target all sequences 

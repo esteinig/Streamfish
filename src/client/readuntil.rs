@@ -119,9 +119,17 @@ impl ReadUntilClient {
             log::warn!("Dori process response unblocking of all reads is active!");
         }
 
+        let dori_client = DoriClient::connect(&config).await?;
+
+        log::info!("Dori client - connection established");
+
+        let minknow_client = MinKnowClient::connect(&config.minknow, &config.icarust).await?;
+
+        log::info!("MinKNOW client - connection established");
+
         Ok(Self { 
-            dori: DoriClient::connect(&config).await?, 
-            minknow: MinKnowClient::connect(&config.minknow).await?,
+            dori: dori_client, 
+            minknow: minknow_client,
             readuntil: config.readuntil.clone(),
             experiment: config.experiment.clone()
         })

@@ -11,6 +11,13 @@ host         = 'localhost'
 token        = 'ea953950-a67e-405b-ab3f-82bd728d0105'  
 certificate  = '/opt/ont/minknow/conf/rpc-certs/ca.crt'
 
+[icarust]
+
+enabled         = false
+position_port   = 10001
+sample_rate     = 4000
+  
+
 [experiment]
 
 mode         = 'mapping'

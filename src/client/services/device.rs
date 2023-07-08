@@ -42,9 +42,12 @@ impl DeviceClient {
     }    
     pub async fn from_minknow_client(minknow_client: &MinKnowClient, position_name: &str) -> Result<Self, ClientError> {
 
-        let rpc_port = minknow_client.positions.get_secure_port(position_name).map_err(
+        let rpc_port = match minknow_client.icarust.enabled {
+            true => minknow_client.icarust.position_port, 
+            false =>  minknow_client.positions.get_secure_port(position_name).map_err(
             |_| ClientError::PortNotFound(position_name.to_string())
-        )?;
+            )?
+        };
 
         let channel = Channel::from_shared(
             format!("https://{}:{}", minknow_client.config.host, rpc_port)
@@ -55,6 +58,7 @@ impl DeviceClient {
         ).map_err(
             |err| ClientError::InvalidTlsConfig(err)
         )?.connect().await?;
+        
         let token: MetadataValue<Ascii> = minknow_client.config.token.parse().expect("Failed to parse token into correct format (ASCII)");
         let client = DeviceServiceClient::with_interceptor(channel, AuthInterceptor { token });
 

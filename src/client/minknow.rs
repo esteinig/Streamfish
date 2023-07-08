@@ -8,6 +8,7 @@ use tonic::transport::{ClientTlsConfig, Certificate, Channel};
 
 use crate::client::services::data::DataClient;
 use crate::client::services::manager::ManagerClient;
+use crate::config::IcarustConfig;
 use crate::{config::MinKnowConfig, services::minknow_api::manager::FlowCellPosition};
 
 use super::services::device::{DeviceClient, DeviceCalibration};
@@ -61,6 +62,7 @@ impl ActivePositions {
 pub struct MinKnowClient{
     pub tls: ClientTlsConfig,
     pub config: MinKnowConfig,
+    pub icarust: IcarustConfig,
     pub clients: ActiveClients,
     pub channels: ActiveChannels,
     pub positions: ActivePositions
@@ -68,7 +70,7 @@ pub struct MinKnowClient{
 
 impl MinKnowClient {
 
-    pub async fn connect(config: &MinKnowConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn connect(config: &MinKnowConfig, icarust: &IcarustConfig) -> Result<Self, Box<dyn std::error::Error>> {
 
         // When connecting to MinKnow we require a secure channel (TLS). However, we were getting 
         // an error through the underlying TLS certificate library, solution is documented here.
@@ -119,6 +121,8 @@ impl MinKnowClient {
             manager_channel.clone(), config.token.clone()
         );
 
+        log::info!("Connected to MinKNOW / Icarust manager service");
+
         // Get the version information to test the connection and print the version of MinKnow
         let version_response = manager_client.get_version_info().await?;
         log::info!("MinKnow version: v{}", version_response);
@@ -168,6 +172,7 @@ impl MinKnowClient {
         Ok(Self {
             tls: tls.clone(),
             config: config.clone(),
+            icarust: icarust.clone(),
             clients: ActiveClients { manager: manager_client },
             channels: ActiveChannels { manager: manager_channel },
             positions: ActivePositions { positions: active_positions }
@@ -244,7 +249,12 @@ impl MinKnowClient {
 
         let mut device_client = DeviceClient::from_minknow_client(&self, position_name).await?;
 
-        let sample_rate = device_client.get_sample_rate().await?;
+        // Need to account for the sample rate not being available for Icarust
+        let sample_rate = match self.icarust.enabled {
+            true => self.icarust.sample_rate,
+            false => device_client.get_sample_rate().await?
+        };
+
         let calibration = device_client.get_calibration(first_channel, last_channel).await?;
 
         Ok((sample_rate, calibration))

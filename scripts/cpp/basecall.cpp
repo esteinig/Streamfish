@@ -47,7 +47,7 @@ int main() {
                 ( std::istream_iterator<std::int16_t>() ) 
             );
 
-            std::cout << req_id << " " << req_channel << " " << req_number << " " << req_digitisation << " " << req_offset << " " << req_range << " " << req_sample_rate << std::endl;  // for basic testing
+            std::cout << req_id << "\t" << req_channel << "\t" << req_number << "\t" << req_digitisation << "\t" << req_offset << "\t" << req_range << "\t" << req_sample_rate << std::endl;  // for basic testing
         }
         
         std::cerr << "STDERR logging on Dori" << std::endl;

@@ -20,6 +20,7 @@ fn get_env_var(var: &str) -> Option<String> {
 pub struct UserConfig  {
     pub meta: UserConfigMetadata,
     pub minknow: UserConfigMinknow,
+    pub icarust: UserConfigIcarust,
     pub experiment: UserConfigExperiment
 }
 
@@ -35,7 +36,15 @@ pub struct UserConfigMinknow {
     pub port: i32,
     pub host: String,
     pub token: String,
-    pub certificate: PathBuf
+    pub certificate: PathBuf,
+}
+
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserConfigIcarust {
+    pub enabled: bool,
+    pub position_port: u32,
+    pub sample_rate: u32
 }
 
 
@@ -59,8 +68,23 @@ pub struct MinKnowConfig {
     // Developer token generated in MinKnow UI
     pub token: String,
     // TLS certificate path, required to connect to MinKnow API
-    pub tls_cert_path: PathBuf,
+    pub tls_cert_path: PathBuf
 }
+
+// Uses the MinKnow connection but adds required additional parameters
+#[derive(Debug, Clone)]
+pub struct IcarustConfig {
+    // Whether the data generation is simulated by Icarust
+    pub enabled: bool,
+    // Port of the device connection - usually sourced 
+    // from MinKNOW after connection, needs to be
+    // specified with Icarust
+    pub position_port: u32,
+    // Icarust does not expose the sample rate from device endpoint
+    // so we must set this manually for now (defualt 4000)
+    pub sample_rate: u32,
+}
+
 
 // A run configuration for ReadUntilClient::run - some can be configured on command-line execution
 #[derive(Debug, Clone)]
@@ -89,7 +113,12 @@ pub struct ReadUntilConfig {
 
 #[derive(Debug, Clone)]
 pub struct DoriConfig {
-    // Unix domain socket path
+    // TCP server connection  
+    pub tcp_enabled: bool,
+    pub tcp_port: u32,
+    pub tcp_host: String,
+
+    // Unix domain socket connection
     pub uds_path: PathBuf,
     pub uds_path_override: bool,
     
@@ -111,6 +140,7 @@ pub struct DoriConfig {
 
     // Dorado config
     pub dorado_batch_size: u32,
+    pub dorado_model_runners: u32,
     pub dorado_mm_kmer_size: u32,
     pub dorado_mm_window_size: u32,
 
@@ -131,6 +161,8 @@ pub struct StreamfishConfig {
     pub dori: DoriConfig,
     // MinKnow client configuration
     pub minknow: MinKnowConfig,
+    // Icarust -> Minknow configuration
+    pub icarust: IcarustConfig,
     // ReadUntil client configuration
     pub readuntil: ReadUntilConfig,
     // Adaptive sampling experiment configuration
@@ -152,15 +184,16 @@ impl StreamfishConfig {
                 token: user_config.minknow.token.clone(),
                 tls_cert_path: user_config.minknow.certificate.clone(),
             },
+            icarust: IcarustConfig { enabled: user_config.icarust.enabled, position_port: user_config.icarust.position_port, sample_rate: user_config.icarust.sample_rate },
 
             readuntil: ReadUntilConfig {
                 // Device and target pore configuration
                 device_name: "MS12345".to_string(),
                 channel_start: 1,
-                channel_end: 512,
+                channel_end: 1024,
                 // Initiation of streams, delays data transmission to let 
                 // analysis pipeline load models and indices on Dori
-                init_delay: 10,
+                init_delay: 5,
                 // Unblock-all latency tests
                 unblock_all_client: false,               // send unblock-all immediately after receipt
                 unblock_all_dori: false,                 // send unblock-all through Dori but not analysis stack
@@ -175,9 +208,9 @@ impl StreamfishConfig {
                 // and for stream stability - looks like in the cached
                 // endpoints with multiple responses we might cause
                 // instability
-                action_stream_queue_buffer: 50000,
-                dori_stream_queue_buffer: 50000,
-                logging_queue_buffer: 50000,
+                action_stream_queue_buffer: 100000,  // may not be this high?
+                dori_stream_queue_buffer: 100000,
+                logging_queue_buffer: 100000,
                 // Logging configuration
                 log_latency: None,
                 print_latency: false,
@@ -205,20 +238,94 @@ impl StreamfishConfig {
                 // Dorado processing - maybe something causes instability like
                 // too small a batch size? Maybe in combination with the fast
                 // stream channeling (but also occurs when batch channeling)
+                //
+                // Interestingly the same slipstream occurs when using a 
+                // 512 config of Icarust - stream on Icarust, Dori and 
+                // the RU client starts slipping... hmmmm
+                //
+                // Dos not seem to happen when max chunks low and batch 
+                // transmission on... and it happens again when increasing 
+                // the maximum chunk size!
+                //
+                // So it's likely no the connection but something in the 
+                // cache implementation maybe still interacting with 
+                // Dorado? 
+                //
+                // YES in fact it seems the cause is Dorado failing...
+                // hmmmmmmmmm that's annoying! Maybe write in batches
+                // to Dorado to not overload input stream or something?
+                // It seems to be ok for now to reduce max chunk size,
+                // but it's not ideal ...
+                //
+                // Then again sometimes it's not and still happens on the
+                // TCP connection... hmmmmmmm
+                //
+                // When crankign the pores to 3000 / PromethION levels it
+                // happens too so... pretty sure it's a connection overload?
+                // No just forgot to adjust channel start and end. No wait it
+                // definitely crashes
+                //
+                // Test it with the Dorado stand-in executable... ok it is
+                // 100% Dorado - channels and cache are fine with 3k pores
+                //
+                // Test if it is the aligner actually. Yep still happening
+                //
+                // Test batch size - hmm mthis might be cranked up really 
+                // high to manage 3000 pores but seems a little stabler on
+                // initial runs - better at 2038 but my GPU is running out
+                // of memory - can't make it higher. 
+                //
+                // Test if it is also happening at this setting without 
+                // aligner... HERE WE GO, looks like it was a combination of
+                // batch size but ultimately aligner failing?            
+                //
+                // Still not solved, the max chunks size weirdly plays a role
+                // as well but it's definintely in Dorado failure   
+                //
+                // Doesn't seem to be overloading channel with responses...
+                // omg this sucks so much
+                //
+                // MAYBE it's that the message sink queue to which the reads
+                // are pushed in Dorado during data loading?? I think there 
+                // is somethign to check out - the sink sizes and max reads
+                // are set before data loads in ScalerNode and BasecallerNode
+                //
+                //
+                // Doesn't seem to be queue size.
+                
+                // The batch size should be set to 1/4 of the pores specified 
+                // in Icarust otherwise it breaks
+                //
+                // I found something interesting kBatchTimeoutMS - time in ms
+                // before incomplete batch is submitted to basecaller node
+                // reduced this to 1ms while keeping batch size normal may 
+                // work to just fire off the batches rapidly without messing
+                // with the interactions of setting a too low batch size?
+                //
+                // https://github.com/nanoporetech/dorado/issues/208
                 read_cache_min_chunks: 1,
                 read_cache_max_chunks: 12
             },
 
             dori: DoriConfig {
+                tcp_enabled: true,
+                tcp_port: 10002,
+                tcp_host: "127.0.0.1".into(),  // modify for docker 
+
                 uds_path: "/tmp/.dori/test".into(),
                 uds_path_override: true,
+
                 basecaller: "dorado".into(),
                 basecaller_model_path: "/tmp/models/dna_r9.4.1_e8_fast@v3.4".into(),
+
                 classifier: "minimap2".into(),
                 classifier_reference_path: user_config.experiment.reference.clone(),
-                basecaller_path: "/home/esteinig/dev/bin/dorado".into(),
+
+                basecaller_path: "/home/esteinig/dev/bin/dorado".into(),  // /usr/src/streamfish/scripts/cpp/cmake-build/tes
                 classifier_path: "".into(),
+
                 stderr_log: "/tmp/dori.pipeline.stderr".into(),
+
                 // There are some diminishing returns for batch size reduction - it probably 
                 // depend on the number of pores sequencing at the time - too small a batch 
                 // size and latency increases because the stream is pushing too many packets
@@ -226,11 +333,19 @@ impl StreamfishConfig {
                 // for more packages - not sure how to optimize, but a batch-size = 32 works
                 // better on the test data than batch-size = 64 or 16 - and works better in 
                 // batched transmission cache mode?
-                dorado_batch_size: 128,
+
+                // Batch size 128 on a full MinION array in carust works only - anything below
+                // causes instability, does not appear to be related to number of model runners,
+                // increasing these + decreasing batch size also causes instability
+                dorado_model_runners: 2,
+                dorado_batch_size: 256,
+
                 dorado_mm_kmer_size: 15,
                 dorado_mm_window_size: 10,
+
                 kraken2_threads: 4,
                 kraken2_args: "--minimum-hit-groups 1 --threads 4 --memory-mapping".into(),
+
                 basecaller_args: Vec::new(),
                 classifier_args: Vec::new()
             },
@@ -258,11 +373,12 @@ impl StreamfishConfig {
             if streamfish_config.dori.basecaller == "dorado"  && streamfish_config.dori.classifier == "minimap2" {
                 // Minimap2 configuration integrated with Dorado - add window/k-mer options [TODO]
                 streamfish_config.dori.basecaller_args = format!(
-                    "basecaller --verbose --batchsize {} --reference {} -k {} -w {} -g 8 --emit-sam {} -",
+                    "basecaller --verbose --batchsize {} --reference {} -k {} -w {} -g 8 --num-runners {} --emit-sam {} -", // 
                     streamfish_config.dori.dorado_batch_size,
                     streamfish_config.dori.classifier_reference_path.display(),
                     streamfish_config.dori.dorado_mm_kmer_size,
                     streamfish_config.dori.dorado_mm_window_size,
+                    streamfish_config.dori.dorado_model_runners,
                     streamfish_config.dori.basecaller_model_path.display()
                 ).split_whitespace().map(String::from).collect();  
             } else if streamfish_config.dori.basecaller == "dorado" && streamfish_config.dori.classifier == "kraken2" {
