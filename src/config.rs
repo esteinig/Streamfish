@@ -117,7 +117,7 @@ pub struct ReadUntilConfig {
     pub channel_start: u32,
     pub channel_end: u32,
     pub dori_tcp_host: String,
-    pub dori_tcp_port: String,
+    pub dori_tcp_port: u32,
     pub init_delay: u64,                     // u64 because of duration type
     pub run_time: u64,                       // u64 because of duration type
     pub unblock_all_client: bool, 
@@ -220,7 +220,7 @@ impl StreamfishConfig {
                 channel_start: 1,
                 channel_end: 512,
                 // Dori TCP host - can be different than in Docker due to port forwarding
-                dori_tcp_host: user_config.readuntil.dori_tcp_host,
+                dori_tcp_host: user_config.readuntil.dori_tcp_host.clone(),
                 dori_tcp_port: user_config.readuntil.dori_tcp_port,
                 // Initiation of streams, delays data transmission to let 
                 // analysis pipeline load models and indices on Dori
@@ -364,9 +364,9 @@ impl StreamfishConfig {
             dori: DoriConfig {
                 tcp_enabled: user_config.dori.tcp_enabled,
                 tcp_port: user_config.dori.tcp_port,
-                tcp_host: user_config.dori.tcp_host,  // inside docker to expose must be 0.0.0.0
+                tcp_host: user_config.dori.tcp_host.clone(),  // inside docker to expose must be 0.0.0.0
 
-                uds_path: user_config.dori.uds_path,
+                uds_path: user_config.dori.uds_path.clone(),
                 uds_path_override: true,
 
                 basecaller: "dorado".into(),
