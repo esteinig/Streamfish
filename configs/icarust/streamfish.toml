@@ -16,9 +16,17 @@ certificate     = '/opt/ont/minknow/conf/rpc-certs/ca.crt'
 enabled         = true
 position_port   = 10001
 sample_rate     = 4000
+
+[dorado]  
   
+batch_size      = 256
+batch_timeout   = 10
+model_runners   = 2
+
+
 [experiment]  
-  
+
+control         = false
 mode            = 'mapping'
 type            = 'targeted_sequencing'
 reference       = '/tmp/bacteria.mmi'

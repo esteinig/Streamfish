@@ -31,18 +31,25 @@ pub enum Commands {
 #[derive(Debug, Args)]
 pub struct DoriServerArgs {
 
+   /// TCP port for connection to Dori
+   #[clap(long, short, default_value="10002")]
+   pub tcp_port: u32,
 }
 
 #[derive(Debug, Args)]
 pub struct TestReadUntilArgs {
    
    /// Channel start for adaptive sampling
-   #[clap(long, short, default_value="1")]
-   pub channel_start: u32,
+   #[clap(long, short)]
+   pub channel_start: Option<u32>,
 
    /// Channel end for adaptive sampling
-   #[clap(long, short, default_value="512")]
-   pub channel_end: u32,
+   #[clap(long, short)]
+   pub channel_end: Option<u32>,
+   
+   /// TCP port for connection to Dori
+   #[clap(long, short)]
+   pub dori_port: Option<u32>,
 
    /// Latency log file
    #[clap(long, short)]

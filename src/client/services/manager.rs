@@ -27,6 +27,7 @@ use crate::client::auth::AuthInterceptor;
 
 // A wrapper around the MangerServiceClient, which requests 
 // data and transforms responses for custom applications
+#[derive(Debug, Clone)]
 pub struct ManagerClient {
     // A client instance with an active channel
     pub client: ManagerServiceClient<InterceptedService<Channel, AuthInterceptor>>

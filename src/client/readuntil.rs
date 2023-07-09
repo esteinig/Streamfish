@@ -1,7 +1,6 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
-
 use uuid::Uuid;
+
 use quanta::{
     Clock, 
     Instant
@@ -84,11 +83,7 @@ impl ClientLog {
 }
 
 
-#[derive(Debug)]
-pub struct StatusLog {
-    msg: String
-}
-
+#[derive(Debug, Clone)]
 pub struct ReadUntilClient {
     pub dori: DoriClient,
     pub minknow: MinKnowClient,
@@ -101,14 +96,9 @@ pub struct ReadUntilClient {
 
 impl ReadUntilClient {
 
-    pub async fn connect(config: &mut StreamfishConfig, log_latency: &Option<PathBuf>) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn connect(config: &mut StreamfishConfig) -> Result<Self, Box<dyn std::error::Error>> {
 
-        // Some configurations can be set from the command-line
-        // and are overwritten before connection of the clients
-        if let Some(_) = log_latency {
-            config.readuntil.log_latency = log_latency.clone()
-        }
-
+        // Unblock-all warnings visible on startup
         if config.readuntil.unblock_all_client {
             log::warn!("Immediate unblocking of all reads is active!");
         }
@@ -119,13 +109,9 @@ impl ReadUntilClient {
             log::warn!("Dori process response unblocking of all reads is active!");
         }
 
+        // MinKNOW and Dori client connections
         let dori_client = DoriClient::connect(&config).await?;
-
-        log::info!("Dori client - connection established");
-
         let minknow_client = MinKnowClient::connect(&config.minknow, &config.icarust).await?;
-
-        log::info!("MinKNOW client - connection established");
 
         Ok(Self { 
             dori: dori_client, 
@@ -155,6 +141,7 @@ impl ReadUntilClient {
 
 
         let run_config = self.readuntil.clone();
+        let experiment_config = self.experiment.clone();
         let clock = Clock::new();
 
         // ==============================
@@ -174,9 +161,11 @@ impl ReadUntilClient {
         // MPSC message queues: senders and receivers
         // ==========================================
 
-        let (action_tx, mut action_rx) = tokio::sync::mpsc::channel(run_config.action_stream_queue_buffer);
-        let (dori_tx, mut dori_rx) = tokio::sync::mpsc::channel(run_config.dori_stream_queue_buffer);
-        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(run_config.logging_queue_buffer);
+        // Tet unbounded channels
+
+        let (action_tx, mut action_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (dori_tx, mut dori_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::unbounded_channel();
 
         // =========================================================
         // Message queue receivers unpack into async request streams
@@ -197,7 +186,6 @@ impl ReadUntilClient {
                 yield dori_request;
             }
         };
-
 
         // =================
         // Preflight checks
@@ -235,7 +223,7 @@ impl ReadUntilClient {
 
         // Send it into the action queue that unpacks into the request stream 
         // - this must happen before the request to MinKNOW
-        action_tx.send(init_action).await?;
+        action_tx.send(init_action)?;
         log::info!("Initiated data streams with MinKNOW");
 
         // DataService response stream is initiated with the data request stream to MinKNOW
@@ -261,7 +249,7 @@ impl ReadUntilClient {
 
         // Initiate the Dori request-response stream with the initiation request - this causes the pipeline process (basecaller/classifier)
         // to initiate and wait for data, including loading basecall models and databases, so there is no delay when data starts streaming
-        dori_tx.send(DoradoCacheBatchRequest { channel: 0, number: 0, channels: HashMap::new(), request: init_request }).await?;
+        dori_tx.send(DoradoCacheBatchRequest { channel: 0, number: 0, channels: HashMap::new(), request: init_request })?;
         log::info!("Initiated data streams with Dori");
         
         log::info!("Waiting {} seconds for pipeline initialisation on Dori...", &run_config.init_delay);
@@ -275,6 +263,7 @@ impl ReadUntilClient {
         // =================================================
 
         let action_stream_handle = tokio::spawn(async move {
+            
             while let Some(response) = minknow_stream.message().await.expect("Failed to get response from Minknow data stream") {
                 
                 if run_config.unblock_all_client {
@@ -290,14 +279,14 @@ impl ReadUntilClient {
                                     channel: channel,
                                 }
                             ]})
-                        )}).await.expect("Failed to send unblock request to Minknow request queue");
+                        )}).expect("Failed to send unblock request to Minknow request queue");
 
                         minknow_response_log.send(ClientLog { 
                             stage: PipelineStage::DoriRequest, 
                             time: minknow_response_clock.now(),
                             channel: channel, 
                             number: read_data.number 
-                        }).await.expect("Failed to send log message from Minknow response stream");
+                        }).expect("Failed to send log message from Minknow response stream");
                     }
 
                 } else {
@@ -314,14 +303,14 @@ impl ReadUntilClient {
                         channel: 0,
                         number: 0,
                         request: data_request
-                    }).await.expect("Failed to send basecall requests to Dori request queue");
+                    }).expect("Failed to send basecall requests to Dori request queue");
 
                     minknow_response_log.send(ClientLog { 
                         stage: PipelineStage::DoriRequest, 
                         time: minknow_response_clock.now(),
                         channel: 0, 
                         number: 0
-                    }).await.expect("Failed to send log message from Minknow response stream");
+                    }).expect("Failed to send log message from Minknow response stream");
                 }
             }
         });
@@ -334,7 +323,10 @@ impl ReadUntilClient {
         let dori_stream_handle = tokio::spawn(async move {
             while let Some(dori_response) = dori_stream.message().await.expect("Failed to parse response from Dori response stream") {
 
-                // log::info!("Channel {:<5} => {}", &dori_response.channel, &dori_response);
+                if experiment_config.control {
+                    // Control experiment - no actions are sent
+                    continue;
+                };
 
                 if  dori_response.decision == unblock_decision {
 
@@ -349,7 +341,7 @@ impl ReadUntilClient {
                                     channel: dori_response.channel,
                                 }
                             ]})
-                        )}).await.expect("Failed to unblock request to queue");
+                        )}).expect("Failed to unblock request to queue");
 
                         // Send uncache request to Dori to remove read from cache
                         dori_action_tx.send(DoradoCacheBatchRequest {
@@ -357,7 +349,7 @@ impl ReadUntilClient {
                             number: dori_response.number,
                             request: cache_request,
                             channels: HashMap::new()
-                        }).await.expect("Failed to send basecall requests to Dori request queue")
+                        }).expect("Failed to send basecall requests to Dori request queue")
 
                 } else if dori_response.decision == stop_decision {
 
@@ -374,7 +366,7 @@ impl ReadUntilClient {
                                 channel: dori_response.channel,
                             }
                         ]})
-                    )}).await.expect("Failed to send stop further data request to Minknow request queue"); 
+                    )}).expect("Failed to send stop further data request to Minknow request queue"); 
 
                     // Send uncache request to Dori to remove read from cache
                     dori_action_tx.send(DoradoCacheBatchRequest {
@@ -382,7 +374,7 @@ impl ReadUntilClient {
                         number: dori_response.number,
                         request: cache_request,
                         channels: HashMap::new()
-                    }).await.expect("Failed to send basecall requests to Dori request queue")
+                    }).expect("Failed to send stop further data request to Minknow request queue");
 
                 } else {
                     // Continue or none decisions are not processed, we let the client fetch
@@ -395,7 +387,7 @@ impl ReadUntilClient {
                     time: dori_response_clock.now(), 
                     channel: dori_response.channel, 
                     number: dori_response.number 
-                }).await.expect("Failed to send log message from Dori response stream");
+                }).expect("Failed to send log message from Dori response stream");
             }
         });
 
@@ -427,6 +419,15 @@ impl ReadUntilClient {
             }
 
         });
+
+        // let runtime_handle = tokio::spawn(async move {
+
+        //     // Check expiration of runtime every so often and send a 
+        //     loop {
+
+        //     }
+
+        // });
 
         // ===================================
         // Await thread handles to run streams
@@ -465,6 +466,8 @@ impl ReadUntilClient {
 
 
         let run_config = self.readuntil.clone();
+        let experiment_config = self.experiment.clone();
+
         let clock = Clock::new();
 
         // ==============================
@@ -484,9 +487,9 @@ impl ReadUntilClient {
         // MPSC message queues: senders and receivers
         // ==========================================
 
-        let (action_tx, mut action_rx) = tokio::sync::mpsc::channel(run_config.action_stream_queue_buffer);
-        let (dori_tx, mut dori_rx) = tokio::sync::mpsc::channel(run_config.dori_stream_queue_buffer);
-        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(run_config.logging_queue_buffer);
+        let (action_tx, mut action_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (dori_tx, mut dori_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::unbounded_channel();
 
         // =========================================================
         // Message queue receivers unpack into async request streams
@@ -545,7 +548,7 @@ impl ReadUntilClient {
 
         // Send it into the action queue that unpacks into the request stream 
         // - this must happen before the request to MinKNOW
-        action_tx.send(init_action).await?;
+        action_tx.send(init_action)?;
         log::info!("Initiated data streams with MinKNOW");
 
         // DataService response stream is initiated with the data request stream to MinKNOW
@@ -571,7 +574,7 @@ impl ReadUntilClient {
 
 
         // Initiate Dori stream
-        dori_tx.send(DoradoCacheChannelRequest { channel: 0, number: 0, data: Vec::new(), request: init_request }).await?;
+        dori_tx.send(DoradoCacheChannelRequest { channel: 0, number: 0, data: Vec::new(), request: init_request })?;
         log::info!("Initiated data streams with Dori");
 
         log::info!("Waiting {} seconds for pipeline initialisation on Dori...", &run_config.init_delay);
@@ -588,8 +591,6 @@ impl ReadUntilClient {
         let action_stream_handle = tokio::spawn(async move {
             while let Some(response) = minknow_stream.message().await.expect("Failed to get response from Minknow data stream") {
                 
-                log::info!("Number of channels received: {}", response.channels.len());
-
                 for (channel, read_data) in response.channels {
                     
                     if run_config.unblock_all_client {
@@ -603,7 +604,7 @@ impl ReadUntilClient {
                                         channel: channel,
                                     }
                                 ]})
-                            )}).await.expect("Failed to send unblock request to Minknow request queue");
+                            )}).expect("Failed to send unblock request to Minknow request queue");
                     } else {
                     
                         // Sends single channel data to Dori - this was the initial implementation
@@ -613,7 +614,7 @@ impl ReadUntilClient {
                             number: read_data.number,
                             data: read_data.raw_data,
                             request: data_request
-                        }).await.expect("Failed to send basecall requests to Dori request queue");
+                        }).expect("Failed to send basecall requests to Dori request queue");
                         
                     }
 
@@ -622,7 +623,7 @@ impl ReadUntilClient {
                         time: minknow_response_clock.now(),
                         channel: channel, 
                         number: read_data.number 
-                    }).await.expect("Failed to send log message from Minknow response stream");
+                    }).expect("Failed to send log message from Minknow response stream");
                 }
             }
         });
@@ -635,7 +636,10 @@ impl ReadUntilClient {
         let dori_stream_handle = tokio::spawn(async move {
             while let Some(dori_response) = dori_stream.message().await.expect("Failed to parse response from Dori response stream") {
 
-                // log::info!("Channel {:<5} => {}", &dori_response.channel, &dori_response);
+                if experiment_config.control {
+                    // Control experiment - no actions are sent
+                    continue;
+                };
 
                 if  dori_response.decision == unblock_decision {
 
@@ -650,7 +654,7 @@ impl ReadUntilClient {
                                     channel: dori_response.channel,
                                 }
                             ]})
-                        )}).await.expect("Failed to unblock request to queue");
+                        )}).expect("Failed to unblock request to queue");
 
                         // Send uncache request to Dori to remove read from cache
                         dori_action_tx.send(DoradoCacheChannelRequest {
@@ -658,7 +662,7 @@ impl ReadUntilClient {
                             number: dori_response.number,
                             request: cache_request,
                             data: Vec::new()
-                        }).await.expect("Failed to send basecall requests to Dori request queue")
+                        }).expect("Failed to send basecall requests to Dori request queue")
 
                 } else if dori_response.decision == stop_decision {
 
@@ -675,7 +679,7 @@ impl ReadUntilClient {
                                 channel: dori_response.channel,
                             }
                         ]})
-                    )}).await.expect("Failed to send stop further data request to Minknow request queue"); 
+                    )}).expect("Failed to send stop further data request to Minknow request queue"); 
 
                     // Send uncache request to Dori to remove read from cache
                     dori_action_tx.send(DoradoCacheChannelRequest {
@@ -683,7 +687,7 @@ impl ReadUntilClient {
                         number: dori_response.number,
                         request: cache_request,
                         data: Vec::new()
-                    }).await.expect("Failed to send basecall requests to Dori request queue")
+                    }).expect("Failed to send basecall requests to Dori request queue")
 
                 } else {
                     // Continue or none decisions are not processed, we let the client fetch
@@ -696,7 +700,7 @@ impl ReadUntilClient {
                     time: dori_response_clock.now(), 
                     channel: dori_response.channel, 
                     number: dori_response.number 
-                }).await.expect("Failed to send log message from Dori response stream");
+                }).expect("Failed to send log message from Dori response stream");
             }
         });
 

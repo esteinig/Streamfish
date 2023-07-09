@@ -34,7 +34,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             test_read_until(&mut config, args).await?;
         },
-        Commands::DoriServer ( _  ) => {
+        Commands::DoriServer ( args ) => {
+
+            // Set the TCP port from the command-line for running multiple servers
+            config.dori.tcp_port = args.tcp_port;
 
             DoriServer::run(&config).await?;
 
@@ -57,7 +60,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn test_read_until(config: &mut StreamfishConfig, args: &TestReadUntilArgs) -> Result<(), Box<dyn std::error::Error>> {
 
-    let mut client = ReadUntilClient::connect(config, &args.log_latency).await?;
+    config.cli_config(
+        args.channel_start, 
+        args.channel_end,
+        args.dori_port,
+        args.log_latency.clone()
+    );
+
+    let mut client = ReadUntilClient::connect(config).await?;
     
     if config.readuntil.read_cache && config.readuntil.read_cache_batch_rpc {
         client.run_dorado_cache_batch().await?;

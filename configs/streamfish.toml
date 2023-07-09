@@ -18,8 +18,16 @@ position_port   = 10001
 sample_rate     = 4000
   
 
-[experiment]
+[dorado]  
+  
+batch_size      = 128
+batch_timeout   = 10
+model_runners   = 2
 
+
+[experiment]  
+
+control      = false
 mode         = 'mapping'
 type         = 'targeted_sequencing'
 reference    = '/tmp/chm13v2_ont.mmi'

@@ -55,6 +55,7 @@ impl DoriServer {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct DoriClient { 
     pub client: AdaptiveSamplingClient<Channel>
 }

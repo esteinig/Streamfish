@@ -4,6 +4,7 @@ use tonic::{Request, Status};
 use tonic::metadata::{MetadataValue, Ascii};
 use tonic::service::interceptor::Interceptor;
 
+#[derive(Debug, Clone)]
 pub struct AuthInterceptor {
     pub token: MetadataValue<Ascii>
 }

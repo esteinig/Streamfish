@@ -29,14 +29,17 @@ pub enum ActivePositionError {
     PositionNotFound(String),
 }
 
+#[derive(Debug, Clone)]
 pub struct ActiveChannels {
     pub manager: Channel
 }
 
+#[derive(Debug, Clone)]
 pub struct ActiveClients {
     pub manager: ManagerClient
 }
 
+#[derive(Debug, Clone)]
 pub struct ActivePositions {
     pub positions: HashMap<String, FlowCellPosition>,
 }
@@ -58,6 +61,7 @@ impl ActivePositions {
     }
 }
 
+#[derive(Debug, Clone)]
 // Main client for the MinKnow API
 pub struct MinKnowClient{
     pub tls: ClientTlsConfig,

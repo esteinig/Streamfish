@@ -50,5 +50,9 @@ RUN mkdir /models && /opt/dorado/bin/dorado download --models all
 # Host user 
 USER ${USERNAME}
 
+# Setup Mamba as user for access to evaluation packages
+
+
 # Development path mounted, access to config files
-WORKDIR /usr/src/streamfish 
+WORKDIR /usr/src/evaluation
+

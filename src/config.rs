@@ -12,15 +12,13 @@ fn get_env_var(var: &str) -> Option<String> {
     std::env::var(var).ok()
 }
 
-
-
-
 // An exposed subset of configurable parameters for the user
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserConfig  {
     pub meta: UserConfigMetadata,
     pub minknow: UserConfigMinknow,
     pub icarust: UserConfigIcarust,
+    pub dorado: UserConfigDorado,
     pub experiment: UserConfigExperiment
 }
 
@@ -48,9 +46,18 @@ pub struct UserConfigIcarust {
 }
 
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserConfigDorado{
+    pub batch_size: u32,
+    pub batch_timeout: u32,
+    pub model_runners: u32,
+}
+
+
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserConfigExperiment {
+    pub control: bool,
     pub mode: String,
     pub r#type: String,
     pub reference: PathBuf,
@@ -92,7 +99,8 @@ pub struct ReadUntilConfig {
     pub device_name: String,                 // Dori access to Minknow
     pub channel_start: u32,
     pub channel_end: u32,
-    pub init_delay: u64,
+    pub init_delay: u64,                     // u64 because of duration type
+    pub run_time: u64,                       // u64 because of duration type
     pub unblock_all_client: bool, 
     pub unblock_all_dori: bool,
     pub unblock_all_process: bool,
@@ -140,6 +148,7 @@ pub struct DoriConfig {
 
     // Dorado config
     pub dorado_batch_size: u32,
+    pub dorado_batch_timeout: u32,
     pub dorado_model_runners: u32,
     pub dorado_mm_kmer_size: u32,
     pub dorado_mm_window_size: u32,
@@ -194,6 +203,9 @@ impl StreamfishConfig {
                 // Initiation of streams, delays data transmission to let 
                 // analysis pipeline load models and indices on Dori
                 init_delay: 5,
+                // Runtime in minutes for evaluation - will abruptly cause stream ends
+                // from client-side but not terminate the server
+                run_time: 20,
                 // Unblock-all latency tests
                 unblock_all_client: false,               // send unblock-all immediately after receipt
                 unblock_all_dori: false,                 // send unblock-all through Dori but not analysis stack
@@ -208,9 +220,9 @@ impl StreamfishConfig {
                 // and for stream stability - looks like in the cached
                 // endpoints with multiple responses we might cause
                 // instability
-                action_stream_queue_buffer: 100000,  // may not be this high?
-                dori_stream_queue_buffer: 100000,
-                logging_queue_buffer: 100000,
+                action_stream_queue_buffer: 1000000,  // may not be this high?
+                dori_stream_queue_buffer: 1000000,
+                logging_queue_buffer: 1000000,
                 // Logging configuration
                 log_latency: None,
                 print_latency: false,
@@ -303,6 +315,24 @@ impl StreamfishConfig {
                 // with the interactions of setting a too low batch size?
                 //
                 // https://github.com/nanoporetech/dorado/issues/208
+                //
+                // Problem still persists when going > 512- 1024 pores,
+                // really not sure now
+                //
+                // Make this a tunable parameter on command line
+                //
+                // Also investigate use of unbounded queues - no backpressure,
+                // risks cutting into memory but does not appear to be
+                // a problem - low memory use overall, unbounded does not
+                // require setting a limit with a priori knowledge of
+                // pore occupancy)
+                //
+                // Invesigate setting up a second stream to MinKNOW without
+                // data returns that can do the action requests separately
+                //
+                // Also investigate to have multiple Streamfish runners
+                // that cover larger pore arrays, but only for subset of 
+                // channels through channel_start - channel_end
                 read_cache_min_chunks: 1,
                 read_cache_max_chunks: 12
             },
@@ -316,12 +346,12 @@ impl StreamfishConfig {
                 uds_path_override: true,
 
                 basecaller: "dorado".into(),
-                basecaller_model_path: "/tmp/models/dna_r9.4.1_e8_fast@v3.4".into(),
+                basecaller_model_path: "/models/dna_r9.4.1_e8_fast@v3.4".into(),
 
                 classifier: "minimap2".into(),
                 classifier_reference_path: user_config.experiment.reference.clone(),
 
-                basecaller_path: "/home/esteinig/dev/bin/dorado".into(),  // /usr/src/streamfish/scripts/cpp/cmake-build/tes
+                basecaller_path: "/opt/dorado/bin/dorado".into(),  // /usr/src/streamfish/scripts/cpp/cmake-build/test | /home/esteinig/dev/bin/dorado
                 classifier_path: "".into(),
 
                 stderr_log: "/tmp/dori.pipeline.stderr".into(),
@@ -334,11 +364,16 @@ impl StreamfishConfig {
                 // better on the test data than batch-size = 64 or 16 - and works better in 
                 // batched transmission cache mode?
 
-                // Batch size 128 on a full MinION array in carust works only - anything below
+                // Batch size 128 on a full MinION array in Icarust works only - anything below
                 // causes instability, does not appear to be related to number of model runners,
-                // increasing these + decreasing batch size also causes instability
-                dorado_model_runners: 2,
-                dorado_batch_size: 256,
+                // increasing these + decreasing batch size also causes instability. Increasing
+                // model runners does ho
+
+                // Ok so weirdly increasing the batch timeout parameter to 5000 does a lot without 
+                // changing batch size... nope.. also not it
+                dorado_model_runners: user_config.dorado.model_runners,
+                dorado_batch_size: user_config.dorado.batch_size,
+                dorado_batch_timeout: user_config.dorado.batch_timeout,
 
                 dorado_mm_kmer_size: 15,
                 dorado_mm_window_size: 10,
@@ -373,11 +408,12 @@ impl StreamfishConfig {
             if streamfish_config.dori.basecaller == "dorado"  && streamfish_config.dori.classifier == "minimap2" {
                 // Minimap2 configuration integrated with Dorado - add window/k-mer options [TODO]
                 streamfish_config.dori.basecaller_args = format!(
-                    "basecaller --verbose --batchsize {} --reference {} -k {} -w {} -g 8 --num-runners {} --emit-sam {} -", // 
+                    "basecaller --verbose --batchsize {} --reference {} -k {} -w {} -g 64 --batch-timeout {} --num-runners {} --emit-sam {} -", // 
                     streamfish_config.dori.dorado_batch_size,
                     streamfish_config.dori.classifier_reference_path.display(),
                     streamfish_config.dori.dorado_mm_kmer_size,
                     streamfish_config.dori.dorado_mm_window_size,
+                    streamfish_config.dori.dorado_batch_timeout,
                     streamfish_config.dori.dorado_model_runners,
                     streamfish_config.dori.basecaller_model_path.display()
                 ).split_whitespace().map(String::from).collect();  
@@ -419,6 +455,24 @@ impl StreamfishConfig {
         return streamfish_config
 
     }
+    pub fn cli_config(&mut self, channel_start: Option<u32>, channel_end: Option<u32>, port_dori: Option<u32>, log_latency: Option<PathBuf>) {
+
+        // Some general client configurations can be set from the command-line
+        // and are overwritten before connection of the clients
+
+        if let Some(log_file) = log_latency {
+            self.readuntil.log_latency = Some(log_file)
+        }
+        if let Some(tcp_port) = port_dori {
+            self.dori.tcp_port = tcp_port;
+        }
+        if let Some(start) = channel_start {
+            self.readuntil.channel_start = start;
+        }
+        if let Some(end) = channel_end {
+            self.readuntil.channel_end = end;
+        }
+    }
 }
 
 
@@ -428,6 +482,7 @@ impl StreamfishConfig {
 // (not quite sure how to do this yet) 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExperimentConfig {
+    pub control: bool,
     pub name: String,
     pub version: String,
     pub description: String,
@@ -437,6 +492,7 @@ pub struct ExperimentConfig {
 impl Default for ExperimentConfig {
     fn default() -> Self {
         Self {
+            control: false,
             name: String::from("Default"),
             version: String::from("v0.1.0"),
             description: String::from("Default adaptive sampling configuration uses host genome depletion with alignment"),
@@ -470,6 +526,7 @@ impl ExperimentConfig {
         };
 
         Self {
+            control: user_config.experiment.control,
             name: user_config.meta.name,
             version: user_config.meta.version,
             description: user_config.meta.description,
