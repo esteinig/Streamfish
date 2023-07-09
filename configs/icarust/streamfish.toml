@@ -20,7 +20,7 @@ sample_rate     = 4000
 [dorado]  
   
 batch_size      = 128
-batch_timeout   = 10
+batch_timeout   = 1
 model_runners   = 2
 
 

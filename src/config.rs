@@ -207,6 +207,8 @@ impl StreamfishConfig {
                 dori_tcp_port: "10002".into(),
                 // Initiation of streams, delays data transmission to let 
                 // analysis pipeline load models and indices on Dori
+                //
+                // I think this is actually important for some reason
                 init_delay: 10,
                 // Runtime in minutes for evaluation - will abruptly cause stream ends
                 // from client-side but not terminate the server
@@ -225,16 +227,16 @@ impl StreamfishConfig {
                 // and for stream stability - looks like in the cached
                 // endpoints with multiple responses we might cause
                 // instability
-                action_stream_queue_buffer: 1024,  // may not be this high?
-                dori_stream_queue_buffer: 1024,
-                logging_queue_buffer: 1024,
+                action_stream_queue_buffer: 100000,  // may not be this high?
+                dori_stream_queue_buffer: 100000,
+                logging_queue_buffer: 100000,
                 // Logging configuration
                 log_latency: None,
                 print_latency: false,
                 // Use streaming read cache for raw data chunks on Dori
                 read_cache: true,
                 // Send data as batched request to Dori cache RPC, otherwise single channel requests
-                read_cache_batch_rpc: true,
+                read_cache_batch_rpc: false,
                 // There is some limit here where I think the UDS connection
                 // becomes overloaded and breaks Need to test two solutions:
                 // fist it maybe due to UDS instability so replace with TCP
@@ -339,7 +341,7 @@ impl StreamfishConfig {
                 // that cover larger pore arrays, but only for subset of 
                 // channels through channel_start - channel_end
                 read_cache_min_chunks: 1,
-                read_cache_max_chunks: 12
+                read_cache_max_chunks: 20
             },
 
             dori: DoriConfig {
@@ -356,7 +358,7 @@ impl StreamfishConfig {
                 classifier: "minimap2".into(),
                 classifier_reference_path: user_config.experiment.reference.clone(),
 
-                basecaller_path: "/home/esteinig/dev/bin/dorado".into(),  // /usr/src/streamfish/scripts/cpp/cmake-build/test | /home/esteinig/dev/bin/dorado
+                basecaller_path: "/opt/dorado/bin/dorado".into(),  // /usr/src/streamfish/scripts/cpp/cmake-build/test | /home/esteinig/dev/bin/dorado | /opt/dorado/bin/dorado
                 classifier_path: "".into(),
 
                 stderr_log: "/tmp/dori.pipeline.stderr".into(),
@@ -413,7 +415,7 @@ impl StreamfishConfig {
             if streamfish_config.dori.basecaller == "dorado"  && streamfish_config.dori.classifier == "minimap2" {
                 // Minimap2 configuration integrated with Dorado - add window/k-mer options [TODO]
                 streamfish_config.dori.basecaller_args = format!(
-                    "basecaller --verbose --batchsize {} --reference {} -k {} -w {} -g 64 --batch-timeout {} --num-runners {} --emit-sam {} -", // 
+                    "basecaller --verbose --batchsize {} --reference {} -k {} -w {} -g 16 --batch-timeout {} --num-runners {} --emit-sam {} -", // 
                     streamfish_config.dori.dorado_batch_size,
                     streamfish_config.dori.classifier_reference_path.display(),
                     streamfish_config.dori.dorado_mm_kmer_size,
