@@ -99,6 +99,8 @@ pub struct ReadUntilConfig {
     pub device_name: String,                 // Dori access to Minknow
     pub channel_start: u32,
     pub channel_end: u32,
+    pub dori_tcp_host: String,
+    pub dori_tcp_port: String,
     pub init_delay: u64,                     // u64 because of duration type
     pub run_time: u64,                       // u64 because of duration type
     pub unblock_all_client: bool, 
@@ -199,10 +201,13 @@ impl StreamfishConfig {
                 // Device and target pore configuration
                 device_name: "MS12345".to_string(),
                 channel_start: 1,
-                channel_end: 1024,
+                channel_end: 512,
+                // Dori TCP host - can be different than in Docker due to port forwarding
+                dori_tcp_host: "127.0.0.1".into(),
+                dori_tcp_port: "10002".into(),
                 // Initiation of streams, delays data transmission to let 
                 // analysis pipeline load models and indices on Dori
-                init_delay: 5,
+                init_delay: 10,
                 // Runtime in minutes for evaluation - will abruptly cause stream ends
                 // from client-side but not terminate the server
                 run_time: 20,
@@ -220,16 +225,16 @@ impl StreamfishConfig {
                 // and for stream stability - looks like in the cached
                 // endpoints with multiple responses we might cause
                 // instability
-                action_stream_queue_buffer: 1000000,  // may not be this high?
-                dori_stream_queue_buffer: 1000000,
-                logging_queue_buffer: 1000000,
+                action_stream_queue_buffer: 1024,  // may not be this high?
+                dori_stream_queue_buffer: 1024,
+                logging_queue_buffer: 1024,
                 // Logging configuration
                 log_latency: None,
                 print_latency: false,
                 // Use streaming read cache for raw data chunks on Dori
                 read_cache: true,
                 // Send data as batched request to Dori cache RPC, otherwise single channel requests
-                read_cache_batch_rpc: false,
+                read_cache_batch_rpc: true,
                 // There is some limit here where I think the UDS connection
                 // becomes overloaded and breaks Need to test two solutions:
                 // fist it maybe due to UDS instability so replace with TCP
@@ -340,18 +345,18 @@ impl StreamfishConfig {
             dori: DoriConfig {
                 tcp_enabled: true,
                 tcp_port: 10002,
-                tcp_host: "127.0.0.1".into(),  // modify for docker 
+                tcp_host: "127.0.0.1".into(),  // inside docker to expose must be 0.0.0.0
 
                 uds_path: "/tmp/.dori/test".into(),
                 uds_path_override: true,
 
                 basecaller: "dorado".into(),
-                basecaller_model_path: "/models/dna_r9.4.1_e8_fast@v3.4".into(),
+                basecaller_model_path: "/tmp/models/dna_r9.4.1_e8_fast@v3.4".into(),
 
                 classifier: "minimap2".into(),
                 classifier_reference_path: user_config.experiment.reference.clone(),
 
-                basecaller_path: "/opt/dorado/bin/dorado".into(),  // /usr/src/streamfish/scripts/cpp/cmake-build/test | /home/esteinig/dev/bin/dorado
+                basecaller_path: "/home/esteinig/dev/bin/dorado".into(),  // /usr/src/streamfish/scripts/cpp/cmake-build/test | /home/esteinig/dev/bin/dorado
                 classifier_path: "".into(),
 
                 stderr_log: "/tmp/dori.pipeline.stderr".into(),

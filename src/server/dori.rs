@@ -65,7 +65,7 @@ impl DoriClient {
         
         if config.dori.tcp_enabled {
             
-            let address = format!("http://{}:{}", config.dori.tcp_host, config.dori.tcp_port);
+            let address = format!("http://{}:{}", config.readuntil.dori_tcp_host, config.readuntil.dori_tcp_port);
 
             log::info!("Dori client connecting to: {}", &address);
 

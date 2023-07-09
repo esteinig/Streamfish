@@ -45,7 +45,6 @@ RUN git clone --single-branch --branch dori-stdin-v0.3.1 https://github.com/este
     cmake --install cmake-build --prefix /opt/dorado 
 
 RUN ln -s /opt/dorado/bin/dorado /usr/local/bin/dorado
-RUN mkdir /models && /opt/dorado/bin/dorado download --models all
 
 # Host user 
 USER ${USERNAME}

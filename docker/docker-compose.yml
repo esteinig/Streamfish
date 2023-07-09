@@ -54,6 +54,11 @@ services:
   # This container must be run with correct host user permissions ecause running the server inside
   # creates the UDS path that should be accessible for the streamfish readuntil client which is
   # excuted on host
+
+  # Icarust setup
+
+  # Server: /opt/streamfish/bin/streamfish -c configs/icarust/streamfish.toml dori-server
+  # Client: /opt/streamfish/bin/streamfish -c configs/icarust/streamfish.toml test-read-until
   
   dori-dev:
     profiles:
@@ -95,7 +100,7 @@ services:
         # Wait for the ownership to change
         condition: service_completed_successfully
 
-  # A reimplementation of the Icarust container for local development and streamlining
+  # Icarust container for local development and streamlining
   #
   # cd /data/dev/meta-gp/forks/icarust && /data/dev/meta-gp/forks/icarust/target/release/icarust -c /streamfish/configs/icarust/test.ini -v -s /streamfish/configs/icarust/test.toml
 
