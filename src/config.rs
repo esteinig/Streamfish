@@ -19,6 +19,8 @@ pub struct UserConfig  {
     pub minknow: UserConfigMinknow,
     pub icarust: UserConfigIcarust,
     pub dorado: UserConfigDorado,
+    pub dori: UserConfigDori,
+    pub readuntil: UserConfigReadUntil,
     pub experiment: UserConfigExperiment
 }
 
@@ -45,6 +47,21 @@ pub struct UserConfigIcarust {
     pub sample_rate: u32
 }
 
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserConfigDori {
+    pub tcp_enabled: bool,
+    pub tcp_port: u32,
+    pub tcp_host: String,           // inside docker to expose must be 0.0.0.0
+    pub uds_path: PathBuf,
+}
+
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserConfigReadUntil {
+    pub dori_tcp_host: String,  // can be different if outside of container
+    pub dori_tcp_port: u32,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserConfigDorado{
@@ -203,8 +220,8 @@ impl StreamfishConfig {
                 channel_start: 1,
                 channel_end: 512,
                 // Dori TCP host - can be different than in Docker due to port forwarding
-                dori_tcp_host: "127.0.0.1".into(),
-                dori_tcp_port: "10002".into(),
+                dori_tcp_host: user_config.readuntil.dori_tcp_host,
+                dori_tcp_port: user_config.readuntil.dori_tcp_port,
                 // Initiation of streams, delays data transmission to let 
                 // analysis pipeline load models and indices on Dori
                 //
@@ -345,11 +362,11 @@ impl StreamfishConfig {
             },
 
             dori: DoriConfig {
-                tcp_enabled: true,
-                tcp_port: 10002,
-                tcp_host: "127.0.0.1".into(),  // inside docker to expose must be 0.0.0.0
+                tcp_enabled: user_config.dori.tcp_enabled,
+                tcp_port: user_config.dori.tcp_port,
+                tcp_host: user_config.dori.tcp_host,  // inside docker to expose must be 0.0.0.0
 
-                uds_path: "/tmp/.dori/test".into(),
+                uds_path: user_config.dori.uds_path,
                 uds_path_override: true,
 
                 basecaller: "dorado".into(),

@@ -10,12 +10,19 @@ port            = 10000
 host            = 'localhost' 
 token           = 'ea953950-a67e-405b-ab3f-82bd728d0105'  
 certificate     = '/opt/ont/minknow/conf/rpc-certs/ca.crt'
-  
+
 [icarust]  
   
 enabled         = true
 position_port   = 10001
 sample_rate     = 4000
+
+[dori]
+
+tcp_enabled     = true
+tcp_host        = "127.0.0.1"
+tcp_port        = 10002
+uds_path        = /tmp/.dori/socket
 
 [dorado]  
   
@@ -23,6 +30,10 @@ batch_size      = 128
 batch_timeout   = 1
 model_runners   = 2
 
+[readuntil]
+
+dori_tcp_host   = "127.0.0.1"                                                            # can be different outside container
+dori_tcp_port   = 10002                                                                  # can be different outside container
 
 [experiment]  
 
