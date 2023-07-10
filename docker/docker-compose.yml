@@ -20,7 +20,8 @@ services:
   #
   # This is done here with the environment variable which overrides the
   # configuration file (.env) from the shared directory tree.
-
+  #
+  # cd /usr/src/icarust && cargo build --release && ./target/release/icarust -c /usr/src/streamfish/configs/icarust/test.ini -v -s /usr/src/streamfish/configs/icarust/test.toml --data-delay 30 --data-run-time 10
   streamfish-dev:
     profiles:
       - dev
@@ -37,12 +38,24 @@ services:
       - STREAMFISH_MINKNOW_HOST=minknow_host  # overrides env file at runtime
     extra_hosts:
       - "minknow_host:host-gateway"
+    ports:
+      - "${TCP_ICARUST_MANAGER:-10000}:${TCP_ICARUST_MANAGER:-10000}"                       # icarust port forward to host - manager port
+      - "${TCP_ICARUST_POSITION:-10001}:${TCP_ICARUST_POSITION:-10001}"                     # icarust port forward to host - position port
     networks:
       - streamfish
     volumes:
-      - ../:/usr/src/streamfish
       - streamfish:/opt/streamfish/bin
-      - /opt/ont/minknow/conf/rpc-certs/:/opt/ont/minknow/conf/rpc-certs/
+
+      - "${STREAMFISH_REPO_DIR}:/usr/src/streamfish"
+      
+      - "${TEMP_DIR:-/tmp}:/tmp"                                                                             # access to dori uds socket from host streamfish client, use ssd access - latency check on resource storage [TODO]
+      - "${ONT_CERT_DIR:-/opt/ont/minknow/conf/rpc-certs}:/opt/ont/minknow/conf/rpc-certs"
+        
+      - "${ICARUST_REPO_DIR}:/usr/src/icarust"                                      # access to icarust fork for modification testing
+      - "${ICARUST_REPO_DIR}/squiggle_arrs:/squiggle_arrs"                          # access to squiggle arrays for running
+      - "${ICARUST_REPO_DIR}/static:/static"                                        # access to static data for running
+      - "${ICARUST_REPO_DIR}/docker/configs:/configs"                               # access to icarust configs for running
+
     command: cargo watch -w src -w proto -w build.rs -w Cargo.toml -x "build --target x86_64-unknown-linux-musl --release -j4 && if [ -f /opt/streamfish/bin/streamfish ]; then rm /opt/streamfish/bin/streamfish; fi && cp /usr/src/streamfish/target/x86_64-unknown-linux-musl/release/streamfish /opt/streamfish/bin/"
     depends_on:
       change-vol-ownership:
@@ -66,27 +79,29 @@ services:
       - streamfish
     image: doradori:latest   
     build:
-      context: .
-      dockerfile: Dockerfile.doradori.dev
+      context: ..
+      dockerfile: docker/Dockerfile.doradori.dev
       args:
         - "UID=${UID:-1000}"
         - "GID=${GID:-1000}"
         - "USERNAME=${USERNAME:-streamfish}"
     environment:
-      - STREAMFISH_MINKNOW_HOST=minknow_host                                                # access to host ports
+      - STREAMFISH_MINKNOW_HOST=minknow_host                                                                              # access to host ports
     extra_hosts:
-      - "minknow_host:host-gateway"                                                         # access to host ports
+      - "minknow_host:host-gateway"                                                                                       # access to host ports
     ports:
-      - "10002:10002"                                                                       # port forward of dori tcp port [default]
-      - "10003:10003"                                                                       # port forward of dori tcp port [default]
+      - "${TCP_DORI_1:-10002}:${TCP_DORI_1:-10002}"                                                                       # port forward of dori tcp port [default]
+      - "${TCP_DORI_2:-10003}:${TCP_DORI_2:-10003}"                                                                       # port forward of dori tcp port [default]
     networks:
       - streamfish
     volumes:
-      - /tmp:/tmp                                                                           # access to dori uds socket from host streamfish client at minimum use ssd 
-      - ../:/usr/src/streamfish                                                             # access to development files and config, working dir inside container
-      - streamfish:/opt/streamfish/bin                                                      # access to development streamfish executable from streamfish-dev
-      - /opt/ont/minknow/conf/rpc-certs/:/opt/ont/minknow/conf/rpc-certs/                   # access to minknow tls certificate
-      - /data/dev/meta-gp/forks/dorado/:/data/dev/meta-gp/forks/dorado                      # access to dorado fork for modification testing
+      - streamfish:/opt/streamfish/bin                                                                    # access to development streamfish executable from streamfish-dev
+
+      - "${TEMP_DIR:-/tmp}:/tmp"                                                                          # access to dori uds socket from host streamfish client at minimum use ssd 
+      - "${MINKNOW_CERT_DIR:-/opt/ont/minknow/conf/rpc-certs}:/opt/ont/minknow/conf/rpc-certs"            # access to minknow tls certificate
+
+      - "${STREAMFISH_REPO_DIR}:/usr/src/streamfish"                                                      # access to development files and config, working dir inside container
+      - "${DORADO_REPO_DIR}:/data/dev/meta-gp/forks/dorado"                                               # access to dorado fork for modification testing
     deploy:
       resources:
         reservations:
@@ -100,49 +115,10 @@ services:
         # Wait for the ownership to change
         condition: service_completed_successfully
 
-  # Icarust container for local development and streamlining
-  #
-  # cd /data/dev/meta-gp/forks/icarust && /data/dev/meta-gp/forks/icarust/target/release/icarust -c /streamfish/configs/icarust/test.ini -v -s /streamfish/configs/icarust/test.toml
-
-  icarust-dev:
+  eval-dev:
     profiles:
       - dev
-      - icarust
-    image: icarust:latest   
-    build:
-      context: .
-      dockerfile: Dockerfile.icarust.dev
-      args:
-        - "UID=${UID}"
-        - "GID=${GID}"
-        - "USERNAME=${USERNAME}"
-    tty: true
-    environment:
-      - STREAMFISH_ICARUST_HOST=icarust_host                                                # access to icarust ports through host - see if they are accessible on docker network
-    extra_hosts:
-      - "icarust_host:host-gateway"                                                         # access to icarust ports through host - see if they are accessible on docker network
-    ports:
-      - "10000:10000"                                                                       # port forward to host - manager port
-      - "10001:10001"                                                                       # port forward to host - position port
-    networks:
       - streamfish
-    volumes:
-      - /tmp:/tmp                                                                           # access to dori uds socket from host streamfish client, use ssd access - latency check on resource storage [TODO]
-      - /opt/ont/minknow/conf/rpc-certs/:/opt/ont/minknow/conf/rpc-certs/                   # access to minknow tls certificate
-      
-      - /data/dev/meta-gp/forks/icarust/:/data/dev/meta-gp/forks/icarust                    # access to icarust fork for modification testing
-
-      - /data/dev/meta-gp/forks/icarust/squiggle_arrs:/squiggle_arrs                        # access to squiggle arrays for running
-      - /data/dev/meta-gp/forks/icarust/static:/static                                      # access to static data for running
-      - /data/dev/meta-gp/forks/icarust/docker/configs:/configs                             # access to icarust configs for running
-
-      - ../configs:/streamfish/configs                                                      # access to streamfish configs for running
-
-  # An evaluation container to run basecalling and plotting scripts
-
-  dorado-evaluation:
-    profiles:
-      - evaluation
     image: doradori:latest   
     build:
       context: .
@@ -151,9 +127,12 @@ services:
         - "UID=${UID:-1000}"
         - "GID=${GID:-1000}"
         - "USERNAME=${USERNAME:-streamfish}"
+    tty: true
     volumes:
-      - ../:/usr/src/streamfish                                                             # access to scripts, working dir inside container
-      - /tmp:/tmp                                                                           # access to dori uds socket from host streamfish client at minimum use ssd 
+      - "${TEMP_DIR:-/tmp}:/tmp"                                                                          # access to dori uds socket from host streamfish client at minimum use ssd
+
+      - "${STREAMFISH_REPO_DIR}:/usr/src/streamfish"                                                      # access to development files and config, working dir inside container
+      - "${DORADO_REPO_DIR}:/data/dev/meta-gp/forks/dorado"                                               # access to dorado fork for modification testing
     deploy:
       resources:
         reservations:
@@ -161,7 +140,6 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    tty: true
 
 
   # Fix ownership of shared volume directory to access updated `streamfish` executable on Dori

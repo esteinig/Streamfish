@@ -1,0 +1,13 @@
+name: icarust_evaluation
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python =3.10
+  - pip
+  - pip:
+    - matplotlib
+    - ont-fast5-api
+    - seaborn
+    - typer

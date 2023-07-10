@@ -29,7 +29,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = StreamfishConfig::new(terminal.global.config);
 
     match &terminal.command {
-
         Commands::TestReadUntil ( args  ) => {
 
             test_read_until(&mut config, args).await?;

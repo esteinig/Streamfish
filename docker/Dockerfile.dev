@@ -13,13 +13,25 @@ ARG GID
 
 RUN groupadd -g ${GID} ${USERNAME} && useradd -u ${UID} -g ${GID} -s /bin/sh ${USERNAME} && mkdir -p /home/${USERNAME} && chown ${UID}:${GID} /home/${USERNAME}
 
-WORKDIR /usr/src/streamfish
 
 # Protoc needs to be specific version for the MinKNOW API to compile (3.12) which is not available
 # in the standard repositories on Ubunut 20.04 LTS - we are using a Debian container for this here
 
 # Run as root
-RUN apt update && apt-get -y install make cmake libprotobuf-dev protobuf-compiler musl-tools
+RUN apt update && apt-get -y install make cmake libprotobuf-dev protobuf-compiler musl-tools libhdf5-dev libzstd-dev git
+
+# Icarust 
+
+WORKDIR /usr/src/icarust
+
+# VBZ compression - need to figure out where this is needed in the Icarust compilation
+RUN git clone https://github.com/nanoporetech/vbz_compression.git && cd vbz_compression && mkdir build && git submodule update --init && cd build && cmake -D CMAKE_BUILD_TYPE=Release -D ENABLE_CONAN=OFF -D ENABLE_PERF_TESTING=OFF -D ENABLE_PYTHON=OFF .. && make -j
+RUN cp -r /usr/src/icarust/vbz_compression/vbz_plugin /vbz_plugin
+
+# Streamfish
+
+WORKDIR /usr/src/streamfish
+
 
 # Run as host user, modify permissions of Cargo (container image)
 USER ${USERNAME}

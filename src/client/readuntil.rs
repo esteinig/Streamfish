@@ -636,14 +636,9 @@ impl ReadUntilClient {
         let dori_stream_handle = tokio::spawn(async move {
             while let Some(dori_response) = dori_stream.message().await.expect("Failed to parse response from Dori response stream") {
 
-                if experiment_config.control {
-                    // Control experiment - no actions are sent
-                    continue;
-                };
-
                 if  dori_response.decision == unblock_decision {
 
-                    log::info!("Sending an unblock decision: {} {}", &dori_response.channel, &dori_response.number);
+                    if !experiment_config.control {
                         // Send unblock decision to stop read - also stops further data (minknow_api::data)
                         minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
                             LiveReadsRequest::Actions(Actions { actions: vec![
@@ -655,31 +650,33 @@ impl ReadUntilClient {
                                 }
                             ]})
                         )}).await.expect("Failed to unblock request to queue");
+                    }
+                    
 
-                        // Send uncache request to Dori to remove read from cache
-                        dori_action_tx.send(DoradoCacheChannelRequest {
-                            channel: dori_response.channel,
-                            number: dori_response.number,
-                            request: cache_request,
-                            data: Vec::new()
-                        }).await.expect("Failed to send basecall requests to Dori request queue")
+                    // Send uncache request to Dori to remove read from cache
+                    dori_action_tx.send(DoradoCacheChannelRequest {
+                        channel: dori_response.channel,
+                        number: dori_response.number,
+                        request: cache_request,
+                        data: Vec::new()
+                    }).await.expect("Failed to send basecall requests to Dori request queue")
 
                 } else if dori_response.decision == stop_decision {
 
-                    log::info!("Sending a stop further data decision: {} {}", &dori_response.channel, &dori_response.number);
-
-                    // Send a stop receive further data action and let read be 
-                    // sequenced without further evaluations
-                    minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
-                        LiveReadsRequest::Actions(Actions { actions: vec![
-                            Action {
-                                action_id: Uuid::new_v4().to_string(),
-                                read: Some(action::Read::Number(dori_response.number)),
-                                action: Some(action::Action::StopFurtherData(StopFurtherData {})),
-                                channel: dori_response.channel,
-                            }
-                        ]})
-                    )}).await.expect("Failed to send stop further data request to Minknow request queue"); 
+                    if !experiment_config.control {
+                        // Send a stop receive further data action and let read be 
+                        // sequenced without further evaluations
+                        minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
+                            LiveReadsRequest::Actions(Actions { actions: vec![
+                                Action {
+                                    action_id: Uuid::new_v4().to_string(),
+                                    read: Some(action::Read::Number(dori_response.number)),
+                                    action: Some(action::Action::StopFurtherData(StopFurtherData {})),
+                                    channel: dori_response.channel,
+                                }
+                            ]})
+                        )}).await.expect("Failed to send stop further data request to Minknow request queue"); 
+                    }
 
                     // Send uncache request to Dori to remove read from cache
                     dori_action_tx.send(DoradoCacheChannelRequest {
@@ -741,7 +738,7 @@ impl ReadUntilClient {
         for handle in [
             action_stream_handle,
             dori_stream_handle,
-            logging_handle
+            logging_handle,
         ] {
             handle.await?
         };

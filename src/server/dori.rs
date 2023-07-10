@@ -6,6 +6,7 @@ use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::{Server, Endpoint, Channel};
 
 use crate::config::StreamfishConfig;
+use crate::server::error::DoriError;
 use crate::server::services::adaptive::AdaptiveSamplingService;
 use crate::services::dori_api::adaptive::adaptive_sampling_server::AdaptiveSamplingServer;
 use crate::services::dori_api::adaptive::adaptive_sampling_client::AdaptiveSamplingClient;
@@ -16,6 +17,8 @@ impl DoriServer {
     pub async fn run(config: &StreamfishConfig) -> Result<(), Box<dyn std::error::Error>> {
 
         let service = AdaptiveSamplingService::new(config);
+
+        log::info!("Dori server configuration: {:?}", &config.dori);
 
         if config.dori.tcp_enabled {
 
@@ -63,13 +66,17 @@ pub struct DoriClient {
 impl DoriClient {
     pub async fn connect(config: &StreamfishConfig) -> Result<Self, Box<dyn std::error::Error>> {
         
+        log::info!("Dori server configuration: {:?}", &config.dori);
+
         if config.dori.tcp_enabled {
             
             let address = format!("http://{}:{}", config.readuntil.dori_tcp_host, config.readuntil.dori_tcp_port);
 
             log::info!("Dori client connecting to: {}", &address);
 
-            let channel = Channel::from_shared(address)?.connect().await?;
+            let channel = Channel::from_shared(address.clone())?.connect().await.map_err(|err| DoriError::ConnectionFailure(err))?;
+
+            log::info!("Dori client connected on: {}", &address);
 
             Ok(Self {  client: AdaptiveSamplingClient::new(channel) })
 

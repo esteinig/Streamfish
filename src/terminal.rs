@@ -26,6 +26,7 @@ pub enum Commands {
     AddDevice(AddDeviceArgs),
     /// Remove a simulated device from MinKnow
     RemoveDevice(RemoveDeviceArgs),
+
 }
 
 #[derive(Debug, Args)]
@@ -67,7 +68,6 @@ pub struct AddDeviceArgs {
     #[clap(long, short, default_value="minion", value_parser=clap::builder::PossibleValuesParser::new(["minion", "promethion", "p2"]))]
     pub r#type: String,
 }
-
 
 #[derive(Debug, Args)]
 pub struct RemoveDeviceArgs {

@@ -54,6 +54,7 @@ pub struct UserConfigDori {
     pub tcp_port: u32,
     pub tcp_host: String,           // inside docker to expose must be 0.0.0.0
     pub uds_path: PathBuf,
+    pub uds_override: bool,
 }
 
 
@@ -69,8 +70,6 @@ pub struct UserConfigDorado{
     pub batch_timeout: u32,
     pub model_runners: u32,
 }
-
-
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserConfigExperiment {
@@ -119,7 +118,6 @@ pub struct ReadUntilConfig {
     pub dori_tcp_host: String,
     pub dori_tcp_port: u32,
     pub init_delay: u64,                     // u64 because of duration type
-    pub run_time: u64,                       // u64 because of duration type
     pub unblock_all_client: bool, 
     pub unblock_all_dori: bool,
     pub unblock_all_process: bool,
@@ -206,6 +204,10 @@ impl StreamfishConfig {
         let mut streamfish_config = Self {
             version: crate_version!().to_string(),
 
+            experiment: ExperimentConfig::from(
+                user_config.clone()
+            ),
+
             minknow: MinKnowConfig {
                 host: match get_env_var("STREAMFISH_MINKNOW_HOST") { Some(var) => var, None => user_config.minknow.host.clone() },  // needed for Docker container forward host
                 port: user_config.minknow.port.clone(),
@@ -220,16 +222,13 @@ impl StreamfishConfig {
                 channel_start: 1,
                 channel_end: 512,
                 // Dori TCP host - can be different than in Docker due to port forwarding
-                dori_tcp_host: user_config.readuntil.dori_tcp_host.clone(),
+                dori_tcp_host: user_config.readuntil.dori_tcp_host,
                 dori_tcp_port: user_config.readuntil.dori_tcp_port,
                 // Initiation of streams, delays data transmission to let 
                 // analysis pipeline load models and indices on Dori
                 //
                 // I think this is actually important for some reason
                 init_delay: 10,
-                // Runtime in minutes for evaluation - will abruptly cause stream ends
-                // from client-side but not terminate the server
-                run_time: 20,
                 // Unblock-all latency tests
                 unblock_all_client: false,               // send unblock-all immediately after receipt
                 unblock_all_dori: false,                 // send unblock-all through Dori but not analysis stack
@@ -358,24 +357,24 @@ impl StreamfishConfig {
                 // that cover larger pore arrays, but only for subset of 
                 // channels through channel_start - channel_end
                 read_cache_min_chunks: 1,
-                read_cache_max_chunks: 20
+                read_cache_max_chunks: 1
             },
 
             dori: DoriConfig {
                 tcp_enabled: user_config.dori.tcp_enabled,
                 tcp_port: user_config.dori.tcp_port,
-                tcp_host: user_config.dori.tcp_host.clone(),  // inside docker to expose must be 0.0.0.0
+                tcp_host: user_config.dori.tcp_host,  // inside docker to expose must be 0.0.0.0
 
-                uds_path: user_config.dori.uds_path.clone(),
-                uds_path_override: true,
+                uds_path: user_config.dori.uds_path,
+                uds_path_override: user_config.dori.uds_override,
 
                 basecaller: "dorado".into(),
                 basecaller_model_path: "/tmp/models/dna_r9.4.1_e8_fast@v3.4".into(),
 
                 classifier: "minimap2".into(),
-                classifier_reference_path: user_config.experiment.reference.clone(),
+                classifier_reference_path: user_config.experiment.reference,
 
-                basecaller_path: "/opt/dorado/bin/dorado".into(),  // /usr/src/streamfish/scripts/cpp/cmake-build/test | /home/esteinig/dev/bin/dorado | /opt/dorado/bin/dorado
+                basecaller_path: "/home/esteinig/dev/bin/dorado".into(),  // /usr/src/streamfish/scripts/cpp/cmake-build/test | /home/esteinig/dev/bin/dorado | /opt/dorado/bin/dorado
                 classifier_path: "".into(),
 
                 stderr_log: "/tmp/dori.pipeline.stderr".into(),
@@ -407,10 +406,7 @@ impl StreamfishConfig {
 
                 basecaller_args: Vec::new(),
                 classifier_args: Vec::new()
-            },
-
-
-            experiment: ExperimentConfig::from(user_config),
+            }
         };
 
         // Some checks and argument construction for basecaller/classifier configurations

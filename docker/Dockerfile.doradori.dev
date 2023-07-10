@@ -46,8 +46,17 @@ RUN git clone --single-branch --branch dori-stdin-v0.3.1 https://github.com/este
 
 RUN ln -s /opt/dorado/bin/dorado /usr/local/bin/dorado
 
+
 # Host user 
 USER ${USERNAME}
+
+# Add micromamba installation used in evaluation container which needs Dori access
+
+WORKDIR /home/${USERNAME}
+ENV PATH="${PATH}:/home/${USERNAME}/bin"
+
+RUN curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj bin/micromamba
+RUN micromamba shell init --shell bash --root-prefix=~/micromamba
 
 # Development path mounted, access to config files
 WORKDIR /usr/src/streamfish 
