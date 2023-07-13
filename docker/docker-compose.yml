@@ -22,6 +22,8 @@ services:
   # configuration file (.env) from the shared directory tree.
   #
   # cd /usr/src/icarust && cargo build --release && ./target/release/icarust -c /usr/src/streamfish/configs/icarust/test.ini -v -s /usr/src/streamfish/configs/icarust/test.toml --data-delay 30 --data-run-time 10
+
+  
   streamfish-dev:
     profiles:
       - dev
@@ -77,6 +79,7 @@ services:
     profiles:
       - dev
       - streamfish
+      - dori
     image: doradori:latest   
     build:
       context: ..
@@ -119,6 +122,7 @@ services:
     profiles:
       - dev
       - streamfish
+      - eval
     image: doradori:latest   
     build:
       context: .

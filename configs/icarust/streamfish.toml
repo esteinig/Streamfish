@@ -4,35 +4,49 @@ version         = '0.1.0'
 description     = 'Streamfish default configuration for Icarust testing'
   
 [minknow]  
-port            = 10000
-host            = 'localhost' 
+port            = 10004                                                               # MinKNOW (9543) or Icarust (10000)
+host            = 'localhost'                                                         # Address where this runs - if connecting from container (Dori) use the DoriConfig
 token           = 'ea953950-a67e-405b-ab3f-82bd728d0105'  
 certificate     = '/opt/ont/minknow/conf/rpc-certs/ca.crt'
 
 [icarust]  
 enabled         = true
-position_port   = 10001
+position_port   = 10005
 sample_rate     = 4000
 
 [dori]
-tcp_enabled     = false
-tcp_host        = '0.0.0.0'
-tcp_port        = 10002
-uds_path        = '/tmp/.dori/socket'
-uds_override    = true
+tcp_enabled         = false
+tcp_host            = '0.0.0.0'                                                           # `0.0.0.0` inside container to make available on forwarded ports
+tcp_port            = 10002
+uds_path            = '/tmp/.dori/socket'
+uds_override        = true
+minknow_host        = "minknow_host"                                                      # Host ports forwarded inside container
+minknow_port        = 10004                                                               # Manager service port inside container
+basecaller_path     = "/opt/dorado/bin/dorado"
+basecaller_model    = "/tmp/models/dna_r9.4.1_e8_fast@v3.4"
+basecaller_stderr   = "/tmp/dori.pipeline.stderr"
 
 [dorado]  
-batch_size      = 128
-batch_timeout   = 100                                                                   # microseconds
+batch_size      = 64
+batch_timeout   = 1000                                                                # 1 ms
 model_runners   = 2
 
 [readuntil]
-dori_tcp_host   = 'dori-dev'                                                            # can be different outside container
-dori_tcp_port   = 10002                                                                 # can be different outside container
+device_name             = "MS12345"
+channel_start           = 1
+channel_end             = 512
+dori_tcp_host           = 'dori-dev'                                                  # 'dori-dev' when running client inside container to connect to networked 'dori-dev' container, otherwise 'localhost' (port forwarded from inside container)
+dori_tcp_port           = 10002                                                       # '10002' when running client inside container, otherwise '10002' (port forwarded from inside container) - no changes necessary, should match `dori.tcp_port`
+unblock_all             = false
+unblock_all_mode        = "client"
+read_cache              = true
+read_cache_batch_rpc    = false
+read_cache_min_chunks   = 1
+read_cache_max_chunks   = 50
 
 [experiment]  
 control         = false
 mode            = 'mapping'
 type            = 'targeted_sequencing'
 reference       = '/tmp/bacteria.mmi'
-targets         = ['NC_002516.2']                                                        # leave empty to target all sequences 
+targets         = ['NC_002516.2']                                                      # leave empty to target all sequences 

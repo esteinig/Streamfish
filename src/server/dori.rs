@@ -76,18 +76,23 @@ impl DoriClient {
 
             let channel = Channel::from_shared(address.clone())?.connect().await.map_err(|err| DoriError::ConnectionFailure(err))?;
 
-            log::info!("Dori client connected on: {}", &address);
+            log::info!("Dori client connected");
 
             Ok(Self {  client: AdaptiveSamplingClient::new(channel) })
 
         } else {
             let uds_path = config.dori.uds_path.clone();
+
+
+            log::info!("Dori client connecting to: {}", &uds_path.display());
             
             // We will ignore this URI because UDS do not use it
             let channel = Endpoint::try_from("http://[::]:50051")?
                 .connect_with_connector(service_fn(move |_|  { 
                     UnixStream::connect(uds_path.clone()) 
             })).await?;
+
+            log::info!("Dori client connected");
 
             Ok(Self { client: AdaptiveSamplingClient::new(channel) })
         }

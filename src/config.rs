@@ -55,13 +55,27 @@ pub struct UserConfigDori {
     pub tcp_host: String,           // inside docker to expose must be 0.0.0.0
     pub uds_path: PathBuf,
     pub uds_override: bool,
+    pub minknow_host: String,
+    pub minknow_port: u32,
+    pub basecaller_path: PathBuf,
+    pub basecaller_model: PathBuf,
+    pub basecaller_stderr: PathBuf
 }
 
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserConfigReadUntil {
+    pub device_name: String,              
+    pub channel_start: u32,
+    pub channel_end: u32,
     pub dori_tcp_host: String,  // can be different if outside of container
-    pub dori_tcp_port: u32,
+    pub dori_tcp_port: u32,    
+    pub unblock_all: bool,
+    pub unblock_all_mode: String,
+    pub read_cache: bool,
+    pub read_cache_batch_rpc: bool,
+    pub read_cache_min_chunks: usize,
+    pub read_cache_max_chunks: usize
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -80,7 +94,31 @@ pub struct UserConfigExperiment {
     pub targets: Vec<String>
 }
 
-
+/// Unblock all circuits for testing
+pub enum UnblockAll {
+    Client,
+    Server,
+    Process
+}
+impl UnblockAll {
+    fn from_str(s: &str) -> Self {
+        match s {
+            "client" => Self::Client,
+            "server" => Self::Server,
+            "process" => Self::Process,
+            _ => unimplemented!("Unblock all setting `{}` is not implemented", s)
+        }
+    }
+    // A little clunky but betetr to have bools in configuration for 
+    // evaluation in streams than matching enumeration types or values
+    fn get_config(&self) -> (bool, bool, bool) {
+        match self {
+            UnblockAll::Client => return (true, false, false),
+            UnblockAll::Server => return (false, true, false),
+            UnblockAll::Process => return (false, false, true)
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct MinKnowConfig {
@@ -109,7 +147,7 @@ pub struct IcarustConfig {
 }
 
 
-// A run configuration for ReadUntilClient::run - some can be configured on command-line execution
+// ReadUntil client configuration
 #[derive(Debug, Clone)]
 pub struct ReadUntilConfig {
     pub device_name: String,                 // Dori access to Minknow
@@ -118,8 +156,8 @@ pub struct ReadUntilConfig {
     pub dori_tcp_host: String,
     pub dori_tcp_port: u32,
     pub init_delay: u64,                     // u64 because of duration type
-    pub unblock_all_client: bool, 
-    pub unblock_all_dori: bool,
+    pub unblock_all_client: bool,
+    pub unblock_all_server: bool,
     pub unblock_all_process: bool,
     pub unblock_duration: f64, 
     pub raw_data_type: RawDataType,
@@ -136,6 +174,7 @@ pub struct ReadUntilConfig {
     pub read_cache_max_chunks: usize
 }
 
+// Dori RPC server configuration
 #[derive(Debug, Clone)]
 pub struct DoriConfig {
     // TCP server connection  
@@ -146,6 +185,11 @@ pub struct DoriConfig {
     // Unix domain socket connection
     pub uds_path: PathBuf,
     pub uds_path_override: bool,
+
+    // MinKNOW / Icarust connection from Dori 
+    // added for host/container setups
+    pub minknow_host: String,
+    pub minknow_port: u32,
     
     // Basecaller supported: `dorado`
     pub basecaller: &'static str, 
@@ -200,7 +244,12 @@ impl StreamfishConfig {
 
         let user_config_str = std::fs::read_to_string(user_config).expect("Failed to read user config TOML");
         let user_config: UserConfig = toml::from_str(&user_config_str).expect("Failed to load user config TOML");
-        
+
+        let (unblock_all_client, unblock_all_server, unblock_all_process) = match user_config.readuntil.unblock_all {
+            true => UnblockAll::from_str(&user_config.readuntil.unblock_all_mode).get_config(),
+            false => (false, false, false)
+        };
+
         let mut streamfish_config = Self {
             version: crate_version!().to_string(),
 
@@ -218,9 +267,9 @@ impl StreamfishConfig {
 
             readuntil: ReadUntilConfig {
                 // Device and target pore configuration
-                device_name: "MS12345".to_string(),
-                channel_start: 1,
-                channel_end: 512,
+                device_name: user_config.readuntil.device_name,
+                channel_start: user_config.readuntil.channel_start,
+                channel_end: user_config.readuntil.channel_end,
                 // Dori TCP host - can be different than in Docker due to port forwarding
                 dori_tcp_host: user_config.readuntil.dori_tcp_host,
                 dori_tcp_port: user_config.readuntil.dori_tcp_port,
@@ -230,9 +279,9 @@ impl StreamfishConfig {
                 // I think this is actually important for some reason
                 init_delay: 10,
                 // Unblock-all latency tests
-                unblock_all_client: false,               // send unblock-all immediately after receipt
-                unblock_all_dori: false,                 // send unblock-all through Dori but not analysis stack
-                unblock_all_process: false,              // send unblock-all through configured processing stack on Dori
+                unblock_all_client: unblock_all_client,
+                unblock_all_server: unblock_all_server,
+                unblock_all_process: unblock_all_process,
                 // Is this relevant to latency?
                 unblock_duration: 0.1,
                 // Signal data configuration
@@ -250,114 +299,12 @@ impl StreamfishConfig {
                 log_latency: None,
                 print_latency: false,
                 // Use streaming read cache for raw data chunks on Dori
-                read_cache: true,
+                read_cache: user_config.readuntil.read_cache,
                 // Send data as batched request to Dori cache RPC, otherwise single channel requests
-                read_cache_batch_rpc: false,
-                // There is some limit here where I think the UDS connection
-                // becomes overloaded and breaks Need to test two solutions:
-                // fist it maybe due to UDS instability so replace with TCP
-                // second, send sampled channel chunks in one go to Dori,
-                // instead of for each channel [unblock all process]
-                //
-                // I think it's mainly the by-channel implementation that can
-                // overload the UDS connection - empirically it seems to happen
-                // when we process by single chunks and send individually by
-                // channel... but not always, maybe some instability expected.
-                // 
-                // Still make sure to test TCP
-                //
-                // Maybe it's overloading the batch size / somethign in Dorado?
-                // When things fail they seem to be preceded by a long no mapping
-                // strectch through Dorado and a "slip-stream" where the stream
-                // runs really fast and not the usual slight stumbling because of
-                // Dorado processing - maybe something causes instability like
-                // too small a batch size? Maybe in combination with the fast
-                // stream channeling (but also occurs when batch channeling)
-                //
-                // Interestingly the same slipstream occurs when using a 
-                // 512 config of Icarust - stream on Icarust, Dori and 
-                // the RU client starts slipping... hmmmm
-                //
-                // Dos not seem to happen when max chunks low and batch 
-                // transmission on... and it happens again when increasing 
-                // the maximum chunk size!
-                //
-                // So it's likely no the connection but something in the 
-                // cache implementation maybe still interacting with 
-                // Dorado? 
-                //
-                // YES in fact it seems the cause is Dorado failing...
-                // hmmmmmmmmm that's annoying! Maybe write in batches
-                // to Dorado to not overload input stream or something?
-                // It seems to be ok for now to reduce max chunk size,
-                // but it's not ideal ...
-                //
-                // Then again sometimes it's not and still happens on the
-                // TCP connection... hmmmmmmm
-                //
-                // When crankign the pores to 3000 / PromethION levels it
-                // happens too so... pretty sure it's a connection overload?
-                // No just forgot to adjust channel start and end. No wait it
-                // definitely crashes
-                //
-                // Test it with the Dorado stand-in executable... ok it is
-                // 100% Dorado - channels and cache are fine with 3k pores
-                //
-                // Test if it is the aligner actually. Yep still happening
-                //
-                // Test batch size - hmm mthis might be cranked up really 
-                // high to manage 3000 pores but seems a little stabler on
-                // initial runs - better at 2038 but my GPU is running out
-                // of memory - can't make it higher. 
-                //
-                // Test if it is also happening at this setting without 
-                // aligner... HERE WE GO, looks like it was a combination of
-                // batch size but ultimately aligner failing?            
-                //
-                // Still not solved, the max chunks size weirdly plays a role
-                // as well but it's definintely in Dorado failure   
-                //
-                // Doesn't seem to be overloading channel with responses...
-                // omg this sucks so much
-                //
-                // MAYBE it's that the message sink queue to which the reads
-                // are pushed in Dorado during data loading?? I think there 
-                // is somethign to check out - the sink sizes and max reads
-                // are set before data loads in ScalerNode and BasecallerNode
-                //
-                //
-                // Doesn't seem to be queue size.
-                
-                // The batch size should be set to 1/4 of the pores specified 
-                // in Icarust otherwise it breaks
-                //
-                // I found something interesting kBatchTimeoutMS - time in ms
-                // before incomplete batch is submitted to basecaller node
-                // reduced this to 1ms while keeping batch size normal may 
-                // work to just fire off the batches rapidly without messing
-                // with the interactions of setting a too low batch size?
-                //
-                // https://github.com/nanoporetech/dorado/issues/208
-                //
-                // Problem still persists when going > 512- 1024 pores,
-                // really not sure now
-                //
-                // Make this a tunable parameter on command line
-                //
-                // Also investigate use of unbounded queues - no backpressure,
-                // risks cutting into memory but does not appear to be
-                // a problem - low memory use overall, unbounded does not
-                // require setting a limit with a priori knowledge of
-                // pore occupancy)
-                //
-                // Invesigate setting up a second stream to MinKNOW without
-                // data returns that can do the action requests separately
-                //
-                // Also investigate to have multiple Streamfish runners
-                // that cover larger pore arrays, but only for subset of 
-                // channels through channel_start - channel_end
-                read_cache_min_chunks: 1,
-                read_cache_max_chunks: 1
+                read_cache_batch_rpc: user_config.readuntil.read_cache_batch_rpc,
+                // Solved the memory problems, it was tensor creation in the modified Dorado
+                read_cache_min_chunks: user_config.readuntil.read_cache_min_chunks,
+                read_cache_max_chunks: user_config.readuntil.read_cache_max_chunks
             },
 
             dori: DoriConfig {
@@ -368,16 +315,19 @@ impl StreamfishConfig {
                 uds_path: user_config.dori.uds_path,
                 uds_path_override: user_config.dori.uds_override,
 
+                minknow_host: user_config.dori.minknow_host,
+                minknow_port: user_config.dori.minknow_port,
+
                 basecaller: "dorado".into(),
-                basecaller_model_path: "/tmp/models/dna_r9.4.1_e8_fast@v3.4".into(),
+                basecaller_model_path: user_config.dori.basecaller_model,
 
                 classifier: "minimap2".into(),
                 classifier_reference_path: user_config.experiment.reference,
 
-                basecaller_path: "/home/esteinig/dev/bin/dorado".into(),  // /usr/src/streamfish/scripts/cpp/cmake-build/test | /home/esteinig/dev/bin/dorado | /opt/dorado/bin/dorado
+                basecaller_path: user_config.dori.basecaller_path,  // /usr/src/streamfish/scripts/cpp/cmake-build/test | /home/esteinig/dev/bin/dorado | /opt/dorado/bin/dorado
                 classifier_path: "".into(),
 
-                stderr_log: "/tmp/dori.pipeline.stderr".into(),
+                stderr_log: user_config.dori.basecaller_stderr,
 
                 // There are some diminishing returns for batch size reduction - it probably 
                 // depend on the number of pores sequencing at the time - too small a batch 
@@ -428,7 +378,7 @@ impl StreamfishConfig {
             if streamfish_config.dori.basecaller == "dorado"  && streamfish_config.dori.classifier == "minimap2" {
                 // Minimap2 configuration integrated with Dorado - add window/k-mer options [TODO]
                 streamfish_config.dori.basecaller_args = format!(
-                    "basecaller --verbose --batchsize {} --reference {} -k {} -w {} -g 16 --batch-timeout {} --num-runners {} --emit-sam {} -", // 
+                    "basecaller --verbose --batchsize {} --reference {} -k {} -w {} -g 32 --batch-timeout {} --num-runners {} --emit-sam {} -", // 
                     streamfish_config.dori.dorado_batch_size,
                     streamfish_config.dori.classifier_reference_path.display(),
                     streamfish_config.dori.dorado_mm_kmer_size,

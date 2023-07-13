@@ -12,6 +12,7 @@ pip install typer ont-fast5-api seaborn matplotlib
 import typer
 import statistics
 
+import pandas
 import seaborn as sns
 import matplotlib.pyplot as plt
 
@@ -22,6 +23,10 @@ from pprint import pprint
 from pathlib import Path
 from ont_fast5_api.fast5_interface import get_fast5_file
 
+
+#####################
+#  HELPER STRUCTS  #
+#####################
 
 LAPUTA_MEDIUM = [
     '#14191F',
@@ -46,21 +51,88 @@ YESTERDAY_MEDIUM = [
 LAPUTA_MEDIUM.reverse()
 YESTERDAY_MEDIUM.reverse()
 
+# Summary 
 @dataclass
 class MappingSummary:
 
+    reference: str
     read_lengths: List[int]
+    mapping_qualities: List[int]
+
+    read_lengths_unblocked: List[int]
+    mapping_qualities_unblocked: List[int]
 
     reads: int = 0
     bases: int = 0
     unblocked: int = 0
+
+    reads_unblocked: int = 0
+    bases_unblocked: int = 0
+
+# Summary for each reference sequence 
+# used in alignment
+@dataclass
+class ReferenceSummary:
+    reference: str = ""
+    control: bool = False
+
+    reads: int = 0
+    bases: int = 0
+    reads_total: int = 0
+    bases_total: int = 0
+    reads_unblocked: int = 0
+    bases_unblocked: int = 0
+
+    unblocked: int = 0
     unblocked_percent: float = 0.
+
     n50_length: int = 0
+    median_length: int = 0
     mean_length: float = 0.
-    median_length: float = 0.
+    mean_mapq: float = 0.
+
+
+    n50_length_unblocked: int = 0
+    median_length_unblocked: int = 0
+    mean_length_unblocked: float = 0.
+    mean_mapq_unblocked: float = 0.
+
+
+
+    def from_mapping_summary(self, data: MappingSummary, control: bool = False):
+
+        self.reference=data.reference
+        self.control=control
+
+        self.reads = data.reads
+        self.bases = data.bases
+        self.reads_unblocked = data.reads_unblocked
+        self.bases_unblocked = data.bases_unblocked
+        self.reads_total = data.reads+data.reads_unblocked
+        self.bases_total = data.bases+data.bases_unblocked
+
+        self.unblocked = data.unblocked
+        self.unblocked_percent = (data.unblocked/(data.reads+data.reads_unblocked))*100
+        
+        self.mean_mapq = statistics.mean(data.mapping_qualities) if len(data.read_lengths) > 1 else 0
+        self.mean_length = statistics.mean(data.read_lengths) if len(data.read_lengths) > 1 else 0
+        self.median_length = int(statistics.median(data.read_lengths)) if len(data.read_lengths) > 1 else 0
+        self.n50_length = compute_n50(data.read_lengths) if len(data.read_lengths) > 1 else 0
+
+        self.mean_mapq_unblocked = statistics.mean(data.mapping_qualities_unblocked) if len(data.mapping_qualities_unblocked) > 1 else 0
+        self.mean_length_unblocked = statistics.mean(data.read_lengths_unblocked)  if len(data.read_lengths_unblocked) > 1 else 0
+        self.median_length_unblocked = int(statistics.median(data.read_lengths_unblocked)) if len(data.read_lengths_unblocked) > 1 else 0
+        self.n50_length_unblocked = compute_n50(data.read_lengths_unblocked)  if len(data.read_lengths_unblocked) > 1 else 0
+
+        return self
+
+######################
+#  HELPER FUNCTIONS  #
+######################
 
 
 def compute_n50(read_lengths):
+
     # Sort the read lengths in descending order
     sorted_lengths = sorted(read_lengths, reverse=True)
 
@@ -80,6 +152,10 @@ def compute_n50(read_lengths):
             break
 
     return n50
+
+########################
+#  PLOTTING FUNCTIONS  #
+########################
 
 def read_length_density_all(data: Dict[str, MappingSummary], output_file: str, min_length: int =50, max_length: int =4000, colors: List[str] = LAPUTA_MEDIUM):
 
@@ -108,6 +184,7 @@ def read_length_density_all(data: Dict[str, MappingSummary], output_file: str, m
     plt.savefig(output_file, dpi=300, bbox_inches='tight', transparent=False)
     plt.close()
 
+
 def read_length_histogram_all(data: Dict[str, MappingSummary], output_file: str, min_length: int =50, max_length: int =4000, colors: List[str] = LAPUTA_MEDIUM):
 
     sns.set_style('whitegrid')
@@ -126,13 +203,14 @@ def read_length_histogram_all(data: Dict[str, MappingSummary], output_file: str,
     # Set the plot labels and title
     ax.set_xlabel('bp')
     ax.set_ylabel('Reads')
-    ax.set_title('Read length', fontdict={'weight': 'bold'})
+    ax.set_title('Read lengt', fontdict={'weight': 'bold'})
 
     sns.despine()
     ax.grid(False)
     
     plt.savefig(output_file, dpi=300, bbox_inches='tight', transparent=False)
     plt.close()
+
 
 def read_length_histogram_distinct(data: Dict[str, MappingSummary], output_file: str, min_length: int =50, max_lengths: List[int] = [4000], colors: List[str] = LAPUTA_MEDIUM):
 
@@ -171,8 +249,102 @@ def read_length_histogram_distinct(data: Dict[str, MappingSummary], output_file:
 app = typer.Typer(add_completion=False)
 
 
+#####################
+# SUMMARY FUNCTIONS #
+#####################
+
+def get_summary(ends: Path, sam: Path, output: Path = None) -> Dict[str, MappingSummary]:
+
+    print(f"Parsing end-reasons: {ends}")
+    endreasons = dict()
+    # Parse end reasons into dictionary with identifier keys
+    with ends.open("r") as end_file:
+        for i, line in enumerate(end_file):
+            if i > 0:
+                content = line.strip().split(",")
+                
+                read = str(content[0])
+                reason = int(content[3])
+
+                endreasons[read] = reason
+
+
+    print(f"Summarizing mappings: {sam}")
+    print(f"Writing summary data to: {output}")
+
+    if output is not None:
+        out_handle = output.open("w")
+        out_handle.write("id,ref,mapq,bp\n")
+
+    summary = dict()
+    with sam.open("r") as sam_file:
+        for line in sam_file:
+            if line.startswith("@"):
+                continue
+
+            content = line.strip().split("\t")
+            
+            read  = str(content[0])
+            ref   = str(content[2])
+            mapq  = int(content[4])
+            bases = len(content[9])
+
+            if output is not None:
+                out_handle.write(f"{read},{ref},{mapq},{bases}\n")
+
+            if ref not in summary.keys():
+                summary[ref] = MappingSummary(
+                    reference=ref, read_lengths=[], mapping_qualities=[],
+                    read_lengths_unblocked=[], mapping_qualities_unblocked=[]
+                )
+            else:
+
+                if endreasons[read] == 4:
+                    summary[ref].unblocked += 1
+                    summary[ref].reads_unblocked += 1
+                    summary[ref].bases_unblocked += bases
+                    summary[ref].read_lengths_unblocked.append(bases)
+                    summary[ref].mapping_qualities_unblocked.append(mapq)
+                else:
+                    summary[ref].reads += 1
+                    summary[ref].bases += bases
+                    summary[ref].read_lengths.append(bases)
+                    summary[ref].mapping_qualities.append(mapq)
+
+
+    if output is not None:
+        out_handle.close()
+        
+    return summary
+
+def create_reference_summary_dataframe(
+    active_summary: Dict[str, MappingSummary], 
+    control_summary: Dict[str, MappingSummary] = None, 
+    output: Path = None
+) -> pandas.DataFrame:
+
+    # Create the reference summaries for each experiment arm summary
+
+    summaries: List[ReferenceSummary] = [ReferenceSummary().from_mapping_summary(data, control=False) for _, data in active_summary.items()]
+    
+    if control_summary:
+        summaries += [ReferenceSummary().from_mapping_summary(data, control=True) for _, data in control_summary.items()]
+
+    df = pandas.DataFrame([o.__dict__ for o in summaries])
+    df = df.sort_values(by="reference")
+
+    if output:
+        df.to_csv(output, index=False, sep=",", header=True)
+
+    return df
+
+########################
+# TERMINAL APPLICATION #
+########################
+
+
 @app.command()
-def endreason_fast5(
+def endreason(
     fast5: Path = typer.Option(
         ..., help="Directory of Fast5 files from Icarust to extract end-reason"
     ),
@@ -205,81 +377,53 @@ def endreason_fast5(
 
 
 @app.command()
-def summary_sam(
-    sam: Path = typer.Option(
+def evaluation(
+    summary_table: Path = typer.Option(
+        ..., help="Summary metrics table for reference alignments"
+    ),
+    active_sam: Path = typer.Option(
         ..., help="SAM file from basecalling and alignment with Dorado"
     ),
-    ends: Path = typer.Option(
-        ..., help="CSV file with endreasons of each read from `--endreason-fast5` command."
+    active_ends: Path = typer.Option(
+        ..., help="CSV file with endreasons from `--endreason-fast5`"
     ),
-    output: Path = typer.Option(
-        ..., help="Output table of summary values per read in CSV"
+    active_output: Path = typer.Option(
+        None, help="Output table of summary values per read in CSV"
+    ),
+    control_sam: Path = typer.Option(
+        None, help="CONTROL SAM file from basecalling and alignment with Dorado"
+    ),
+    control_ends: Path = typer.Option(
+        None, help="CONTROL CSV file with endreasonsfrom `--endreason-fast5`"
+    ),
+    control_output: Path = typer.Option(
+        None, help="Output table of summary values per read in CSV"
     )
 ):
     """
     Get a table of read identifiers and end reasons from Fast5 (Icarust v0.3.0)
     """
 
-    print("Parsing end-reason file...")
-    endreasons = dict()
-    # Parse end reasons into dictionary with identifier keys
-    with ends.open("r") as end_file:
-        for i, line in enumerate(end_file):
-            if i > 0:
-                content = line.strip().split(",")
-                
-                read = str(content[0])
-                reason = int(content[3])
+    active_summary = get_summary(ends=active_ends, sam=active_sam, output=active_output)
 
-                endreasons[read] = reason
-
-
-    print("Summarizing alignment file...")
-    out_handle = output.open("w")
-    out_handle.write("id,ref,mapq,bp\n")
-
-    summary = dict()
-    with sam.open("r") as sam_file:
-        for line in sam_file:
-            if line.startswith("@"):
-                continue
-
-            content = line.strip().split("\t")
-            
-            read  = str(content[0])
-            ref   = str(content[2])
-            mapq  = int(content[4])
-            bases = len(content[9])
-
-            out_handle.write(f"{read},{ref},{mapq},{bases}\n")
-
-            if ref not in summary.keys():
-                summary[ref] = MappingSummary(read_lengths=[])
-            else:
-
-                summary[ref].reads += 1
-                summary[ref].read_lengths.append(bases)
-
-                if endreasons[read] == 4:
-                    summary[ref].unblocked += 1
+    control_summary = None
+    if control_sam and control_ends:
+        control_summary = get_summary(ends=control_ends, sam=control_sam, output=control_output)
     
-    read_length_density_all(summary, f"read_lengths_density_all.png", min_length=50, max_length=4000, colors=LAPUTA_MEDIUM)
-    read_length_histogram_all(summary, f"read_lengths_histogram_all.png", min_length=50, max_length=4000, colors=LAPUTA_MEDIUM)
-    read_length_histogram_distinct(summary, f"read_lengths_histogram_distinct.png", min_length=50, max_lengths=[1000, 4000], colors=LAPUTA_MEDIUM)
+    df = create_reference_summary_dataframe(active_summary=active_summary, control_summary=control_summary, output=summary_table)
 
-    for ref, data in summary.items():
-        data.mean_length = statistics.mean(data.read_lengths)
-        data.median_length = statistics.median(data.read_lengths)
-        data.bases = sum(summary[ref].read_lengths)
-        data.n50_length = compute_n50(data.read_lengths)
-        data.unblocked_percent = (data.unblocked/data.reads)*100
-        data.read_lengths = []
+    with pandas.option_context(
+        'display.max_rows', None,
+        'display.max_columns', None,
+        'display.precision', 3
+    ):
+        print(df)
+    
+    
+    # read_length_density_all(summary, f"read_lengths_density_all.png", min_length=50, max_length=4000, colors=LAPUTA_MEDIUM)
+    # read_length_histogram_all(summary, f"read_lengths_histogram_all.png", min_length=50, max_length=4000, colors=LAPUTA_MEDIUM)
+    # read_length_histogram_distinct(summary, f"read_lengths_histogram_distinct.png", min_length=50, max_lengths=[1000, 4000], colors=LAPUTA_MEDIUM)
 
-    print("Completed statistics summary for alignments")
-
-    pprint(summary)
-
-    out_handle.close()
 
 
 app()

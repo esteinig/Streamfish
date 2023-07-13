@@ -100,13 +100,13 @@ impl ReadUntilClient {
 
         // Unblock-all warnings visible on startup
         if config.readuntil.unblock_all_client {
-            log::warn!("Immediate unblocking of all reads is active!");
+            log::warn!("Unblocking reads immediately after receipt from control server!");
         }
-        if config.readuntil.unblock_all_dori {
-            log::warn!("Dori response unblocking of all reads is active!");
+        if config.readuntil.unblock_all_server {
+            log::warn!("Unblocking reads after sending to Dori!");
         }
         if config.readuntil.unblock_all_process {
-            log::warn!("Dori process response unblocking of all reads is active!");
+            log::warn!("Unblocking reads after processing on Dori!");
         }
 
         // MinKNOW and Dori client connections
@@ -638,7 +638,20 @@ impl ReadUntilClient {
 
                 if  dori_response.decision == unblock_decision {
 
-                    if !experiment_config.control {
+                    if experiment_config.control {
+                        // Send a none action when running an experiment control
+                        minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
+                            LiveReadsRequest::Actions(Actions { actions: vec![
+                                Action {
+                                    action_id: Uuid::new_v4().to_string(),
+                                    read: Some(action::Read::Number(dori_response.number)),
+                                    action: None,
+                                    channel: dori_response.channel,
+                                }
+                            ]})
+                        )}).await.expect("Failed to unblock request to queue");
+                        log::info!("Sending none action");
+                    } else {
                         // Send unblock decision to stop read - also stops further data (minknow_api::data)
                         minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
                             LiveReadsRequest::Actions(Actions { actions: vec![
@@ -663,7 +676,20 @@ impl ReadUntilClient {
 
                 } else if dori_response.decision == stop_decision {
 
-                    if !experiment_config.control {
+                    if experiment_config.control {
+                        // Send a none action when running an experiment control
+                        minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
+                            LiveReadsRequest::Actions(Actions { actions: vec![
+                                Action {
+                                    action_id: Uuid::new_v4().to_string(),
+                                    read: Some(action::Read::Number(dori_response.number)),
+                                    action: None,
+                                    channel: dori_response.channel,
+                                }
+                            ]})
+                        )}).await.expect("Failed to unblock request to queue");
+                        log::info!("Sending none action");
+                    } else {
                         // Send a stop receive further data action and let read be 
                         // sequenced without further evaluations
                         minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
@@ -687,7 +713,7 @@ impl ReadUntilClient {
                     }).await.expect("Failed to send basecall requests to Dori request queue")
 
                 } else {
-                    // Continue or none decisions are not processed, we let the client fetch
+                    // Proceed or none decisions are not processed, we let the client fetch
                     // more chunks from the read to be added to cache and only log
                 }
 

@@ -1,0 +1,45 @@
+[meta]
+name            = 'streamfish-icarust-test'
+version         = '0.1.0'
+description     = 'Streamfish default configuration for Icarust testing'
+  
+[minknow]  
+port            = 9502                                                                # MinKNOW (9502) or Icarust (10000)
+host            = '127.0.0.1'                                                         # Address where this runs - if connecting from container (Dori) use the DoriConfig
+token           = 'df801f1a-871a-464e-a5af-077bae1741e0'  
+certificate     = '/opt/ont/minknow/conf/rpc-certs/ca.crt'
+
+[icarust]  
+enabled         = false
+position_port   = 10005
+sample_rate     = 4000
+
+[dori]
+tcp_enabled     = false
+tcp_host        = '0.0.0.0'
+tcp_port        = 10002
+uds_path        = '/tmp/.dori/socket'
+uds_override    = true
+minknow_host    = "minknow_host"                                                      # Host ports forwarded inside container
+minknow_port    = 9502                                                                # Manager service port inside container
+
+[dorado]  
+batch_size      = 128
+batch_timeout   = 1000                                                                # 1 ms
+model_runners   = 2
+
+[readuntil]
+device_name         = "MS12345"
+channel_start       = 1
+channel_end         = 512
+dori_tcp_host       = '127.0.0.1'                                                           # container
+dori_tcp_port       = 10002                                                                 # container
+unblock_all         = false
+unblock_all_mode    = "client"
+
+[experiment]  
+control         = false
+mode            = 'mapping'
+type            = 'targeted_sequencing'
+reference       = '/tmp/bacteria.mmi'
+targets         = ['NC_002516.2']                                                     # leave empty to target all sequences 

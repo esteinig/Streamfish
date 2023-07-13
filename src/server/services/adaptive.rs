@@ -38,13 +38,13 @@ impl AdaptiveSamplingService {
         }
 
         if config.readuntil.unblock_all_client {
-            log::warn!("Immediate unblocking of all reads on client is active!");
+            log::warn!("Unblocking reads immediately after receipt from control server!");
         }
-        if config.readuntil.unblock_all_dori {
-            log::warn!("Dori response unblocking of all reads is active!");
+        if config.readuntil.unblock_all_server {
+            log::warn!("Unblocking reads after sending to Dori!");
         }
         if config.readuntil.unblock_all_process {
-            log::warn!("Dori process response unblocking of all reads is active!");
+            log::warn!("Unblocking reads after processing on Dori!");
         }
         
         log::info!("Basecaller: {} Path: {:?} Args: {:?}", config.dori.basecaller, config.dori.basecaller_path, config.dori.basecaller_args.join(" "));
@@ -225,7 +225,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                         
                         // If unblock-all testing is active, send
                         // response after channel cache decisions
-                        if run_config_1.readuntil.unblock_all_dori {
+                        if run_config_1.readuntil.unblock_all_server {
                             yield DoradoCacheResponse { 
                                 channel, 
                                 number,
@@ -233,6 +233,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                             }
 
                         } else {
+                            
+                            // Introduce a tiny throttle to slow down read inpout to Dorado?                            
                             log::debug!("Processing cached read: {} {} (chunks = {})", &channel, &number, &num_chunks);
 
                             let data: Vec<String> = cached.iter().map(|raw_data| {
@@ -452,7 +454,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
                             // If unblock-all testing is active, send
                             // response after channel cache decisions
-                            if run_config_1.readuntil.unblock_all_dori {
+                            if run_config_1.readuntil.unblock_all_server {
                                 yield DoradoCacheResponse { 
                                     channel, 
                                     number,

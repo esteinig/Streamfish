@@ -21,12 +21,12 @@ break_read_ms = 400
 
 [[sample]]
 name = "Bacteria 1"
-input_genome = "/squiggle_arrs/NC_002516.2.squiggle.npy" 
+input_genome = "squiggle_arrs/NC_002516.2.squiggle.npy" 
 mean_read_length = 1000
 weight = 1
 
 [[sample]]
 name = "Bacteria 2"
-input_genome = "/squiggle_arrs/NC_003997.3.squiggle.npy"
-mean_read_length = 1500
-weight = 2
+input_genome = "squiggle_arrs/NC_003997.3.squiggle.npy"
+mean_read_length = 1000
+weight = 1

@@ -108,6 +108,8 @@ impl MinKnowClient {
         // ManagerClient Initiation 
         // ========================
 
+        log::info!("Connecting to: https://{}:{}", config.host, config.port);
+
         // Establish a secure channel to the MinKnow manager service, that will be 
         // available throughout to request data from the manager service
         let manager_channel = Channel::from_shared(
@@ -120,6 +122,8 @@ impl MinKnowClient {
         // We clone the established channel (cheap, see below) and instantiate a new manger 
         // service client, that allows us to send the implemented requests. This is a general
         // patterns to create the client wrappers.
+
+        log::info!("Channel established on: https://{}:{}", config.host, config.port);
         
         let mut manager_client = ManagerClient::new(
             manager_channel.clone(), config.token.clone()
