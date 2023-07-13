@@ -11,11 +11,12 @@ It turned into a fun and slightly crazy project designing and testing a low-late
 ## Features
 
 * Extensible control-server (`MinKNOW`, `Icarust`) client implementation and library in Rust
+* Run directly on host or within/between Docker containers, or a mixture of both
 * Low-latency optimized streaming implementation of the adaptive sampling client, stable and tested for long runtimes
 * `Dorado` streaming basecaller and alignment on a deployable RPC server, e.g. if you need to access on GPU cluster
-* 'Slice-and-dice' parallelized multi-GPU flowcell partitioning for high throughput runs (1024 pores+)
-* Full adaptive sampling experiment implementation, can be customized (under construction)
-* Dynamic adaptive sampling feedback loops for "slow" real-time analysis (under construction)
+* 'Slice-and-dice': flowcell partitioning for high throughput runs (1024 pores+) and latency optimization on multiple GPUs with Dorado
+* Full adaptive sampling experiment implementation with `Icarust` testing, can be customized (under construction)
+* Dynamic adaptive sampling feedback loops for "slow" real-time analysis and configuration changes (under construction)
 
 ## Warnings
 
@@ -45,4 +46,11 @@ When testing high-throughput setups with `Icarust` (> 512 pores) you will need t
 
 Check out the amazing work by [@Adoni5](https://github.com/Adoni5) and [Loose Lab](https://github.com/LooseLab). Please also cite [their preprint](https://www.biorxiv.org/content/10.1101/2023.05.16.540986v1) if you should - for whatever reason - use `Streamfish` in your publication (not recommended at this stage).
 
+## Modifications
 
+Modifications to tools used in `Streamfish` to make this work:
+
+1. TLS certification checks: deactivated certification checks in the underlying `tonic v0.9.2` library as they were incompatible with the `MinKNOW` certificate version
+2. Dorado streaming input: added a `DataLoader` method that allows reading a text based input stream that contains the uncalbriated signal arrays and device configurations for basecalling
+3. Dorado batch timeout: added a command line option (`--batch-timeout` in microseconds) that allows setting the timeout before an incomplete batch is launched for basecalling - this is necessary to improve latency due to inpout streams and launches models as quickyl as possible
+4. Icarust quality of life: added delay and timeout to Icarust for standardizing benchmark experiments, added optional actions (as in MinKNOW) for experiment control testing, added channel size on `GetLiveReadsRequest` setup configuration to get channel subsets only and allow for `slice-and-dice` runs on multiple GPUs
