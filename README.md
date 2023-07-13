@@ -4,9 +4,9 @@ Low-latency adaptive sampling that re-engineers the [`ReadUntil client`](https:/
 
 ## Motivation
 
-I didn't understand enough of the adaptive sampling stack to customize applications. This started as an excercise to re-implement the [`ReadUntil API`](https://github.com/nanoporetech/read_until_api) and parts of the [`Minknow API`](https://github.com/nanoporetech/minknow_api/tree/master/proto/minknow_api) from Oxford Nanopore Technologies (ONT) to learn how the control server and Remote Call Procedure (RPC) endpoints work, as well as how the adaptive sampling queues, caches and decision logic operate. 
+`Streamfish` (originally `Reefsquid` but it got too confusing with `Readfish`) started as an excercise to re-implement the [`ReadUntil API`](https://github.com/nanoporetech/read_until_api) and parts of the [`Minknow API`](https://github.com/nanoporetech/minknow_api/tree/master/proto/minknow_api) from Oxford Nanopore Technologies (ONT). I wanted to learn how the control server Remote Call Procedure (RPC) endpoints were designed, as well as how the adaptive sampling queues, caches and decision logic operate. 
 
-It turned into a fun and slightly crazy project designing and testing a low-latency adaptive sampling client that operates on asynchoneous streams and custom RPC servers, and is - of course - fully implemented in Rust 🦀.
+It turned into a fun and slightly insane project to design and test a low-latency client that operates on asynchoneous streams and is - of course - fully implemented in Rust 🦀.
 
 ## Features
 
