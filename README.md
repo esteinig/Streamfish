@@ -12,7 +12,7 @@ It turned into a fun and slightly crazy project designing and testing a low-late
 
 Main features:
 
-* Low-latency optimized, asynchroneous streaming implementation of the adaptive sampling clien
+* Low-latency asynchroneous streaming implementation of the adaptive sampling client
 * Stable and tested for long runtimes and high-throughput flowcells, uses latest basecall models with `Dorado`
 * 'Slice-and-dice': multi-GPU flowcell partitioning for high throughput runs (1024 pores+) and latency optimization
 * Dynamic adaptive sampling feedback loops for "slow" real-time analysis and configuration changes (under construction)
