@@ -6,11 +6,28 @@ Low-latency adaptive sampling that re-engineers the [`ReadUntil client`](https:/
 
 I didn't understand enough of the adaptive sampling stack to customize applications. This started as an excercise to re-implement the [`ReadUntil API`](https://github.com/nanoporetech/read_until_api) and parts of the [`Minknow API`](https://github.com/nanoporetech/minknow_api/tree/master/proto/minknow_api) from Oxford Nanopore Technologies (ONT) to learn how the control server and Remote Call Procedure (RPC) endpoints work, as well as how the adaptive sampling queues, caches and decision logic operate. 
 
-It turned into a fun and slightly crazy project designing and testing a low-latency adaptive sampling client that operates on asynchoneous streams and custom RPC servers, and is - of course - fully implemented in Rust (with some C++ modifications of [`Dorado`](https://github.com/esteinig/dorado/commits/dori-stdin-v0.3.1)) 🦀.
+It turned into a fun and slightly crazy project designing and testing a low-latency adaptive sampling client that operates on asynchoneous streams and custom RPC servers, and is - of course - fully implemented in Rust 🦀.
+
+## Features
+
+Main features:
+
+* Low-latency asynchroneous streaming implementation of the adaptive sampling client
+* Stable and tested for long runtimes and high-throughput flowcells, uses latest basecall models with `Dorado`
+* Customizable adaptive sampling experiments with testing and latency optimization through `Icarust` 
+* 'Slice-and-dice' multi-GPU flowcell partitioning for latency optimization and high throughput runs (1024 pores+) (**under construction**)
+* Dynamic adaptive sampling feedback loops for "slow" real-time analysis and configuration changes (**under construction**)
+
+Other features:
+
+* Extensible control-server client implementation and library in Rust, cached and non-cached ReadUntil runtimes
+* `Dorado` modifications for streaming input on a deployable RPC server, for example if you need to access on GPU cluster
+* Runs directly on host or within/between Docker containers, or a mixture of both - container compiles custom fork of `Dorado`
+* Adaptive samplign experiment presets for targeted sequencing and coverage balancing (no barcode implementation at the moment)
 
 ## Warnings
 
-This is an early development version that (somewhat surprisingly) works. **It is not user-friendly.** At the very least you will need to be familiar with using `Docker` and willing to spend some time adjusting `Dorado` on your GPU. 
+This is an early development version that somewhat surprisingly works. **It is experimental and not user-friendly, particularly for installation.**. But it's also not ... too bad, I suppose?
 
 Compiled binaries, libraries and forks are implemented in the `Docker` images - it **should** not be too difficult to configure and start the containers (😬). However, there may be unanticipated interactions with your supported NVIDIA GPU drivers and CUDA version - this may need to be adjusted in the container image [as described on this page](docs/gpu.md). 
 
@@ -36,4 +53,11 @@ When testing high-throughput setups with `Icarust` (> 512 pores) you will need t
 
 Check out the amazing work by [@Adoni5](https://github.com/Adoni5) and [Loose Lab](https://github.com/LooseLab). Please also cite [their preprint](https://www.biorxiv.org/content/10.1101/2023.05.16.540986v1) if you should - for whatever reason - use `Streamfish` in your publication (not recommended at this stage).
 
+## Modifications
 
+Modifications to tools used in `Streamfish` to make this work:
+
+1. TLS certification checks: deactivated certification checks in the underlying `tonic v0.9.2` library as they were incompatible with the `MinKNOW` certificate version
+2. Dorado streaming input: added a `DataLoader` method that allows reading a text based input stream that contains the uncalbriated signal arrays and device configurations for basecalling
+3. Dorado batch timeout: added a command line option (`--batch-timeout` in microseconds) that allows setting the timeout before an incomplete batch is launched for basecalling - this is necessary to improve latency due to inpout streams and launches models as quickyl as possible
+4. Icarust quality of life: added delay and timeout to Icarust for standardizing benchmark experiments, added optional actions (as in MinKNOW) for experiment control testing, added channel size on `GetLiveReadsRequest` setup configuration to get channel subsets only and allow for `slice-and-dice` runs on multiple GPUs
