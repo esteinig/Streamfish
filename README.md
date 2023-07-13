@@ -8,9 +8,18 @@ I didn't understand enough of the adaptive sampling stack to customize applicati
 
 It turned into a fun and slightly crazy project designing and testing a low-latency adaptive sampling client that operates on asynchoneous streams and custom RPC servers, and is - of course - fully implemented in Rust (with some C++ modifications of [`Dorado`](https://github.com/esteinig/dorado/commits/dori-stdin-v0.3.1)) 🦀.
 
+## Features
+
+* Extensible control-server (`MinKNOW`, `Icarust`) client implementation and library in Rust
+* Low-latency optimized streaming implementation of the adaptive sampling client, stable and tested for long runtimes
+* `Dorado` streaming basecaller and alignment on a deployable RPC server, e.g. if you need to access on GPU cluster
+* 'Slice-and-dice' parallelized multi-GPU flowcell partitioning for high throughput runs (1024 pores+)
+* Full adaptive sampling experiment implementation, can be customized (under construction)
+* Dynamic adaptive sampling feedback loops for "slow" real-time analysis (under construction)
+
 ## Warnings
 
-This is an early development version that (somewhat surprisingly) works. **It is not user-friendly.** At the very least you will need to be familiar with using `Docker` and willing to spend some time adjusting `Dorado` on your GPU. 
+This is an early development version that (somewhat surprisingly) works. **It is not user-friendly.** At the very least you will need to be familiar with using `Docker`.
 
 Compiled binaries, libraries and forks are implemented in the `Docker` images - it **should** not be too difficult to configure and start the containers (😬). However, there may be unanticipated interactions with your supported NVIDIA GPU drivers and CUDA version - this may need to be adjusted in the container image [as described on this page](docs/gpu.md). 
 
