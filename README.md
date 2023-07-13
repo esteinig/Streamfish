@@ -14,9 +14,9 @@ Main features:
 
 * Low-latency asynchroneous streaming implementation of the adaptive sampling client
 * Stable and tested for long runtimes and high-throughput flowcells, uses latest basecall models with `Dorado`
-* 'Slice-and-dice': multi-GPU flowcell partitioning for high throughput runs (1024 pores+) and latency optimization
+* Customizable adaptive sampling experiments with testing and latency optimization through `Icarust` 
+* 'Slice-and-dice' multi-GPU flowcell partitioning for high throughput runs (1024 pores+) 
 * Dynamic adaptive sampling feedback loops for "slow" real-time analysis and configuration changes (under construction)
-* Customizable adaptive sampling experiment implementation  with `Icarust` testing
 
 Other features:
 
