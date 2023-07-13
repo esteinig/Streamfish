@@ -6,17 +6,24 @@ Low-latency adaptive sampling that re-engineers the [`ReadUntil client`](https:/
 
 I didn't understand enough of the adaptive sampling stack to customize applications. This started as an excercise to re-implement the [`ReadUntil API`](https://github.com/nanoporetech/read_until_api) and parts of the [`Minknow API`](https://github.com/nanoporetech/minknow_api/tree/master/proto/minknow_api) from Oxford Nanopore Technologies (ONT) to learn how the control server and Remote Call Procedure (RPC) endpoints work, as well as how the adaptive sampling queues, caches and decision logic operate. 
 
-It turned into a fun and slightly crazy project designing and testing a low-latency adaptive sampling client that operates on asynchoneous streams and custom RPC servers, and is - of course - fully implemented in Rust (with some C++ modifications of [`Dorado`](https://github.com/esteinig/dorado/commits/dori-stdin-v0.3.1)) 🦀.
+It turned into a fun and slightly crazy project designing and testing a low-latency adaptive sampling client that operates on asynchoneous streams and custom RPC servers, and is - of course - fully implemented in Rust 🦀.
 
 ## Features
 
-* Extensible control-server (`MinKNOW`, `Icarust`) client implementation and library in Rust
-* Run directly on host or within/between Docker containers, or a mixture of both
-* Low-latency optimized streaming implementation of the adaptive sampling client, stable and tested for long runtimes
-* `Dorado` streaming basecaller and alignment on a deployable RPC server, e.g. if you need to access on GPU cluster
-* 'Slice-and-dice': flowcell partitioning for high throughput runs (1024 pores+) and latency optimization on multiple GPUs with Dorado
-* Full adaptive sampling experiment implementation with `Icarust` testing, can be customized (under construction)
+Main features:
+
+* Low-latency optimized, asynchroneous streaming implementation of the adaptive sampling clien
+* Stable and tested for long runtimes and high-throughput flowcells, uses latest basecall models with `Dorado`
+* 'Slice-and-dice': multi-GPU flowcell partitioning for high throughput runs (1024 pores+) and latency optimization
 * Dynamic adaptive sampling feedback loops for "slow" real-time analysis and configuration changes (under construction)
+* Customizable adaptive sampling experiment implementation  with `Icarust` testing
+
+Other features:
+
+* Extensible control-server client implementation and library in Rust, cached and non-cached ReadUntil runtimes
+* `Dorado` modifications for streaming input on a deployable RPC server, for example if you need to access on GPU cluster
+* Runs directly on host or within/between Docker containers, or a mixture of both - container compiles custom fork of `Dorado`
+* Adaptive samplign experiment presets for depletion and targeted sequencing including coverage balancing (no barcode implementation at the moment)
 
 ## Warnings
 
