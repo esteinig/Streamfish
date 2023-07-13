@@ -23,7 +23,7 @@ Other features:
 * Extensible control-server client implementation and library in Rust, cached and non-cached ReadUntil runtimes
 * `Dorado` modifications for streaming input on a deployable RPC server, for example if you need to access on GPU cluster
 * Runs directly on host or within/between Docker containers, or a mixture of both - container compiles custom fork of `Dorado`
-* Adaptive samplign experiment presets for depletion and targeted sequencing including coverage balancing (no barcode implementation at the moment)
+* Adaptive samplign experiment presets for targeted sequencing and coverage balancing (no barcode implementation at the moment)
 
 ## Warnings
 
