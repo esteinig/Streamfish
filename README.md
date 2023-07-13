@@ -20,10 +20,10 @@ Main features:
 
 Other features:
 
-* Extensible control-server client implementation and library in Rust, cached and non-cached ReadUntil runtimes
-* `Dorado` modifications for streaming input on a deployable RPC server, for example if you need to access on GPU cluster
-* Runs directly on host or within/between Docker containers, or a mixture of both - container compiles custom fork of `Dorado`
-* Adaptive samplign experiment presets for targeted sequencing and coverage balancing (no barcode implementation at the moment)
+* Extensible control-server and read-until clients in Rust, read-cache and pure streaming runtimes
+* Runs directly on localhost, in Docker containers, or a mixture of both, for compiler convenience and hot-reload development
+* `Dorado` modifications for streaming input on a deployable RPC server, both within Docker or on remote servers like GPU clusters (introduces latency though
+* Adaptive samplign experiment presets for depletion, targeted sequencing and coverage balancing (no barcodes in the initial release)
 
 ## Warnings
 
