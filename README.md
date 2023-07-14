@@ -29,7 +29,7 @@ Other features:
 
 ## Warnings
 
-This is an early development version that somewhat surprisingly works. **It is experimental and not user-friendly, particularly for installation.**. But it's also not ... too bad, I suppose?
+This is an experimental version. **It is not user-friendly.**. But it's also not ... too bad, I suppose?
 
 Compiled binaries, libraries and forks are implemented in the `Docker` images - it **should** not be too difficult to configure and start the containers (😬). However, there may be unanticipated interactions with your supported NVIDIA GPU drivers and CUDA version - this may need to be adjusted in the container image [as described on this page](docs/gpu.md). 
 
