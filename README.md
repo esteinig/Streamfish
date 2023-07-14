@@ -8,14 +8,14 @@ Low-latency adaptive sampling that re-engineers the [`ReadUntil client`](https:/
 
 It turned into a fun and slightly insane project to design and test a low-latency client that operates on asynchoneous streams and is - of course - fully implemented in Rust 🦀. 
 
-While `Streamfish` approaches the fundamental mechanics and implementation of adaptive sampling from a different angle, it borrows heavily from the logic of [`Readfish`](https://github.com/LooseLab/Readfish) and the hard work done by the [LooseLab](https://github.com/LooseLab) over the years, including the super cool dynamic processing loops that feed back changes to the experiment configuration.
+While `Streamfish` approaches the mechanics from a slightly different angle, it otherwise borrows heavily from the logic of [`Readfish`](https://github.com/LooseLab/Readfish) and all the work done by the [LooseLab](https://github.com/LooseLab), including the super cool dynamic processing loops that feed back changes to the experiment configuration. Essentially you can consider `Streamfish` an experimental implementation of `Readfish` - do **not** use it for real sequencing runs!
 
 ## Features
 
 Main features:
 
 * Low-latency asynchroneous streaming implementation of the adaptive sampling client
-* Stable and tested for long runtimes and high-throughput flowcells, uses latest basecall models with `Dorado`
+* Stable and tested on long runtimes and high-throughput flowcells, uses latest basecall models with `Dorado`
 * Customizable adaptive sampling experiments with testing and latency optimization through `Icarust` 
 * 'Slice-and-dice' multi-GPU flowcell partitioning for latency optimization and high throughput runs (1024 pores+) (**under construction**)
 * Dynamic adaptive sampling feedback loops for "slow" real-time analysis and configuration changes (**under construction**)
@@ -45,9 +45,7 @@ Compiled binaries, libraries and forks are implemented in the `Docker` images - 
 
 I have tested this system on a basic gaming computer running Ubuntu 20.04 LTS with 16 threads (AMD), NVIDIA GTX 3060 12GB RAM with drivers supporting CUDA 11.4 or higher (configured in container) and 48 GB RAM. 
 
-Empirically `Streamfish` client and servers do not need a lot of resources. If you are using a human genome for reference alignment you may need 24-32 GB of RAM - initially my system ran out with 16GB while also running `MinKNOW`. 
-
-When testing high-throughput setups with `Icarust` (> 512 pores) you will need to adjust Dorado batch size in the `Streamfish` configuration - there is a few caveats around batch sizes and too low a batch size may cause a "slipstream" behaviour before `Dorado` crashes without informative error messages. I have documented the investigation and debugging steps [here](https://github.com/esteinig/Streamfish/issues/18) and written some recommendation on what to look out for and how to adjust batch sizes for expected throughput [on this page](docs/gpu.md). High-throughput setups (> 2048 pores) with suitable batch sizes require ~ 10GB GPU RAM.
+Empirically `Streamfish` client and servers do not need a lot of resources except for memory that fits the reference databases or genomes.
 
 ## Icarust
 
