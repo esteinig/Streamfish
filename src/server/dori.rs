@@ -66,7 +66,7 @@ pub struct DoriClient {
 impl DoriClient {
     pub async fn connect(config: &StreamfishConfig) -> Result<Self, Box<dyn std::error::Error>> {
         
-        log::info!("Dori server configuration: {:?}", &config.dori);
+        log::info!("Dori server configuration: {:#?}", &config.dori);
 
         if config.dori.tcp_enabled {
             
@@ -76,7 +76,7 @@ impl DoriClient {
 
             let channel = Channel::from_shared(address.clone())?.connect().await.map_err(|err| DoriError::ConnectionFailure(err))?;
 
-            log::info!("Dori client connected");
+            log::info!("Dori client connected on TCP channel");
 
             Ok(Self {  client: AdaptiveSamplingClient::new(channel) })
 
@@ -92,7 +92,7 @@ impl DoriClient {
                     UnixStream::connect(uds_path.clone()) 
             })).await?;
 
-            log::info!("Dori client connected");
+            log::info!("Dori client connected on UDS channel");
 
             Ok(Self { client: AdaptiveSamplingClient::new(channel) })
         }

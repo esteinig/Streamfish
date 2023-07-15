@@ -17,7 +17,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from pprint import pprint
 
 from pathlib import Path
@@ -56,15 +56,15 @@ YESTERDAY_MEDIUM.reverse()
 class MappingSummary:
 
     reference: str
-    read_lengths: List[int]
-    mapping_qualities: List[int]
+
+    read_lengths_pass: List[int]
+    mapping_qualities_pass: List[int]
 
     read_lengths_unblocked: List[int]
     mapping_qualities_unblocked: List[int]
 
-    reads: int = 0
-    bases: int = 0
-    unblocked: int = 0
+    reads_pass: int = 0
+    bases_pass: int = 0
 
     reads_unblocked: int = 0
     bases_unblocked: int = 0
@@ -76,27 +76,24 @@ class ReferenceSummary:
     reference: str = ""
     control: bool = False
 
-    reads: int = 0
-    bases: int = 0
     reads_total: int = 0
     bases_total: int = 0
+
+    reads_pass: int = 0
+    bases_pass: int = 0
+    n50_length_pass: int = 0
+    median_length_pass: int = 0
+    mean_length_pass: float = 0.
+    mean_mapq_pass: float = 0.
+
     reads_unblocked: int = 0
     bases_unblocked: int = 0
-
-    unblocked: int = 0
-    unblocked_percent: float = 0.
-
-    n50_length: int = 0
-    median_length: int = 0
-    mean_length: float = 0.
-    mean_mapq: float = 0.
-
-
     n50_length_unblocked: int = 0
     median_length_unblocked: int = 0
     mean_length_unblocked: float = 0.
     mean_mapq_unblocked: float = 0.
 
+    unblocked_percent: float = 0.
 
 
     def from_mapping_summary(self, data: MappingSummary, control: bool = False):
@@ -104,25 +101,69 @@ class ReferenceSummary:
         self.reference=data.reference
         self.control=control
 
-        self.reads = data.reads
-        self.bases = data.bases
+        self.reads_total = data.reads_pass+data.reads_unblocked
+        self.bases_total = data.bases_pass+data.bases_unblocked
+
+        self.reads_pass = data.reads_pass
+        self.bases_pass = data.bases_pass
         self.reads_unblocked = data.reads_unblocked
         self.bases_unblocked = data.bases_unblocked
-        self.reads_total = data.reads+data.reads_unblocked
-        self.bases_total = data.bases+data.bases_unblocked
 
-        self.unblocked = data.unblocked
-        self.unblocked_percent = (data.unblocked/(data.reads+data.reads_unblocked))*100
-        
-        self.mean_mapq = statistics.mean(data.mapping_qualities) if len(data.read_lengths) > 1 else 0
-        self.mean_length = statistics.mean(data.read_lengths) if len(data.read_lengths) > 1 else 0
-        self.median_length = int(statistics.median(data.read_lengths)) if len(data.read_lengths) > 1 else 0
-        self.n50_length = compute_n50(data.read_lengths) if len(data.read_lengths) > 1 else 0
+        try:
+            self.unblocked_percent = (data.reads_unblocked/(data.reads_pass+data.reads_unblocked))*100
+        except ZeroDivisionError:
+            self.unblocked_percent = 0
+
+        self.mean_mapq_pass = statistics.mean(data.mapping_qualities_pass) if len(data.mapping_qualities_pass) > 1 else 0
+        self.mean_length_pass = statistics.mean(data.read_lengths_pass) if len(data.read_lengths_pass) > 1 else 0
+        self.median_length_pass = int(statistics.median(data.read_lengths_pass)) if len(data.read_lengths_pass) > 1 else 0
+        self.n50_length_pass = compute_n50(data.read_lengths_pass) if len(data.read_lengths_pass) > 1 else 0
 
         self.mean_mapq_unblocked = statistics.mean(data.mapping_qualities_unblocked) if len(data.mapping_qualities_unblocked) > 1 else 0
         self.mean_length_unblocked = statistics.mean(data.read_lengths_unblocked)  if len(data.read_lengths_unblocked) > 1 else 0
         self.median_length_unblocked = int(statistics.median(data.read_lengths_unblocked)) if len(data.read_lengths_unblocked) > 1 else 0
         self.n50_length_unblocked = compute_n50(data.read_lengths_unblocked)  if len(data.read_lengths_unblocked) > 1 else 0
+
+        return self
+    
+    def from_mapping_summaries(self, summaries: List[MappingSummary]):
+
+        self.reference=""
+        self.control=False
+
+        all_lengths_unblocked = []
+        all_lengths_pass = []
+        all_mapq_unblocked = []
+        all_mapq_pass = []
+
+        for data in summaries:
+
+
+            self.reads_total += data.reads_pass+data.reads_unblocked
+            self.bases_total += data.bases_pass+data.bases_unblocked
+
+            self.reads_pass += data.reads_pass
+            self.bases_pass += data.bases_pass
+            self.reads_unblocked += data.reads_unblocked
+            self.bases_unblocked += data.bases_unblocked
+
+            
+            all_lengths_unblocked += data.read_lengths_unblocked
+            all_lengths_pass += data.read_lengths_pass
+            all_mapq_unblocked += data.mapping_qualities_unblocked
+            all_mapq_pass += data.mapping_qualities_pass
+
+        self.unblocked_percent = (self.reads_unblocked/(self.reads_pass+self.reads_unblocked))*100
+        
+        self.mean_mapq_pass = statistics.mean(all_mapq_pass) if len(all_mapq_pass) > 1 else 0
+        self.mean_length_pass = statistics.mean(all_lengths_pass) if len(all_lengths_pass) > 1 else 0
+        self.median_length_pass = int(statistics.median(all_lengths_pass)) if len(all_lengths_pass) > 1 else 0
+        self.n50_length_pass = compute_n50(all_lengths_pass) if len(all_lengths_pass) > 1 else 0
+
+        self.mean_mapq_unblocked = statistics.mean(all_mapq_unblocked) if len(all_mapq_unblocked) > 1 else 0
+        self.mean_length_unblocked = statistics.mean(all_lengths_unblocked)  if len(all_lengths_unblocked) > 1 else 0
+        self.median_length_unblocked = int(statistics.median(all_lengths_unblocked)) if len(all_lengths_unblocked) > 1 else 0
+        self.n50_length_unblocked = compute_n50(all_lengths_unblocked)  if len(all_lengths_unblocked) > 1 else 0
 
         return self
 
@@ -276,7 +317,7 @@ def get_summary(ends: Path, sam: Path, output: Path = None) -> Dict[str, Mapping
         out_handle = output.open("w")
         out_handle.write("id,ref,mapq,bp\n")
 
-    summary = dict()
+    summary: Dict[str, MappingSummary] = dict()
     with sam.open("r") as sam_file:
         for line in sam_file:
             if line.startswith("@"):
@@ -294,22 +335,21 @@ def get_summary(ends: Path, sam: Path, output: Path = None) -> Dict[str, Mapping
 
             if ref not in summary.keys():
                 summary[ref] = MappingSummary(
-                    reference=ref, read_lengths=[], mapping_qualities=[],
+                    reference=ref, read_lengths_pass=[], mapping_qualities_pass=[],
                     read_lengths_unblocked=[], mapping_qualities_unblocked=[]
                 )
             else:
 
                 if endreasons[read] == 4:
-                    summary[ref].unblocked += 1
                     summary[ref].reads_unblocked += 1
                     summary[ref].bases_unblocked += bases
                     summary[ref].read_lengths_unblocked.append(bases)
                     summary[ref].mapping_qualities_unblocked.append(mapq)
                 else:
-                    summary[ref].reads += 1
-                    summary[ref].bases += bases
-                    summary[ref].read_lengths.append(bases)
-                    summary[ref].mapping_qualities.append(mapq)
+                    summary[ref].reads_pass += 1
+                    summary[ref].bases_pass += bases
+                    summary[ref].read_lengths_pass.append(bases)
+                    summary[ref].mapping_qualities_pass.append(mapq)
 
 
     if output is not None:
@@ -321,22 +361,28 @@ def create_reference_summary_dataframe(
     active_summary: Dict[str, MappingSummary], 
     control_summary: Dict[str, MappingSummary] = None, 
     output: Path = None
-) -> pandas.DataFrame:
+) -> Tuple[pandas.DataFrame, pandas.DataFrame]:
 
     # Create the reference summaries for each experiment arm summary
 
+    summary_list: List[MappingSummary] = [data for _, data in active_summary.items()]
     summaries: List[ReferenceSummary] = [ReferenceSummary().from_mapping_summary(data, control=False) for _, data in active_summary.items()]
     
     if control_summary:
         summaries += [ReferenceSummary().from_mapping_summary(data, control=True) for _, data in control_summary.items()]
+        summary_list += [data for _, data in control_summary.items()]
+
+    combined = ReferenceSummary().from_mapping_summaries(summaries=summary_list)
 
     df = pandas.DataFrame([o.__dict__ for o in summaries])
     df = df.sort_values(by="reference")
 
+    df_combined = pandas.DataFrame([combined.__dict__])
+    
     if output:
         df.to_csv(output, index=False, sep=",", header=True)
 
-    return df
+    return df, df_combined
 
 ########################
 # TERMINAL APPLICATION #
@@ -410,14 +456,15 @@ def evaluation(
     if control_sam and control_ends:
         control_summary = get_summary(ends=control_ends, sam=control_sam, output=control_output)
     
-    df = create_reference_summary_dataframe(active_summary=active_summary, control_summary=control_summary, output=summary_table)
+    df, df_combined = create_reference_summary_dataframe(active_summary=active_summary, control_summary=control_summary, output=summary_table)
 
     with pandas.option_context(
         'display.max_rows', None,
         'display.max_columns', None,
-        'display.precision', 3
+        'display.precision', 2
     ):
         print(df)
+        print(df_combined)
     
     
     # read_length_density_all(summary, f"read_lengths_density_all.png", min_length=50, max_length=4000, colors=LAPUTA_MEDIUM)

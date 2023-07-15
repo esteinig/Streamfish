@@ -47,8 +47,8 @@ impl AdaptiveSamplingService {
             log::warn!("Unblocking reads after processing on Dori!");
         }
         
-        log::info!("Basecaller: {} Path: {:?} Args: {:?}", config.dori.basecaller, config.dori.basecaller_path, config.dori.basecaller_args.join(" "));
-        log::info!("Classifier: {} Path: {:?} Args: {:?}", config.dori.classifier, config.dori.classifier_path, config.dori.classifier_args.join(" "));
+        log::info!("Basecaller: {} Path: {:?} Args: {:?}", config.dori.basecaller.as_str(), config.dori.basecaller_path, config.dori.basecaller_args.join(" "));
+        // log::info!("Classifier: {} Path: {:?} Args: {:?}", config.dori.classifier.as_str(), config.dori.classifier_path, config.dori.classifier_args.join(" "));
 
         Self { config: config.clone() }
     }
@@ -293,7 +293,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                             false => mapping_config.decision(&flag, tid)
                         };
 
-                        log::info!("mapped={:<8} flag={:<4} action={:<1} targets={:?}", tid, &flag, &decision, mapping_config.targets);
+                        log::info!("mapped={:<21} flag={:<4} action={:<1} targets={:?}", tid, &flag, &decision, mapping_config.targets);
 
                         yield DoradoCacheResponse { 
                             channel: identifiers[1].parse::<u32>().unwrap(), 
@@ -511,13 +511,12 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                         let flag = content[1].parse::<u32>().unwrap();
                         let tid = content[2];
 
-
                         let decision = match run_config_2.readuntil.unblock_all_process {
                             true => mapping_config.unblock_all(&flag, tid),
                             false => mapping_config.decision(&flag, tid)
                         };
 
-                        log::info!("mapped={:<8} flag={:<4} action={:<1}", tid, &flag, &decision);
+                        log::info!("mapped={:<21} flag={:<4} action={:<1} targets={:?}", tid, &flag, &decision, mapping_config.targets);
 
                         yield DoradoCacheResponse { 
                             channel: identifiers[1].parse::<u32>().unwrap(), 

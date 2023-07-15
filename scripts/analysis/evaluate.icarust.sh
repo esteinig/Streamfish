@@ -9,9 +9,7 @@
 
 # docker compose -f docker/docker-compose.yml --profile dev --project-name main --env-file docker/.env up
 
-# Enter the evaluation container and setup the conda environment if not already done:
-
-# micromamba create -f scripts/analysis/evaluate.icarust.yml -y
+# Enter the evaluation container and execute the script on the correct input paths and settings (see below)
 
 # =============================
 # STEP 1: DORADO BASECALLING
@@ -19,12 +17,13 @@
 
 CONTROL=1
 
-ANALYSIS_ID='test'
 ANALYSIS_DIR="/tmp/streamfish_analysis_${ANALYSIS_ID}"
 
 MAPPING_REFERENCE='/tmp/bacteria.mmi'
 
-FAST5_ACTIVE_DIR="/tmp/test_bacteria/test/20230713_0050_XIII_FAQ12345_e7931955d/fast5_pass/"  # /tmp/test_bacteria/test/20230712_0745_XIII_FAQ12345_0c3d8fab3/fast5_pass/ (85% pore occupancy) /tmp/minknow_test_fast5
+ANALYSIS_ID=$1
+FAST5_ACTIVE_DIR=$2
+
 FAST5_CONTROL_DIR="/tmp/test_bacteria/test/20230711_0611_XIII_FAQ12345_5ef1fa3b9/fast5_pass/"
 
 DORADO_FST_MODEL='/tmp/models/dna_r9.4.1_e8_fast@v3.4'
@@ -45,6 +44,8 @@ if [ ! -d "$ANALYSIS_DIR" ]; then
 else
     echo "Analysis directory already exists. Overwriting analysis in directory: $ANALYSIS_DIR"
 fi
+
+echo "Running analysis on: $FAST5_ACTIVE_DIR"
 
 micromamba activate icarust_evaluation
 

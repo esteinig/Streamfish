@@ -65,6 +65,7 @@ pub struct UserConfigDori {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserConfigReadUntil {
+    pub init_delay: u64,
     pub device_name: String,              
     pub channel_start: u32,
     pub channel_end: u32,
@@ -75,7 +76,13 @@ pub struct UserConfigReadUntil {
     pub read_cache: bool,
     pub read_cache_batch_rpc: bool,
     pub read_cache_min_chunks: usize,
-    pub read_cache_max_chunks: usize
+    pub read_cache_max_chunks: usize,
+    pub throttle: u64,
+    pub latency_log: Option<PathBuf>,
+
+    pub unblock_duration: f64,
+    pub sample_minimum_chunk_size: u64,
+    pub accepted_first_chunk_classifications: Vec<i32>
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -83,6 +90,8 @@ pub struct UserConfigDorado{
     pub batch_size: u32,
     pub batch_timeout: u32,
     pub model_runners: u32,
+    pub minimap_kmer_size: u32,
+    pub minimap_window_size: u32
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -95,6 +104,7 @@ pub struct UserConfigExperiment {
 }
 
 /// Unblock all circuits for testing
+#[derive(Debug, Clone, PartialEq)]
 pub enum UnblockAll {
     Client,
     Server,
@@ -116,6 +126,47 @@ impl UnblockAll {
             UnblockAll::Client => return (true, false, false),
             UnblockAll::Server => return (false, true, false),
             UnblockAll::Process => return (false, false, true)
+        }
+    }
+}
+
+/// Basecallers
+#[derive(Debug, Clone, PartialEq)]
+pub enum Basecaller {
+    Dorado
+}
+impl Basecaller {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "dorado" => Self::Dorado,
+            _ => unimplemented!("Basecaller `{}` is not implemented", s)
+        }
+    }
+    pub fn as_str(&self) -> &str {
+        match self {
+            Basecaller::Dorado => "dorado"
+        }
+    }
+}
+
+/// Classifiers
+#[derive(Debug, Clone, PartialEq)]
+pub enum Classifier {
+    Minimap2,
+    Kraken2
+}
+impl Classifier {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "minimap2" => Self::Minimap2,
+            "kraken2" => Self::Kraken2,
+            _ => unimplemented!("Classifier `{}` is not implemented", s)
+        }
+    }
+    pub fn as_str(&self) -> &str {
+        match self {
+            Classifier::Minimap2 => "minimap2",
+            Classifier::Kraken2 => "kraken2"
         }
     }
 }
@@ -163,11 +214,8 @@ pub struct ReadUntilConfig {
     pub raw_data_type: RawDataType,
     pub sample_minimum_chunk_size: u64,
     pub accepted_first_chunk_classifications: Vec<i32>,
-    pub action_stream_queue_buffer: usize,
-    pub dori_stream_queue_buffer: usize,
-    pub logging_queue_buffer: usize,
-    pub log_latency: Option<PathBuf>,           // log latency output to file - adds latency! (1-2 bp)
-    pub print_latency: bool,                    // if no latency file specified, print latency to console, otherwise standard log is used without latency
+    pub throttle: u64,
+    pub latency_log: Option<PathBuf>,          
     pub read_cache: bool,
     pub read_cache_batch_rpc: bool,
     pub read_cache_min_chunks: usize,
@@ -192,11 +240,11 @@ pub struct DoriConfig {
     pub minknow_port: u32,
     
     // Basecaller supported: `dorado`
-    pub basecaller: &'static str, 
+    pub basecaller: Basecaller, 
     // Basecaller model path
     pub basecaller_model_path: PathBuf,
     // Classifier supported: `minimap2`, `kraken2`
-    pub classifier: &'static str,   
+    pub classifier: Classifier,   
     // Classifier reference path
     pub classifier_reference_path: PathBuf,
 
@@ -266,43 +314,23 @@ impl StreamfishConfig {
             icarust: IcarustConfig { enabled: user_config.icarust.enabled, position_port: user_config.icarust.position_port, sample_rate: user_config.icarust.sample_rate },
 
             readuntil: ReadUntilConfig {
-                // Device and target pore configuration
                 device_name: user_config.readuntil.device_name,
                 channel_start: user_config.readuntil.channel_start,
                 channel_end: user_config.readuntil.channel_end,
-                // Dori TCP host - can be different than in Docker due to port forwarding
                 dori_tcp_host: user_config.readuntil.dori_tcp_host,
                 dori_tcp_port: user_config.readuntil.dori_tcp_port,
-                // Initiation of streams, delays data transmission to let 
-                // analysis pipeline load models and indices on Dori
-                //
-                // I think this is actually important for some reason
-                init_delay: 10,
-                // Unblock-all latency tests
+                init_delay: user_config.readuntil.init_delay,
                 unblock_all_client: unblock_all_client,
                 unblock_all_server: unblock_all_server,
                 unblock_all_process: unblock_all_process,
-                // Is this relevant to latency?
-                unblock_duration: 0.1,
-                // Signal data configuration
-                sample_minimum_chunk_size: 200,
+                unblock_duration: user_config.readuntil.unblock_duration,
+                throttle: user_config.readuntil.throttle,
+                sample_minimum_chunk_size: user_config.readuntil.sample_minimum_chunk_size,
                 raw_data_type: RawDataType::Uncalibrated,
-                accepted_first_chunk_classifications: vec![83, 65],
-                // May need to increase these for larger pore arrays
-                // and for stream stability - looks like in the cached
-                // endpoints with multiple responses we might cause
-                // instability
-                action_stream_queue_buffer: 100000,  // may not be this high?
-                dori_stream_queue_buffer: 100000,
-                logging_queue_buffer: 100000,
-                // Logging configuration
-                log_latency: None,
-                print_latency: false,
-                // Use streaming read cache for raw data chunks on Dori
+                accepted_first_chunk_classifications: user_config.readuntil.accepted_first_chunk_classifications,
+                latency_log: user_config.readuntil.latency_log,
                 read_cache: user_config.readuntil.read_cache,
-                // Send data as batched request to Dori cache RPC, otherwise single channel requests
                 read_cache_batch_rpc: user_config.readuntil.read_cache_batch_rpc,
-                // Solved the memory problems, it was tensor creation in the modified Dorado
                 read_cache_min_chunks: user_config.readuntil.read_cache_min_chunks,
                 read_cache_max_chunks: user_config.readuntil.read_cache_max_chunks
             },
@@ -318,10 +346,10 @@ impl StreamfishConfig {
                 minknow_host: user_config.dori.minknow_host,
                 minknow_port: user_config.dori.minknow_port,
 
-                basecaller: "dorado".into(),
+                basecaller: Basecaller::Dorado,
                 basecaller_model_path: user_config.dori.basecaller_model,
 
-                classifier: "minimap2".into(),
+                classifier: Classifier::Minimap2,
                 classifier_reference_path: user_config.experiment.reference,
 
                 basecaller_path: user_config.dori.basecaller_path,  // /usr/src/streamfish/scripts/cpp/cmake-build/test | /home/esteinig/dev/bin/dorado | /opt/dorado/bin/dorado
@@ -348,8 +376,8 @@ impl StreamfishConfig {
                 dorado_batch_size: user_config.dorado.batch_size,
                 dorado_batch_timeout: user_config.dorado.batch_timeout,
 
-                dorado_mm_kmer_size: 15,
-                dorado_mm_window_size: 10,
+                dorado_mm_kmer_size: user_config.dorado.minimap_kmer_size,
+                dorado_mm_window_size: user_config.dorado.minimap_window_size,
 
                 kraken2_threads: 4,
                 kraken2_args: "--minimum-hit-groups 1 --threads 4 --memory-mapping".into(),
@@ -361,21 +389,21 @@ impl StreamfishConfig {
 
         // Some checks and argument construction for basecaller/classifier configurations
 
-        if !["dorado"].contains(&streamfish_config.dori.basecaller.trim().to_lowercase().as_str()) {
+        if !["dorado"].contains(&streamfish_config.dori.basecaller.as_str().trim().to_lowercase().as_str()) {
             panic!("Basecaller configuration not supported")
         }
-        if !["minimap2", "kraken2"].contains(&streamfish_config.dori.classifier.trim().to_lowercase().as_str()) {
+        if !["minimap2", "kraken2"].contains(&streamfish_config.dori.classifier.as_str().trim().to_lowercase().as_str()) {
             panic!("Classifier configuration not supported")
         }
 
-        if streamfish_config.dori.classifier == "minimap2" && streamfish_config.dori.classifier_reference_path.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
+        if streamfish_config.dori.classifier == Classifier::Minimap2 && streamfish_config.dori.classifier_reference_path.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
             panic!("Classifier reference for minimap2 must be an index file (.mmi)")
         }
 
         // Dorado basecaller setup
         if streamfish_config.dori.basecaller_args.is_empty() {
             // Construct arguments and set into config
-            if streamfish_config.dori.basecaller == "dorado"  && streamfish_config.dori.classifier == "minimap2" {
+            if streamfish_config.dori.basecaller == Basecaller::Dorado  && streamfish_config.dori.classifier == Classifier::Minimap2 {
                 // Minimap2 configuration integrated with Dorado - add window/k-mer options [TODO]
                 streamfish_config.dori.basecaller_args = format!(
                     "basecaller --verbose --batchsize {} --reference {} -k {} -w {} -g 32 --batch-timeout {} --num-runners {} --emit-sam {} -", // 
@@ -387,7 +415,7 @@ impl StreamfishConfig {
                     streamfish_config.dori.dorado_model_runners,
                     streamfish_config.dori.basecaller_model_path.display()
                 ).split_whitespace().map(String::from).collect();  
-            } else if streamfish_config.dori.basecaller == "dorado" && streamfish_config.dori.classifier == "kraken2" {
+            } else if streamfish_config.dori.basecaller == Basecaller::Dorado && streamfish_config.dori.classifier == Classifier::Kraken2 {
                 // Basecalling only configuration with stdout pipe from Dorado
                 streamfish_config.dori.basecaller_args = format!(
                     "basecaller --verbose --batchsize {} --emit-fastq {} -",
@@ -402,7 +430,7 @@ impl StreamfishConfig {
 
         if streamfish_config.dori.classifier_args.is_empty() {
             // Construct arguments and set into config
-            if  streamfish_config.dori.basecaller == "dorado" && streamfish_config.dori.classifier == "kraken2" {
+            if  streamfish_config.dori.basecaller == Basecaller::Dorado&& streamfish_config.dori.classifier == Classifier::Kraken2 {
                 for arg in  streamfish_config.dori.kraken2_args.clone().split_whitespace() {
                     streamfish_config.dori.classifier_args.push(arg.to_string())
                 }
@@ -414,7 +442,7 @@ impl StreamfishConfig {
                     "/dev/fd/0".to_string() // stdin
                 ]);
 
-            } else if streamfish_config.dori.basecaller == "dorado" && streamfish_config.dori.classifier == "minimap2" {
+            } else if streamfish_config.dori.basecaller == Basecaller::Dorado && streamfish_config.dori.classifier == Classifier::Minimap2 {
                 // No settings necessary - minimap is used in Dorado
             } else {
                 panic!("Classifier / basecaller combination not supported")
@@ -431,7 +459,7 @@ impl StreamfishConfig {
         // and are overwritten before connection of the clients
 
         if let Some(log_file) = log_latency {
-            self.readuntil.log_latency = Some(log_file)
+            self.readuntil.latency_log = Some(log_file)
         }
         if let Some(tcp_port) = port_dori {
             self.dori.tcp_port = tcp_port;
@@ -678,8 +706,8 @@ impl MappingConfig {
     }
     // A test method that returns an unblock decision for unblock-all testing
     pub fn unblock_all(&self, flag: &u32, tid: &str) -> i32 {
-        if self.unblock_all.flags.contains(flag) && self.targets.iter().any(|x| x == tid) {
-            // No action, always return unblock for testing
+        if self.unblock_all.flags.contains(flag) && (self.target_all || self.targets.iter().any(|x| x == tid)) {
+            // No action, always return unblock for testing, implements one lo logic check to reflect decision logic time
         }
         self.unblock_all.decision
     }

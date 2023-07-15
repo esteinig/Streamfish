@@ -40,9 +40,9 @@ services:
       - STREAMFISH_MINKNOW_HOST=minknow_host  # overrides env file at runtime
     extra_hosts:
       - "minknow_host:host-gateway"
-    ports:
-      - "${TCP_ICARUST_MANAGER:-10000}:${TCP_ICARUST_MANAGER:-10000}"                       # icarust port forward to host - manager port
-      - "${TCP_ICARUST_POSITION:-10001}:${TCP_ICARUST_POSITION:-10001}"                     # icarust port forward to host - position port
+    # ports:
+    #   - "${TCP_ICARUST_MANAGER:-10000}:${TCP_ICARUST_MANAGER:-10000}"                       # icarust port forward to host - manager port
+    #   - "${TCP_ICARUST_POSITION:-10001}:${TCP_ICARUST_POSITION:-10001}"                     # icarust port forward to host - position port
     networks:
       - streamfish
     volumes:

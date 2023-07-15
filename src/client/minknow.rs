@@ -129,22 +129,22 @@ impl MinKnowClient {
             manager_channel.clone(), config.token.clone()
         );
 
-        log::info!("Connected to MinKNOW / Icarust manager service");
+        log::info!("Connected to control server manager service");
 
         // Get the version information to test the connection and print the version of MinKnow
         let version_response = manager_client.get_version_info().await?;
-        log::info!("MinKnow version: v{}", version_response);
+        log::info!("Control server version: v{}", version_response);
 
         // Get the flowcell positions and print their total count, if present, print their summary
         let position_response = manager_client.get_flow_cell_positions().await?;
 
         if position_response.total_count > 0 {
-            log::info!("MinKnow flowcell positions detected:");
+            log::info!("Flowcell positions detected:");
             for position in &position_response.positions {
                 log::info!("{}", position);
             }
         } else {
-            log::info!("MinKnow flowcell positions: {}", &position_response);
+            log::info!("Flowcell positions: {}", &position_response);
         }
 
         let active_positions: HashMap<String, FlowCellPosition> = HashMap::from_iter(
