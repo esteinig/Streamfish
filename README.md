@@ -4,28 +4,34 @@ Low-latency adaptive sampling that re-engineers the [`ReadUntil client`](https:/
 
 ## Motivation
 
-`Streamfish` (originally `Reefsquid` but it got too confusing with `Readfish`) started as an excercise to re-implement the [`ReadUntil API`](https://github.com/nanoporetech/read_until_api) and parts of the [`Minknow API`](https://github.com/nanoporetech/minknow_api/tree/master/proto/minknow_api) from Oxford Nanopore Technologies (ONT). I wanted to learn how the control server Remote Call Procedure (RPC) endpoints were designed, as well as how the adaptive sampling queues, caches and decision logic operate. 
+Streamfish started as an excercise to re-implement the [`ReadUntil API`](https://github.com/nanoporetech/read_until_api) and parts of the [`Minknow API`](https://github.com/nanoporetech/minknow_api/tree/master/proto/minknow_api) from Oxford Nanopore Technologies (ONT). I wanted to learn how the control server endpoints and the adaptive sampling queues, caches and decision logic operate. It turned into a fun and slightly insane project to design and test a client implementation that operates on asynchoneous streams using a Rust codebase 🦀. 
 
-It turned into a fun and slightly insane project to design and test a low-latency client that operates on asynchoneous streams and is - of course - fully implemented in Rust 🦀. 
-
-While `Streamfish` approaches the mechanics from a slightly different angle, it otherwise borrows heavily from the logic of [`Readfish`](https://github.com/LooseLab/Readfish) and all the work done by the [LooseLab](https://github.com/LooseLab), including the super cool dynamic processing loops that feed back changes to the experiment configuration. Essentially you can consider `Streamfish` an experimental implementation of `Readfish` - do **not** use it for real sequencing runs!
+While Streamfish approaches the mechanics from a slightly different angle (streaming operations instead of batch-wise) it otherwise borrows heavily from the logic and implementation of [Readfish](https://github.com/LooseLab/Readfish) and all the work done by the [LooseLab](https://github.com/LooseLab) - including the super cool dynamic processing loops that feed back changes to the experiment configuration (see also their latest paper on BOSS runs with Readfish). Essentially you can consider Streamfish an experimental implementation of Readfish. It is highly recommended **not** to use it for real sequencing runs at this stage.
 
 ## Features
 
 Main features:
 
 * Low-latency asynchroneous streaming implementation of the adaptive sampling client
-* Stable and tested on long runtimes and high-throughput flowcells, uses latest basecall models with `Dorado`
-* Customizable adaptive sampling experiments with testing and latency optimization through `Icarust` 
-* 'Slice-and-dice' multi-GPU flowcell partitioning for latency optimization and high throughput runs (1024 pores+) (**under construction**)
-* Dynamic adaptive sampling feedback loops for "slow" real-time analysis and configuration changes (**under construction**)
+* Stable and tested on long runtimes and high-throughput flowcells (with some caveats around basecalling)
+* Latest basecall models with a streaming input into `Dorado` and legacy implementation of `Guppy`
+* Customizable adaptive sampling experiments with testing and latency optimization through `Icarust`
+
+Under construction:
+
+* Partioning of experimental conditions acoss the flowcell - better experiment configurations
+* 'Slice-and-dice' multi-GPU flowcell partitioning for latency optimization and high throughput runs (1024 pores+)
+* Dynamic adaptive sampling feedback loops for real-time analysis and configuration changes e.g. coverage optimization
 
 Other features:
 
-* Extensible control-server and read-until clients in Rust, read-cache and pure streaming runtimes
-* Runs directly on localhost, in Docker containers, or a mixture of both, for compiler convenience and hot-reload development
-* `Dorado` modifications for streaming input on a deployable RPC server for Docker containers or remote GPU servers
-* Adaptive samplign experiment presets for depletion, targeted sequencing and coverage balancing (no barcodes in the initial release)
+* Extensible control-server and read-until clients, read-cache or pure streaming endpoints, throttle for batched actions
+* Runs directly on localhost, in Docker containers, or a mixture of both (for compiler convenience and hot-reload development)
+* Adaptive samplign experiment presets for depletion, targeted sequencing and coverage balancing
+
+Not to be implemented:
+
+* Barcode experiments - not needed for my own applications, but open to suggestions or pull requests :) 
 
 ## Warnings
 
