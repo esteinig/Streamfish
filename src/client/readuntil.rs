@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use colored::control;
 use uuid::Uuid;
 
 use quanta::{
@@ -268,37 +267,30 @@ impl ReadUntilClient {
             while let Some(response) = minknow_stream.message().await.expect("Failed to get response from Minknow data stream") {
                 
                 if run_config.unblock_all_client {
-
+                    let mut batched_actions = Vec::new();
                     for (channel, read_data) in response.channels {
-                        // Unblock all to test unblocking, equivalent to Readfish
-                        minknow_action_tx.send(GetLiveReadsRequest { request: Some(
-                            LiveReadsRequest::Actions(Actions { actions: vec![
-                                Action {
-                                    action_id: Uuid::new_v4().to_string(), // Check if this is really costly?
-                                    read: Some(action::Read::Number(read_data.number)),
-                                    action: Some(action::Action::Unblock(UnblockAction { duration: run_config.unblock_duration })),
-                                    channel: channel,
-                                }
-                            ]})
-                        )}).expect("Failed to send unblock request to Minknow request queue");
-
-                        minknow_response_log.send(ClientLog { 
-                            stage: PipelineStage::DoriRequest, 
-                            time: minknow_response_clock.now(),
-                            channel: channel, 
-                            number: read_data.number 
-                        }).expect("Failed to send log message from Minknow response stream");
+                       batched_actions.push(
+                            Action {
+                                action_id: Uuid::new_v4().to_string(), // Check if this is really costly?
+                                read: Some(action::Read::Number(read_data.number)),
+                                action: Some(action::Action::Unblock(UnblockAction { duration: run_config.unblock_duration })),
+                                channel: channel,
+                            }
+                        )
                     }
+                     // Unblock all to test unblocking, equivalent to Readfish
+                     minknow_action_tx.send(GetLiveReadsRequest { request: Some(
+                        LiveReadsRequest::Actions(Actions { actions: batched_actions })
+                    )}).expect("Failed to send unblock request to Minknow request queue");
+
+                    minknow_response_log.send(ClientLog { 
+                        stage: PipelineStage::DoriRequest, 
+                        time: minknow_response_clock.now(),
+                        channel: 0, 
+                        number: 0 
+                    }).expect("Failed to send log message from Minknow response stream");
 
                 } else {
-                
-                    // Sends full channel data over to Dori - evaluate if single
-                    // RPC requests per channel are not inferior in metrics - however
-                    // when minimum chunk size for the cache is set higher the arrays
-                    // get larger for transfer and it might impact latency - it seems to 
-                    // choke sometimes but the distribution at 10 chunks is a solid 1.8kb N50
-                    // seems more sensitive to system load though - other processses running 
-                    // wil lchoke the stream more than individual requests sent.
                     dori_data_tx.send(DoradoCacheBatchRequest {
                         channels: response.channels,
                         channel: 0,
@@ -437,6 +429,8 @@ impl ReadUntilClient {
 
         });
 
+
+        // THROTTLE HANDLE TO BE IMPLEMENTED
 
         // ===================================
         // Await thread handles to run streams
@@ -579,13 +573,12 @@ impl ReadUntilClient {
 
         let dori_response_log = log_tx.clone();
         let dori_response_clock = clock.clone();
-
-        let dori_action_tx = dori_tx.clone();
+        
         let minknow_dori_action_tx = action_tx.clone();
 
 
         // Initiate Dori stream
-        dori_tx.send(DoradoCacheChannelRequest { channel: 0, number: 0, data: Vec::new(), request: init_request })?;
+        dori_tx.send(DoradoCacheChannelRequest { channel: 0, number: 0, id: String::new(), data: Vec::new(), request: init_request })?;
         log::info!("Initiated data streams with Dori");
 
         log::info!("Waiting {} seconds for pipeline initialisation on Dori...", &run_config.init_delay);
@@ -620,6 +613,7 @@ impl ReadUntilClient {
                         // Sends single channel data to Dori - this was the initial implementation
                         // and may not be inferior to the batched request implementation above
                         dori_data_tx.send(DoradoCacheChannelRequest {
+                            id: read_data.id,
                             channel: channel,
                             number: read_data.number,
                             data: read_data.raw_data,
@@ -664,13 +658,6 @@ impl ReadUntilClient {
                         }
                     ).expect("Failed to send data into throttle queue");
                     
-                    // Send uncache request to Dori to remove read from cache
-                    dori_action_tx.send(DoradoCacheChannelRequest {
-                        channel: dori_response.channel,
-                        number: dori_response.number,
-                        request: cache_request,
-                        data: Vec::new()
-                    }).expect("Failed to send basecall requests to Dori request queue")
 
                 } else if dori_response.decision == stop_decision {
 
@@ -683,13 +670,16 @@ impl ReadUntilClient {
                         }
                     ).expect("Failed to send data into throttle queue");
 
-                    // Send uncache request to Dori to remove read from cache
-                    dori_action_tx.send(DoradoCacheChannelRequest {
-                        channel: dori_response.channel,
-                        number: dori_response.number,
-                        request: cache_request,
-                        data: Vec::new()
-                    }).expect("Failed to send basecall requests to Dori request queue")
+                } else {
+
+                    throttle_tx.send(
+                        Action {
+                            action_id: Uuid::new_v4().to_string(),
+                            read: Some(action::Read::Number(dori_response.number)),
+                            action: None,
+                            channel: dori_response.channel,
+                        }
+                    ).expect("Failed to send data into throttle queue");
 
                 }
 

@@ -70,6 +70,7 @@ message DoradoCacheBatchRequest {
   // Number for cache request
   uint32 number = 4;
 
+
 }
 
 // Streaming by channel
@@ -88,6 +89,9 @@ message DoradoCacheChannelRequest {
   // Number for cache request
   uint32 number = 4;
 
+  // Read identifier
+  string id = 5;
+
 }
 
 message DoradoCacheResponse { 
@@ -100,7 +104,6 @@ message DoradoCacheResponse {
 
   // Action decision for client to act on
   Decision decision = 3;
-
 
 }
 

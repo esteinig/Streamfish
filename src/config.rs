@@ -2,6 +2,7 @@
 
 
 use indoc::formatdoc;
+use minimap2::Mapping;
 use std::path::PathBuf;
 use clap::crate_version;
 use serde::Deserialize;
@@ -57,6 +58,7 @@ pub struct UserConfigDori {
     pub uds_override: bool,
     pub minknow_host: String,
     pub minknow_port: u32,
+    pub classifier: String,
     pub basecaller_path: PathBuf,
     pub basecaller_model: PathBuf,
     pub basecaller_stderr: PathBuf
@@ -91,7 +93,8 @@ pub struct UserConfigDorado{
     pub batch_timeout: u32,
     pub model_runners: u32,
     pub minimap_kmer_size: u32,
-    pub minimap_window_size: u32
+    pub minimap_window_size: u32,
+    pub minimap_index_batch_size: String
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -152,20 +155,23 @@ impl Basecaller {
 /// Classifiers
 #[derive(Debug, Clone, PartialEq)]
 pub enum Classifier {
-    Minimap2,
+    Minimap2Dorado,
+    Minimap2Rust,
     Kraken2
 }
 impl Classifier {
     pub fn from_str(s: &str) -> Self {
         match s {
-            "minimap2" => Self::Minimap2,
+            "minimap2-dorado" => Self::Minimap2Dorado,
+            "minimap2-rs" => Self::Minimap2Rust,
             "kraken2" => Self::Kraken2,
             _ => unimplemented!("Classifier `{}` is not implemented", s)
         }
     }
     pub fn as_str(&self) -> &str {
         match self {
-            Classifier::Minimap2 => "minimap2",
+            Classifier::Minimap2Dorado => "minimap2-dorado",
+            Classifier::Minimap2Rust => "minimap2-rs",
             Classifier::Kraken2 => "kraken2"
         }
     }
@@ -261,6 +267,7 @@ pub struct DoriConfig {
     pub dorado_model_runners: u32,
     pub dorado_mm_kmer_size: u32,
     pub dorado_mm_window_size: u32,
+    pub dorado_mm_index_batch_size: String,
 
     // Kraken2 config
     pub kraken2_threads: u16,
@@ -339,46 +346,23 @@ impl StreamfishConfig {
                 tcp_enabled: user_config.dori.tcp_enabled,
                 tcp_port: user_config.dori.tcp_port,
                 tcp_host: user_config.dori.tcp_host,  // inside docker to expose must be 0.0.0.0
-
                 uds_path: user_config.dori.uds_path,
                 uds_path_override: user_config.dori.uds_override,
-
                 minknow_host: user_config.dori.minknow_host,
                 minknow_port: user_config.dori.minknow_port,
-
                 basecaller: Basecaller::Dorado,
                 basecaller_model_path: user_config.dori.basecaller_model,
-
-                classifier: Classifier::Minimap2,
+                classifier: Classifier::from_str(&user_config.dori.classifier),
                 classifier_reference_path: user_config.experiment.reference,
-
                 basecaller_path: user_config.dori.basecaller_path,  // /usr/src/streamfish/scripts/cpp/cmake-build/test | /home/esteinig/dev/bin/dorado | /opt/dorado/bin/dorado
                 classifier_path: "".into(),
-
                 stderr_log: user_config.dori.basecaller_stderr,
-
-                // There are some diminishing returns for batch size reduction - it probably 
-                // depend on the number of pores sequencing at the time - too small a batch 
-                // size and latency increases because the stream is pushing too many packets
-                // too big a batch size and latency increases because basecaller is waiting 
-                // for more packages - not sure how to optimize, but a batch-size = 32 works
-                // better on the test data than batch-size = 64 or 16 - and works better in 
-                // batched transmission cache mode?
-
-                // Batch size 128 on a full MinION array in Icarust works only - anything below
-                // causes instability, does not appear to be related to number of model runners,
-                // increasing these + decreasing batch size also causes instability. Increasing
-                // model runners does ho
-
-                // Ok so weirdly increasing the batch timeout parameter to 5000 does a lot without 
-                // changing batch size... nope.. also not it
                 dorado_model_runners: user_config.dorado.model_runners,
                 dorado_batch_size: user_config.dorado.batch_size,
                 dorado_batch_timeout: user_config.dorado.batch_timeout,
-
                 dorado_mm_kmer_size: user_config.dorado.minimap_kmer_size,
                 dorado_mm_window_size: user_config.dorado.minimap_window_size,
-
+                dorado_mm_index_batch_size: user_config.dorado.minimap_index_batch_size,
                 kraken2_threads: 4,
                 kraken2_args: "--minimum-hit-groups 1 --threads 4 --memory-mapping".into(),
 
@@ -389,65 +373,38 @@ impl StreamfishConfig {
 
         // Some checks and argument construction for basecaller/classifier configurations
 
-        if !["dorado"].contains(&streamfish_config.dori.basecaller.as_str().trim().to_lowercase().as_str()) {
-            panic!("Basecaller configuration not supported")
-        }
-        if !["minimap2", "kraken2"].contains(&streamfish_config.dori.classifier.as_str().trim().to_lowercase().as_str()) {
-            panic!("Classifier configuration not supported")
-        }
-
-        if streamfish_config.dori.classifier == Classifier::Minimap2 && streamfish_config.dori.classifier_reference_path.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
+        if (streamfish_config.dori.classifier == Classifier::Minimap2Dorado || streamfish_config.dori.classifier == Classifier::Minimap2Rust) && streamfish_config.dori.classifier_reference_path.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
             panic!("Classifier reference for minimap2 must be an index file (.mmi)")
         }
 
         // Dorado basecaller setup
         if streamfish_config.dori.basecaller_args.is_empty() {
             // Construct arguments and set into config
-            if streamfish_config.dori.basecaller == Basecaller::Dorado  && streamfish_config.dori.classifier == Classifier::Minimap2 {
+            if streamfish_config.dori.basecaller == Basecaller::Dorado  && streamfish_config.dori.classifier == Classifier::Minimap2Dorado {
                 // Minimap2 configuration integrated with Dorado - add window/k-mer options [TODO]
                 streamfish_config.dori.basecaller_args = format!(
-                    "basecaller --verbose --batchsize {} --reference {} -k {} -w {} -g 32 --batch-timeout {} --num-runners {} --emit-sam {} -", // 
+                    "basecaller --verbose --batchsize {} --reference {} -I {} -k {} -w {} -g 64 --batch-timeout {} --num-runners {} --emit-sam {} -", // 
                     streamfish_config.dori.dorado_batch_size,
                     streamfish_config.dori.classifier_reference_path.display(),
+                    streamfish_config.dori.dorado_mm_index_batch_size,
                     streamfish_config.dori.dorado_mm_kmer_size,
                     streamfish_config.dori.dorado_mm_window_size,
                     streamfish_config.dori.dorado_batch_timeout,
                     streamfish_config.dori.dorado_model_runners,
                     streamfish_config.dori.basecaller_model_path.display()
                 ).split_whitespace().map(String::from).collect();  
-            } else if streamfish_config.dori.basecaller == Basecaller::Dorado && streamfish_config.dori.classifier == Classifier::Kraken2 {
+            } else if streamfish_config.dori.basecaller == Basecaller::Dorado && (streamfish_config.dori.classifier == Classifier::Minimap2Rust  || streamfish_config.dori.classifier == Classifier::Kraken2) {
                 // Basecalling only configuration with stdout pipe from Dorado
                 streamfish_config.dori.basecaller_args = format!(
-                    "basecaller --verbose --batchsize {} --emit-fastq {} -",
+                    "basecaller --verbose --batchsize {} -g 64 --batch-timeout {} --num-runners {} --emit-fastq {} -",
                     streamfish_config.dori.dorado_batch_size,
+                    streamfish_config.dori.dorado_batch_timeout,
+                    streamfish_config.dori.dorado_model_runners,
                     streamfish_config.dori.basecaller_model_path.display()
                 ).split_whitespace().map(String::from).collect();
             } else {
                 panic!("Classifier configuration not supported")
             }
-        }
-
-
-        if streamfish_config.dori.classifier_args.is_empty() {
-            // Construct arguments and set into config
-            if  streamfish_config.dori.basecaller == Basecaller::Dorado&& streamfish_config.dori.classifier == Classifier::Kraken2 {
-                for arg in  streamfish_config.dori.kraken2_args.clone().split_whitespace() {
-                    streamfish_config.dori.classifier_args.push(arg.to_string())
-                }
-                streamfish_config.dori.classifier_args = Vec::from([
-                    "--db".to_string(), 
-                    format!("{}", streamfish_config.dori.classifier_reference_path.display()), 
-                    "--threads".to_string(), 
-                    streamfish_config.dori.kraken2_threads.to_string(),
-                    "/dev/fd/0".to_string() // stdin
-                ]);
-
-            } else if streamfish_config.dori.basecaller == Basecaller::Dorado && streamfish_config.dori.classifier == Classifier::Minimap2 {
-                // No settings necessary - minimap is used in Dorado
-            } else {
-                panic!("Classifier / basecaller combination not supported")
-            }
-
         }
 
         return streamfish_config
@@ -517,6 +474,11 @@ impl ExperimentConfig {
                             MappingExperiment::TargetedSequencing(MappingConfig::targeted_sequencing(user_config.experiment.targets))
                         )
                     },
+                    "unknown_sequences" => {
+                        Experiment::MappingExperiment(
+                            MappingExperiment::UnknownSequences(MappingConfig::unknown_sequences())
+                        )
+                    },
                     _ => unimplemented!("Experiment type not implemented for mapping mode")
                 }
             },
@@ -542,11 +504,13 @@ pub enum Experiment {
 
 
 // An enumeration of `MappingConfig` variants wrapping configured structs
-// that constitute an experimental setup as in Readfish (Table 2)
+// that constitute an experimental setup as in Readfish (Table 2) + 
+// additional presets specific to Streamfish
 #[derive(Debug, Clone, Deserialize)]
 pub enum MappingExperiment {
     HostDepletion(MappingConfig),
-    TargetedSequencing(MappingConfig)
+    TargetedSequencing(MappingConfig),
+    UnknownSequences(MappingConfig)
 }
 impl MappingExperiment {
     // Region of interest for alignment: known host genome [implemented]
@@ -564,6 +528,12 @@ impl MappingExperiment {
     pub fn targeted_sequencing(targets: Vec<String>) -> Self {
         MappingExperiment::TargetedSequencing(
             MappingConfig::targeted_sequencing(targets)
+        )
+    }
+    // Mapping against comprehensive database and targeting anything unknown
+    pub fn unknown_sequences() -> Self {
+        MappingExperiment::UnknownSequences(
+            MappingConfig::unknown_sequences()
         )
     }
 }
@@ -666,11 +636,46 @@ impl MappingConfig {
                 decision: Decision::Proceed.into(), 
                 flags: MappingFlags::Multi.sam() 
             }, 
-            single_on:  DecisionConfig { 
+            single_on: DecisionConfig { 
                 decision: Decision::StopData.into(), 
                 flags: MappingFlags::Single.sam() 
             }, 
-            single_off:  DecisionConfig { 
+            single_off: DecisionConfig { 
+                decision: Decision::Unblock.into(), 
+                flags: MappingFlags::Single.sam() 
+            }, 
+            no_map: DecisionConfig { 
+                decision: Decision::Proceed.into(),
+                flags: MappingFlags::None.sam() 
+            },
+            no_seq: DecisionConfig { 
+                decision: Decision::Proceed.into(),
+                flags: MappingFlags::None.sam() 
+            },
+            unblock_all: DecisionConfig { 
+                decision: Decision::Unblock.into(), 
+                flags: vec![4, 0, 10]  // NOT USED - tests latency for unblock-all
+            }
+        }
+    }
+    pub fn unknown_sequences() -> Self {
+        Self {
+            targets: Vec::new(),
+            target_all: true,  // all mapped
+
+            multi_on: DecisionConfig { 
+                decision: Decision::Unblock.into(), 
+                flags: MappingFlags::Multi.sam() 
+            }, 
+            multi_off: DecisionConfig { 
+                decision: Decision::Unblock.into(), 
+                flags: MappingFlags::Multi.sam() 
+            }, 
+            single_on: DecisionConfig { 
+                decision: Decision::Unblock.into(), 
+                flags: MappingFlags::Single.sam() 
+            }, 
+            single_off: DecisionConfig { 
                 decision: Decision::Unblock.into(), 
                 flags: MappingFlags::Single.sam() 
             }, 
@@ -688,21 +693,69 @@ impl MappingConfig {
             }
         }
     }
-    // Main method to pass a flag and get the configured experiment decision - contains doesn not work with str slices
-    pub fn decision(&self, flag: &u32, tid: &str) -> i32 {
-        if self.multi_on.flags.contains(flag) && (self.target_all || self.targets.iter().any(|x| x == tid)) {
+    // Main method for `minimap2-dorado` using a SAM flag to get the configured experiment decision [.contains() does not work with str slices]
+    pub fn decision_from_sam(&self, flag: &u32, tid: &str) -> i32 {
+
+        let target_mapped = match self.target_all {
+            true => true,
+            false => self.targets.iter().any(|x| x == tid)
+        };
+
+        if self.multi_on.flags.contains(flag) && target_mapped {
             self.multi_on.decision
-        } else if self.multi_off.flags.contains(flag) && (self.target_all || !self.targets.iter().any(|x| x == tid)) {  // target all sequences active (no sequences in targets) == any sequence mapping off target as targets do not exist
+        } else if self.multi_off.flags.contains(flag) && !target_mapped {  // target all sequences active (no sequences in targets) == any sequence mapping off target as targets do not exist
             self.multi_off.decision
-        } else if self.single_on.flags.contains(flag) && (self.target_all || self.targets.iter().any(|x| x == tid)){
+        } else if self.single_on.flags.contains(flag) && target_mapped {
             self.single_on.decision
-        } else if self.single_off.flags.contains(flag) && (self.target_all || !self.targets.iter().any(|x| x == tid)) { // target all sequences active (no sequences in targets) == any sequence mapping off target as targets do not exist
+        } else if self.single_off.flags.contains(flag) && !target_mapped { // target all sequences active (no sequences in targets) == any sequence mapping off target as targets do not exist
             self.single_off.decision
         } else {
             // No sequence is not possible, so we otherwise 
             // return no mapping status decision
             self.no_map.decision
         }
+    }
+    // Main method for `minimap2-rs` using the Mapping struct to get a configured experiment decision
+    pub fn decision_from_mapping(&self, mappings: Vec<Mapping>, unblock_all: bool, ) -> i32 {
+
+        if unblock_all {
+            return self.unblock_all.decision;
+        }
+
+        if mappings.is_empty() {
+            return self.no_map.decision
+        }
+
+        let mappings: Vec<Mapping> = mappings.into_iter().filter(|x| x.match_len >= 100).collect();
+
+        let num_mappings = mappings.len();
+        
+        let target_mapped = match self.target_all {
+            true => true,
+            false => {
+                let mut mapped = Vec::new();
+                for mapping in mappings.into_iter() {
+                    if let Some(tid) = mapping.target_name {
+                        log::info!("Detected mapping for {}", tid);
+                        mapped.push(tid);
+                    }
+                }
+                self.targets.iter().any(|target| mapped.contains(&target)) 
+            }
+        };
+             
+        if num_mappings > 1 && target_mapped {
+            self.multi_on.decision
+        } else if num_mappings > 1 && !target_mapped {
+            self.multi_off.decision
+        } else if num_mappings == 1 && target_mapped {
+            self.single_on.decision
+        } else if num_mappings == 1 && !target_mapped {
+            self.single_off.decision 
+        } else {
+            self.no_map.decision
+        }
+
     }
     // A test method that returns an unblock decision for unblock-all testing
     pub fn unblock_all(&self, flag: &u32, tid: &str) -> i32 {

@@ -1,0 +1,32 @@
+pore_type = "R9"
+working_pore_percent = 85
+
+target_yield = 100000000000
+global_mean_read_length = 20000
+
+random_seed = 10
+output_path = "/tmp/"
+
+[parameters]
+
+sample_name = "test"
+experiment_name = "test_virus"
+experiment_duration_set = 4800
+
+device_id = "Device"
+position = "MS12345"
+flowcell_name = "FAQ12345"
+
+break_read_ms = 400
+
+[[sample]]
+name = "SARS-CoV-2 Wuhan 1"
+input_genome = "/tmp/squiggles/NC_045512.2.squiggle.npy" 
+mean_read_length = 4000
+weight = 1
+
+[[sample]]
+name = "MPXC Rivers"
+input_genome = "/tmp/squiggles/NC_063383.1.squiggle.npy"
+mean_read_length = 4000
+weight = 1

@@ -287,8 +287,6 @@ def read_length_histogram_distinct(data: Dict[str, MappingSummary], output_file:
     plt.close()
 
 
-app = typer.Typer(add_completion=False)
-
 
 #####################
 # SUMMARY FUNCTIONS #
@@ -387,6 +385,8 @@ def create_reference_summary_dataframe(
 ########################
 # TERMINAL APPLICATION #
 ########################
+
+app = typer.Typer(add_completion=False)
 
 
 @app.command()

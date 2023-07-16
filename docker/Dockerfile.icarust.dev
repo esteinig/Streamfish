@@ -2,11 +2,6 @@ FROM rust:1.69-bookworm
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
-# Because we want to run the container as host user
-# and hot-reload the Cargo builds, the user must be
-# active during builds otherwise we run into 
-# permission issues
-
 ARG USERNAME
 ARG UID
 ARG GID
@@ -19,7 +14,8 @@ WORKDIR /usr/src/icarust
 # in the standard repositories on Ubunut 20.04 LTS - we are using a Debian container for this here
 
 # Run as root for now, change to host container-user later
-RUN apt update && apt-get -y install make cmake libprotobuf-dev protobuf-compiler musl-tools libhdf5-dev libzstd-dev git
+RUN apt update && apt-get -y install make cmake libprotobuf-dev protobuf-compiler musl-tools libzstd-dev git libcunit1 libcunit1-dev libhdf5-dev libopenblas-dev
+
 
 # VBZ compression - need to figure out where this is needed in the Icarust compilation
 RUN git clone https://github.com/nanoporetech/vbz_compression.git && cd vbz_compression && mkdir build && git submodule update --init && cd build && cmake -D CMAKE_BUILD_TYPE=Release -D ENABLE_CONAN=OFF -D ENABLE_PERF_TESTING=OFF -D ENABLE_PYTHON=OFF .. && make -j
@@ -28,7 +24,12 @@ RUN cp -r /usr/src/icarust/vbz_compression/vbz_plugin /vbz_plugin
 # Run as host user, modify permissions of Cargo (container image)
 USER ${USERNAME}
 
-RUN rustup target add x86_64-unknown-linux-musl
-RUN cargo install cargo-watch
+# This container is mainly used for generating R9 squiggles
 
-# We fork/clone the development repository for Icarust somewhere else and mount it through the compose file with a hot-reload command similar to Streamfish
+WORKDIR /home/${USERNAME}
+ENV PATH="${PATH}:/home/${USERNAME}/bin"
+
+RUN curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj bin/micromamba
+RUN micromamba shell init --shell bash --root-prefix=~/micromamba
+
+WORKDIR /usr/src/icarust

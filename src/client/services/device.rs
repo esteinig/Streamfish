@@ -9,6 +9,7 @@ use tonic::service::interceptor::InterceptedService;
 use crate::client::services::error::ClientError;
 use crate::client::minknow::MinKnowClient;
 
+#[derive(Debug, Clone)]
 pub struct DeviceCalibration {
     pub digitisation: u32,
     pub offsets: Vec<f32>,

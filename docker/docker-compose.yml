@@ -145,7 +145,24 @@ services:
               count: 1
               capabilities: [gpu]
 
-
+  icarust-squiggle:
+    profiles:
+      - dev
+      - squiggle
+    image: icarust:latest   
+    build:
+      context: .
+      dockerfile: Dockerfile.icarust.dev
+      args:
+        - "UID=${UID:-1000}"
+        - "GID=${GID:-1000}"
+        - "USERNAME=${USERNAME:-streamfish}"
+    tty: true
+    volumes:
+      - "${TEMP_DIR:-/tmp}:/tmp"                                                                         # access to dori uds socket from host streamfish client at minimum use ssd
+      - "${ICARUST_REPO_DIR}:/usr/src/icarust"                                                           # access to development files and config, working dir inside container
+      - "${STREAMFISH_REPO_DIR}:/usr/src/streamfish"
+      
   # Fix ownership of shared volume directory to access updated `streamfish` executable on Dori
   change-vol-ownership:
     # We can use any image we want as long as we can chown
