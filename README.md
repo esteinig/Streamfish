@@ -10,7 +10,7 @@ It turned into a fun and out-of-hand endeavour to create an adaptive sampling cl
 
 While Streamfish approaches the mechanics from a slightly different angle by implementing native, asynchroneous streaming instead of batch-wise operations, it otherwise borrows heavily from the logic and implementation of [Readfish](https://github.com/LooseLab/Readfish) and all the work done by the [LooseLab](https://github.com/LooseLab) - including the super cool dynamic processing loops that feed back changes to the experiment configuration. 
 
-Essentially you can consider Streamfish a highly experimental implementation of Readfish. It is very much recommended **not** to use it for real sequencing runs at this stage, unless you are swimming in money or something.
+Essentially you can consider Streamfish a highly experimental implementation of Readfish. It is very much recommended **not** to use it for real sequencing runs, unless you are swimming in money or something.
 
 ## Features
 
