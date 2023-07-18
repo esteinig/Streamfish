@@ -6,34 +6,35 @@ Low-latency adaptive sampling using asynchroneous streams and RPC.
 
 I wanted to better understand how the adaptive sampling mechanics work. Streamfish started as a weekend project to re-implement the [`ReadUntil API`](https://github.com/nanoporetech/read_until_api) and parts of the [`Minknow API`](https://github.com/nanoporetech/minknow_api/tree/master/proto/minknow_api) in Rust (:crab:). 
 
-While Streamfish approaches the mechanics from a slightly different angle by implementing native, asynchroneous streaming instead of batch-wise operations, it otherwise borrows heavily from the logic and implementation of [Readfish](https://github.com/LooseLab/Readfish) and all the work done by the [LooseLab](https://github.com/LooseLab) - including the super cool dynamic processing loops that feed back changes to the experiment configuration. 
+While Streamfish approaches the mechanics from a slightly different angle than [Readfish](https://github.com/LooseLab/Readfish), it borrows heavily from all the work done by the [LooseLab](https://github.com/LooseLab) - including the super cool dynamic processing loops that feed back changes to the experiment configuration. 
 
 Essentially you can consider Streamfish a highly experimental implementation of Readfish. It is very much recommended **not** to use it for real sequencing runs, unless you are swimming in money or something.
 
 ## Features
 
-Main features:
+Main:
 
 * Low-latency asynchroneous streaming implementation of the adaptive sampling client
 * Relatively stable and tested on long runtimes and high-throughput flowcells
 * Latest basecall models with a streaming input for `Guppy` and (unstable) implementation of `Dorado`
 * Experiment testing and latency optimization through itnegration with [`Icarust`](https://github.com/LooseLab/Icarust)
+* Adaptive sampling experiment presets for depletion, targeted sequencing, coverage balancing and unknown sequences
 
-Under construction:
+Advanced:
 
 * Partioning of experimental conditions acoss the flowcell and more customizable experiment configurations
 * 'Slice-and-dice' multi-client flowcell partitioning for latency optimization and high throughput
 * Dynamic adaptive sampling feedback loops for real-time analysis and configuration changes
 
-Other features:
+Other:
 
-* Extensible control-server and read-until clients, read-cache or pure streaming endpoints, throttle for batched actions
-* Runs directly on localhost, in Docker containers, or a mixture of both (for compiler convenience and hot-reload development)
-* Adaptive samplign experiment presets for depletion, targeted sequencing and coverage balancing
+* Extandable client library mirroring some functions of `ReadUntil API` and `MinKNOW API`
+* Read-cache or uncached streaming endpoints, optional throttle for batched actions
+* Runs directly on host, in containers, or a mixture of both (latency optimization, development environment)
 
-Not to be implemented:
+Not implemented:
 
-* Barcode experiments - not needed for my own applications, but open to suggestions or pull requests :) 
+* Barcode experiments - not needed for my applications, but open to suggestions or pull requests :) 
 
 ## Warnings
 
@@ -51,9 +52,39 @@ Compiled binaries, libraries and forks are implemented in the `Docker` images - 
 
 ## Resources
 
-I have tested this system on a basic gaming computer running Ubuntu 20.04 LTS with 16 threads (AMD), NVIDIA GTX 3060 12GB RAM with drivers supporting CUDA 11.4 or higher (configured in container) and 48 GB RAM. 
+I have mainly tested this system on a gaming computer running Ubuntu 20.04 LTS with 16 threads (AMD), NVIDIA GTX 3060 12GB RAM with drivers supporting CUDA 11.4 or higher (configured in container) and 48 GB RAM. `Streamfish` client and server run their asynchroneous routines on a single thread. However, basecalling and reference mapping require some more resources depending on the throughput and experiment configuration you want to run.
 
-Empirically `Streamfish` client and servers do not need a lot of resources except for memory that fits the reference databases or genomes.
+
+## Quick start
+
+### `Docker` production
+
+```bash
+# Clone a release version
+git clone -b 0.1.0 https://github.com/esteinig/streamfish
+
+# Launch container network
+docker compose
+```
+
+
+
+
+
+### `Docker` development
+
+Create a `.env` file with a bunch of environmental variables. This mounts development paths and configures the current user during container builds to avoid root writing to mounted paths. It is recommended to make use of `/tmp` on a SSD or NVME drive to ensure fast read/write access to resources.
+
+```
+git clone -b 0.1.0 https://github.com/esteinig/streamfish
+```
+
+
+
+
+### No containers (😬)
+
+I outlined a [setup procedure]() to ensure that the correct `protoc` compiler is installed and all components can interact with each other. It's much easier to launch containers due to the number of components and connections required, especially when using the `slice-and-dice` adaptive sampling.
 
 ## Icarust
 
