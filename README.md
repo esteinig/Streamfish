@@ -1,4 +1,4 @@
-# Streamfish
+# Streamfish <a href='https://github.com/esteinig'><img src='docs/logo.png' align="right" height="270" /></a>
 
 Low-latency adaptive sampling that re-engineers the [`ReadUntil client`](https://github.com/nanoporetech/read_until_api) using asynchroneous streams and RPC.
 
