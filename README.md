@@ -1,6 +1,6 @@
 # Streamfish <a href='https://github.com/esteinig'><img src='docs/logo.png' align="right" height="250" /></a>
 
-Low-latency adaptive sampling that re-implements the [`ReadUntil client`](https://github.com/nanoporetech/read_until_api) using asynchroneous streams and custom RPC server endpoints in Rust.
+Low-latency adaptive sampling using asynchroneous streams and custom RPC server endpoints.
 
 ## Motivation
 
