@@ -1,29 +1,29 @@
-# Streamfish
+# Streamfish <a href='https://github.com/esteinig'><img src='docs/logo.png' align="right" height="250" /></a>
 
-Low-latency adaptive sampling that re-engineers the [`ReadUntil client`](https://github.com/nanoporetech/read_until_api) using asynchroneous streams and RPC.
+Low-latency adaptive sampling using asynchroneous streams and custom RPC server endpoints.
 
 ## Motivation
 
-Streamfish started as an excercise to re-implement the [`ReadUntil API`](https://github.com/nanoporetech/read_until_api) and parts of the [`Minknow API`](https://github.com/nanoporetech/minknow_api/tree/master/proto/minknow_api) from Oxford Nanopore Technologies (ONT). I wanted to learn how the control server endpoints and the adaptive sampling queues, caches and experiments operate. It turned into a fun and slightly insane project to create an adaptive sampling client that operates on asynchoneous streams using a Rust codebase 🦀. 
+I wanted to better understand how the adaptive sampling mechanics work. Streamfish started as a weekend project to re-implement the [`ReadUntil API`](https://github.com/nanoporetech/read_until_api) and parts of the [`Minknow API`](https://github.com/nanoporetech/minknow_api/tree/master/proto/minknow_api) in Rust (:crab:). 
 
 While Streamfish approaches the mechanics from a slightly different angle by implementing native, asynchroneous streaming instead of batch-wise operations, it otherwise borrows heavily from the logic and implementation of [Readfish](https://github.com/LooseLab/Readfish) and all the work done by the [LooseLab](https://github.com/LooseLab) - including the super cool dynamic processing loops that feed back changes to the experiment configuration. 
 
-Essentially you can consider Streamfish an experimental implementation of Readfish. It is highly recommended **not** to use it for real sequencing runs at this stage.
+Essentially you can consider Streamfish a highly experimental implementation of Readfish. It is very much recommended **not** to use it for real sequencing runs, unless you are swimming in money or something.
 
 ## Features
 
 Main features:
 
 * Low-latency asynchroneous streaming implementation of the adaptive sampling client
-* Stable and tested on long runtimes and high-throughput flowcells (some caveats around basecalling)
-* Latest basecall models with a streaming input for `Dorado` and legacy `Guppy` server basecalling
-* Customizable adaptive sampling experiments with testing and latency optimization through `Icarust`
+* Relatively stable and tested on long runtimes and high-throughput flowcells
+* Latest basecall models with a streaming input for `Guppy` and (unstable) implementation of `Dorado`
+* Experiment testing and latency optimization through itnegration with [`Icarust`](https://github.com/LooseLab/Icarust)
 
 Under construction:
 
-* Partioning of experimental conditions acoss the flowcell - better experiment configurations
-* 'Slice-and-dice' multi-GPU flowcell partitioning for latency optimization and high throughput runs (1024 pores+)
-* Dynamic adaptive sampling feedback loops for real-time analysis and configuration changes e.g. coverage optimization
+* Partioning of experimental conditions acoss the flowcell and more customizable experiment configurations
+* 'Slice-and-dice' multi-client flowcell partitioning for latency optimization and high throughput
+* Dynamic adaptive sampling feedback loops for real-time analysis and configuration changes
 
 Other features:
 
