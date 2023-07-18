@@ -23,9 +23,12 @@ use async_process::{Command, Stdio, ChildStdout, ChildStdin};
 use itertools::join;
 
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
-use moka::future::Cache;
-
+// ArcMutex HashMap seems to work fine for now
+// leaving this in for potential future use
+// use moka::future::Cache;
+use tokio::sync::mpsc::{Sender, Receiver};
 use minimap2::*;
 
 pub struct AdaptiveSamplingService {
@@ -36,11 +39,11 @@ impl AdaptiveSamplingService {
 
         // Some checks on server
 
-        if !config.dori.basecaller_model_path.exists() {
-            panic!("Basecaller model path does not exist")
+        if !config.dori.dorado_basecaller_model.exists() {
+            panic!("Dorado basecaller model path does not exist")
         }
-        if !config.dori.classifier_reference_path.exists() {
-            panic!("Classifier reference/database path does not exist")
+        if !config.dori.classifier_reference.exists() {
+            panic!("Classifier reference path does not exist")
         }
 
         if config.readuntil.unblock_all_client {
@@ -49,8 +52,12 @@ impl AdaptiveSamplingService {
         if config.readuntil.unblock_all_server {
             log::warn!("Unblocking reads after sending to Dori!");
         }
-        if config.readuntil.unblock_all_process {
-            log::warn!("Unblocking reads after processing on Dori!");
+        if config.readuntil.unblock_all_basecaller {
+            log::warn!("Unblocking reads after basecalling on Dori!");
+        }
+
+        if config.readuntil.unblock_all_mapper {
+            log::warn!("Unblocking reads after basecalling and mapping on Dori!");
         }
         
         log::info!("Basecaller: {} Path: {:?} Args: {:?}", config.dori.basecaller.as_str(), config.dori.basecaller_path, config.dori.basecaller_args.join(" "));
@@ -172,12 +179,15 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
         let (cache_queue_tx, mut cache_queue_rx) = tokio::sync::mpsc::channel(1024); // handles cache removal instructions
         let (decision_tx, mut decision_rx) = tokio::sync::mpsc::channel(1024); // drains into output stream
+        let (basecall_tx, mut basecall_rx): (Sender<(String, u32, u32, Vec<Vec<u8>>)>, Receiver<(String, u32, u32, Vec<Vec<u8>>)>) = tokio::sync::mpsc::channel(1024); // basecaller stdin
 
         let uncache_tx = cache_queue_tx.clone();
         let cache_decision_tx = decision_tx.clone();
-    
-        // Use channel specific caches due to not having to use a string value for lookup
-        // let read_cache: Cache<String, Arc<Vec<Vec<u8>>>> = Cache::new(10_000);
+        
+        // Read cache with standard HashMap
+
+        let read_cache: Arc<Mutex<HashMap<String, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let read_cache_clone = Arc::clone(&read_cache);
         
         // A self clearing cache - this is important - the simple HashMap version previously
         // implemented was not able to be cleared, because the incomping reads updated the
@@ -185,38 +195,65 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         // - both causing instabilites. With the Arc values implemented below we only 
         // clone the Arc on gets and set expiration times by which we expect
         // chunks to be outdated - TTL is since insert, TTI is since last get
-        let read_cache: Cache<String, Arc<Vec<Vec<u8>>>> = Cache::builder()
-                // Time to live (TTL): 
-                .time_to_live(std::time::Duration::from_secs(3))
-                // Time to idle (TTI):
-                .time_to_idle(std::time::Duration::from_secs(1))
-                // Create the cache.
-                .build();
+        // let read_cache: Cache<String, Arc<Vec<Vec<u8>>>> = Cache::builder()
+        //         // Time to live (TTL): 
+        //         .time_to_live(std::time::Duration::from_secs(3))
+        //         // Time to idle (TTI):
+        //         .time_to_idle(std::time::Duration::from_secs(1))
+        //         // Create the cache.
+        //         .build();
 
-        let read_cache_1 = read_cache.clone();
-        let read_cache_2 = read_cache.clone();
-
-        // Cache removal thread - receives messages from pipeline processing stream
+        // let read_cache_1 = read_cache.clone();
+        // let read_cache_2 = read_cache.clone();
+      
+        // Cache removal thread
         tokio::spawn(async move {
             
             while let Some(read_id) = cache_queue_rx.recv().await {
-
-                read_cache_2.remove(&read_id).await;
-                log::info!("Reads cached: {} ", read_cache_2.entry_count());
+                let mut read_cache  = read_cache_clone.lock().await;
+                log::info!("Reads cached: {} ", read_cache.len());
+                read_cache.remove(&read_id);
+                // log::info!("Reads in cache: {}", read_cache_2.entry_count());
+                // read_cache_2.remove(&read_id).await;
             }
         
         });
 
+        // Basecaller submission thread
+        tokio::spawn(async move {
+            
+            while let Some((read_id, channel, number, cached)) = basecall_rx.recv().await {
+                
+                // log::info!("Sending chunks to basecaller: {}", cached.len());
+                
+                let channel_index = (channel - 1) as usize;
+
+                let data = get_dorado_input_string(
+                    read_id,
+                    cached.concat(),
+                    channel,
+                    number,
+                    calibration.offsets[channel_index],
+                    calibration.pa_ranges[channel_index],
+                    calibration.digitisation,
+                    sample_rate
+                );
+                
+                pipeline_stdin.write_all(data.as_bytes()).await.expect("Failed to write to pipeline standard input");
+            }
+        
+        });
+
+
         // READ CACHE IS THE PROBLEM - FILLS UP FASTER THAN IT IS EMPTIED! PROBABLY LOCKED MORE BELOW THAN ABOVE
 
+        // Caching thread
         tokio::spawn(async move {
 
 
             while let Some(dorado_request) = request_stream.next().await {
                 let dorado_request = dorado_request.unwrap();
                 
-                let read_id = dorado_request.id.clone();
-
                 if dorado_request.request == init_request {
                     // No action, continue and wait for data stream
                     log::info!("Waiting {} seconds for pipeline initialisation ...", &run_config_1.readuntil.init_delay);
@@ -224,26 +261,38 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                     continue;
                 }
 
-                // Looks weird, but actually works this way
+                let read_id = dorado_request.id.clone();
+                
+                let mut cache = read_cache.lock().await;
+
+                // Find cached read or insert new one, update the cache with the current read
+                cache.entry(dorado_request.id).or_insert(Vec::new()).push(dorado_request.data);
+
+                // Get the updated read and the number of chunks in the cache
+                let cached = cache.get(&read_id).expect("Failed to get data from read cache");
+
+                // Looks weird because we Arc the values, but actually works - does not work with expensive
+                // cloning of gets from the cache, when not using Arc:
                 //
                 // https://github.com/moka-rs/moka#example-size-aware-eviction
-                let cached = match read_cache_1.get(&read_id) {
-                    Some(data) => {
-                        let cached = &*data;
-                        let mut updated = Vec::new();
-                        for chunk in cached {
-                            updated.push(chunk.to_owned())
-                        }
-                        updated.push(dorado_request.data);
-                        read_cache.insert(dorado_request.id, Arc::new(updated.clone())).await;
-                        updated
-                    },
-                    None => {
-                        let data = vec![dorado_request.data];
-                        read_cache.insert(dorado_request.id, Arc::new(data.clone())).await;
-                        data
-                    }
-                };
+                //
+                // let cached = match read_cache_1.get(&read_id) {
+                //     Some(data) => {
+                //         let cached = &*data;
+                //         let mut updated = Vec::new();
+                //         for chunk in cached {
+                //             updated.push(chunk.to_owned())
+                //         }
+                //         updated.push(dorado_request.data);
+                //         read_cache.insert(dorado_request.id, Arc::new(updated.clone())).await;
+                //         updated
+                //     },
+                //     None => {
+                //         let data = vec![dorado_request.data];
+                //         read_cache.insert(dorado_request.id, Arc::new(data.clone())).await;
+                //         data
+                //     }
+                // };
                 
                 let num_chunks = cached.len();
 
@@ -286,27 +335,16 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                             number: dorado_request.number, 
                             decision: unblock_decision
                         }).await.expect("Failed to send stop further data into decision response queue");
+
+                        cache_queue_tx.send(read_id).await.expect("Failed to send uncache instruction to queue");
+
                     } else {
                                                     
                         log::debug!("Process cached read data and send into pipeline: {} (chunks = {})", &read_id, &num_chunks);
                         
-                        let channel_index = (dorado_request.channel - 1) as usize;
+                        let data = cached.to_owned();
+                        basecall_tx.send((read_id, dorado_request.channel, dorado_request.number, data)).await.expect("Failed to send data into basecaller input");
 
-                        let data: Vec<String> = cached.into_iter().map(|raw_data| {
-                            get_dorado_input_string(
-                                read_id.clone(),
-                                raw_data,
-                                dorado_request.channel,
-                                dorado_request.number,
-                                calibration.offsets[channel_index],
-                                calibration.pa_ranges[channel_index],
-                                calibration.digitisation,
-                                sample_rate
-                            )
-                        }).collect();
-                        
-
-                        pipeline_stdin.write_all(data.concat().as_bytes()).await.expect("Failed to write to pipeline standard input");
                     }
                 }
             }
@@ -435,7 +473,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
             let aligner = Aligner::builder()
             .map_ont()
-            .with_index(run_config_2.dori.classifier_reference_path.clone(), None)
+            .with_index(run_config_2.dori.classifier_reference.clone(), None)
             .expect("Unable to build index");
             log::info!("Built the minimap2-rs aligner in stream thread");
 
@@ -449,6 +487,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
             while let Some(line) = pipeline_stdout.next().await {
 
                 let line = line.unwrap();
+
+                // log::info!("{}", line);
 
                 // Dynamic mapping updates require Arc<Mutex<MappingConfig>> locks within the
                 // decision/evaluation stream- this does introduce some latency but is
@@ -483,16 +523,46 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                                 // let aligner_clone = aligner.clone();
                                 // let c = current_channel.clone();
                                 // let n = current_number.clone();
+                                
+                                if run_config_2.readuntil.unblock_all_basecaller {
+                                    
+                                    log::info!("Unblocking reads from basecaller: {} {}", &current_channel, &current_number);
+                                    decision_tx.send(DoradoCacheResponse { 
+                                        channel: current_channel, 
+                                        number: current_number, 
+                                        decision: unblock_decision
+                                    }).await.expect("Failed to send decision response to queue");
+                                    uncache_tx.send(current_id.clone()).await.expect("Failed to send uncache identifier to queue");
+
+                                    line_counter += 1;
+                                    continue;
+                                }
 
                                 let mappings = aligner.map(line.as_bytes(), false, false, None, None).expect("Failed to map read");
                                 
                                 // log::info!("{:?}", mappings);
 
+                                if run_config_2.readuntil.unblock_all_mapper {
+                                    
+                                    decision_tx.send(DoradoCacheResponse { 
+                                        channel: current_channel, 
+                                        number: current_number, 
+                                        decision: unblock_decision
+                                    }).await.expect("Failed to send decision response to queue");
+
+                                    uncache_tx.send(current_id.clone()).await.expect("Failed to send uncache identifier to queue");
+
+                                    line_counter += 1;
+                                    continue;
+                                }
+
+                                // log::info!("{:?}", line);
+
                                 // DO NOT LOG THE MAPPINGS OR USE BORROWS ON THEM - FOR SOME ULTRA ARCANE REASON THIS BRAKES EVERYTHING
 
                                 // MAYBE THIS IS MUSL BUILD RELATED? I THINK IT IS - NORMAL X86_64 BUILDS DO NOT RUN WILD EXCEPT FOR MISCONFIGURED EXPERIMENTS
-
-                                let decision = mapping_config.decision_from_mapping(mappings, run_config_2.readuntil.unblock_all_process);
+                                
+                                let decision = mapping_config.decision_from_mapping(mappings);
 
                                 if decision == stop_decision || decision == unblock_decision {
                                     uncache_tx.send(current_id.clone()).await.expect("Failed to send uncache identifier to queue");
@@ -503,23 +573,6 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                                     number: current_number, 
                                     decision: decision
                                 }).await.expect("Failed to send decision response to queue");
-
-                                // tokio::spawn(async move {
-                                //     let mapping = aligner_clone.map(line.as_bytes(), false, false, None, None).expect("Failed to map read");
-
-                                //     let decision = match run_config_2.readuntil.unblock_all_process {
-                                //         true => map_conf.unblock_all(&0, ""),
-                                //         false => map_conf.decision_from_mapping(&mapping)
-                                //     };
-
-                                //     response_tx.send(DoradoCacheResponse { 
-                                //         channel: c, 
-                                //         number: n, 
-                                //         decision: decision
-                                //     }).await.expect("Failed to send decision response to queue");
-                                
-                                // });
-                                
 
                                 line_counter += 1;
 
@@ -775,8 +828,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                         let flag = content[1].parse::<u32>().unwrap();
                         let tid = content[2];
 
-                        let decision = match run_config_2.readuntil.unblock_all_process {
-                            true => mapping_config.unblock_all(&flag, tid),
+                        let decision = match run_config_2.readuntil.unblock_all_mapper {
+                            true => unblock_decision,
                             false => mapping_config.decision_from_sam(&flag, tid)
                         };
 

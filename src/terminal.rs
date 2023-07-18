@@ -35,6 +35,15 @@ pub struct DoriServerArgs {
    /// TCP port for connection to Dori
    #[clap(long, short, default_value="10002")]
    pub tcp_port: u32,
+
+   /// UDS connection to Dori
+   #[clap(long, short)]
+   pub dori_socket: Option<PathBuf>,
+
+   /// Guppy server address 
+   #[clap(long, short)]
+   pub guppy_address: Option<String>,
+
 }
 
 #[derive(Debug, Args)]
@@ -48,6 +57,10 @@ pub struct TestReadUntilArgs {
    #[clap(long, short)]
    pub channel_end: Option<u32>,
    
+   /// UDS connection to Dori
+   #[clap(long, short)]
+   pub dori_socket: Option<PathBuf>,
+
    /// TCP port for connection to Dori
    #[clap(long, short)]
    pub dori_port: Option<u32>,

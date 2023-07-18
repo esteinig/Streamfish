@@ -153,8 +153,11 @@ class ReferenceSummary:
             all_mapq_unblocked += data.mapping_qualities_unblocked
             all_mapq_pass += data.mapping_qualities_pass
 
-        self.unblocked_percent = (self.reads_unblocked/(self.reads_pass+self.reads_unblocked))*100
-        
+        try:
+            self.unblocked_percent = (self.reads_unblocked/(self.reads_pass+self.reads_unblocked))*100
+        except ZeroDivisionError:
+            self.unblocked_percent = 0
+            
         self.mean_mapq_pass = statistics.mean(all_mapq_pass) if len(all_mapq_pass) > 1 else 0
         self.mean_length_pass = statistics.mean(all_lengths_pass) if len(all_lengths_pass) > 1 else 0
         self.median_length_pass = int(statistics.median(all_lengths_pass)) if len(all_lengths_pass) > 1 else 0

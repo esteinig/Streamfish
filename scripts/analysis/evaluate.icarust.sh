@@ -20,14 +20,13 @@ ANALYSIS_ID=$1
 FAST5_ACTIVE_DIR=$2
 
 ANALYSIS_DIR="/tmp/streamfish_analysis_${ANALYSIS_ID}"
+
 MAPPING_REFERENCE='/tmp/viruses.mmi'
-FAST5_CONTROL_DIR="/tmp/test_bacteria/test/20230711_0611_XIII_FAQ12345_5ef1fa3b9/fast5_pass/"
-DORADO_FST_MODEL='/tmp/models/dna_r9.4.1_e8_fast@v3.4'  # dna_r9.4.1_e8_fast@v3.4
+DORADO_FST_MODEL='/tmp/models/dna_r9.4.1_e8_fast@v3.4'
 
-# DORADO_HAC_MODEL='/tmp/models/dna_r9.4.1_e8_hac@v3.3'
-# DORADO_SUP_MODEL='/tmp/models/dna_r9.4.1_e8_sup@v3.3'
+# FAST5_CONTROL_DIR="/tmp/test_bacteria/test/20230711_0611_XIII_FAQ12345_5ef1fa3b9/fast5_pass/"
 
-# Always initialize shell - failure to activate after starting new container otherwise
+# Micromamba shenanigans
 micromamba shell init -s bash -p ~/micromamba
 source ~/.bashrc
 

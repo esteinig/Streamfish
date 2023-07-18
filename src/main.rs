@@ -35,8 +35,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::DoriServer ( args ) => {
 
-            // Set the TCP port from the command-line for running multiple servers
-            config.dori.tcp_port = args.tcp_port;
+            config.cli_config(
+                None,
+                None,
+                args.dori_socket.clone(),
+                args.guppy_address.clone(),
+                None, 
+                None
+            );
 
             DoriServer::run(&config).await?;
 
@@ -62,8 +68,11 @@ async fn test_read_until(config: &mut StreamfishConfig, args: &TestReadUntilArgs
     config.cli_config(
         args.channel_start, 
         args.channel_end,
+        args.dori_socket.clone(),
+        None,
         args.dori_port,
-        args.log_latency.clone()
+        args.log_latency.clone(),
+
     );
 
     let mut client = ReadUntilClient::connect(config).await?;

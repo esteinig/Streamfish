@@ -24,12 +24,11 @@ Because we are also using an additional processing server (Dori, Figure 1) we ad
 
 ### Latency
 
-Latency is measured outcome-based - our primary metrics are the mean and median read length of unblocked reads, which are computed from the output signal data basecalled with the same basecaller and model for each experimental setup. Unblocked read lengths were chosen over time-based measurements, as it allowed us to compare across control runs and the `Readfish` `unblock-all` configuration. It also produces a tangible and interpretable measure that makes sense in reference to different pore versions and translocation speeds, whereas read throughput in microseconds is harder to interpret overall. However, we provide detailed, time-based measurements in [Supplementary Data 1](#supplementary-data).
+Latency is measured outcome-based - our primary metrics are the mean and median read length of unblocked reads, which are computed from the output signal data basecalled with the same basecaller and model for each experimental setup. Unblocked read lengths were chosen over time-based measurements, as it allowed us to compare across control runs and the `Readfish` `unblock-all` configuration. It also produces a tangible and interpretable measure that is understood intuitively and can be visualized as read length distributions, whereas read throughput in microseconds is harder to interpret overall. However, we provide detailed time-based measurements in [Supplementary Data 1](#supplementary-data).
 
-First, we establish a base-line of `unblock-all` testing during a play-back run of a commonly used adaptive sampling evaluation experiment described initially for testing `Readfish` (https://github.com/LooseLab/readfish) and used by other client implementation validations like `ReadBouncer` (Ulrich et al. 2022) (which does not provide an `unblock-all` configuration for testing and could therefore not be used as reference without substantial modification of source code that would bias the comparisons). We then compare the baseline measurement to simulatiuons in `Icarust` where we note a conceptual error in the implementation of the important `break_reads_after_seconds` configuration adopted from `MinKNOW`. After fixing this error and demonstrating parity of measurements between play-back and simulated runs for unblock-all testing, we continue to use `Icarust` simulations to demonstrate latency contributionsfrom different components, configurations and sequencing conditions with `Streamfish`.
+First, we establish a base-line of `unblock-all` testing during a play-back run of a commonly used adaptive sampling evaluation experiment described initially for testing `Readfish` (https://github.com/LooseLab/readfish) and used by other client implementation validations like `ReadBouncer` (Ulrich et al. 2022) (which does not provide an `unblock-all` configuration for testing and could therefore not be used as reference without substantial modification of source code that would bias the comparisons). We then compare the baseline measurement to simulatiuons in `Icarust` where we note a conceptual error in the implementation of the important `break_reads_after_seconds` configuration adopted from `MinKNOW`. After fixing this error and demonstrating parity between play-back and simulated runs in unblock-all testing, we continue to use `Icarust` simulations to demonstrate latency contributionsfrom different components, configurations and sequencing conditions with `Streamfish`.
 
 ### Configurations
-
 
 **Host and Docker**: We ran all tests on a standard gaming computer with 48GB RAM, 16 threads (AMD Ryzen 5) and a GTX 3060 12MB, running Ubuntu 20.04 OS. For the main evaluation `MinKNOW` and `Icarust` control servers, and `Readfish` and `Streamfish` ran directly on the host.  Clients connected to control servers through a TLS encrypted TCP channel with token authentication as required by `MinKNOW`. `Dori` ran inside a Ubuntu 20.04 OS Docker container with NVIDIA configuration and appropirate CUDA version. It connected to the control serve rto obtain experiment configuration like digitisation and sample rate through host ports forwarded into the container and on the required TCP connection. `Streamfish` connected to `Dori` on a Unix Domain Socket (UDS) channel which was located on the NVME drive of the host mounted inside the container.
 
@@ -69,7 +68,19 @@ We further configure the control server using the setup action request and set a
 
 #### Initial comparison between `MinKNOW` and `Icarust`
 
+1. Main justification for modification of `Icarust` - will need to be a PR for Rory (and to get their opinion)
 
+#### Baseline 
+
+1. Experiment baselines run to show that long-running unblocked distributions are equivalent to short-running ones - justifies usign short test runs for parameter optimization and exploration.
+
+#### Preliminary
+
+1. Throughput and how to scale - compare with unblock-all and identify bottlenecks in latency
+2. Read length + proportions of strains
+2. Basecaller optimization - UDS and client threads seems to be important, no throttle on results also seems to be important at higher throughputs, num caller interaction with dataset? Also! It seems cached size for the unknown sample experiment is critical - longer stretches on proceed will eventually map against homologous regions
+3. Experiment type - reference size and runnign actual experiment vs. unblock-all, interactions with throughput and basecaller, impact on logic / decision matrix on latency
+4. Impact on mapper - single threaded (can we even do multithread)
 
 
 

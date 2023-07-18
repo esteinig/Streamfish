@@ -20,7 +20,9 @@ pub struct UserConfig  {
     pub minknow: UserConfigMinknow,
     pub icarust: UserConfigIcarust,
     pub dorado: UserConfigDorado,
+    pub guppy: UserConfigGuppy,
     pub dori: UserConfigDori,
+    pub minimap: UserConfigMinimap,
     pub readuntil: UserConfigReadUntil,
     pub experiment: UserConfigExperiment
 }
@@ -59,8 +61,8 @@ pub struct UserConfigDori {
     pub minknow_host: String,
     pub minknow_port: u32,
     pub classifier: String,
+    pub basecaller: String,
     pub basecaller_path: PathBuf,
-    pub basecaller_model: PathBuf,
     pub basecaller_stderr: PathBuf
 }
 
@@ -79,9 +81,8 @@ pub struct UserConfigReadUntil {
     pub read_cache_batch_rpc: bool,
     pub read_cache_min_chunks: usize,
     pub read_cache_max_chunks: usize,
-    pub throttle: u64,
+    pub action_throttle: u64,
     pub latency_log: Option<PathBuf>,
-
     pub unblock_duration: f64,
     pub sample_minimum_chunk_size: u64,
     pub accepted_first_chunk_classifications: Vec<i32>
@@ -94,7 +95,24 @@ pub struct UserConfigDorado{
     pub model_runners: u32,
     pub minimap_kmer_size: u32,
     pub minimap_window_size: u32,
-    pub minimap_index_batch_size: String
+    pub minimap_index_batch_size: String,
+    pub basecaller_model: PathBuf,
+}
+
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserConfigMinimap {
+    pub reference: PathBuf,
+    pub min_match_len: i32
+}
+
+
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserConfigGuppy {
+    pub client_path: PathBuf,
+    pub server_address: String,
+    pub server_config: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -102,8 +120,7 @@ pub struct UserConfigExperiment {
     pub control: bool,
     pub mode: String,
     pub r#type: String,
-    pub reference: PathBuf,
-    pub targets: Vec<String>
+    pub targets: Vec<String>,
 }
 
 /// Unblock all circuits for testing
@@ -111,24 +128,27 @@ pub struct UserConfigExperiment {
 pub enum UnblockAll {
     Client,
     Server,
-    Process
+    Basecaller,
+    Mapper,
 }
 impl UnblockAll {
     fn from_str(s: &str) -> Self {
         match s {
             "client" => Self::Client,
             "server" => Self::Server,
-            "process" => Self::Process,
+            "basecaller" => Self::Basecaller,
+            "mapper" => Self::Mapper,
             _ => unimplemented!("Unblock all setting `{}` is not implemented", s)
         }
     }
     // A little clunky but betetr to have bools in configuration for 
     // evaluation in streams than matching enumeration types or values
-    fn get_config(&self) -> (bool, bool, bool) {
+    fn get_config(&self) -> (bool, bool, bool, bool) {
         match self {
-            UnblockAll::Client => return (true, false, false),
-            UnblockAll::Server => return (false, true, false),
-            UnblockAll::Process => return (false, false, true)
+            UnblockAll::Client => return (true, false, false, false),
+            UnblockAll::Server => return (false, true, false, false),
+            UnblockAll::Basecaller => return (false, false, true, false),
+            UnblockAll::Mapper => return (false, false, false, true)
         }
     }
 }
@@ -136,18 +156,21 @@ impl UnblockAll {
 /// Basecallers
 #[derive(Debug, Clone, PartialEq)]
 pub enum Basecaller {
-    Dorado
+    Dorado,
+    Guppy
 }
 impl Basecaller {
     pub fn from_str(s: &str) -> Self {
         match s {
             "dorado" => Self::Dorado,
+            "guppy" => Self::Guppy,
             _ => unimplemented!("Basecaller `{}` is not implemented", s)
         }
     }
     pub fn as_str(&self) -> &str {
         match self {
-            Basecaller::Dorado => "dorado"
+            Basecaller::Dorado => "dorado",
+            Basecaller::Guppy => "guppy"
         }
     }
 }
@@ -215,7 +238,8 @@ pub struct ReadUntilConfig {
     pub init_delay: u64,                     // u64 because of duration type
     pub unblock_all_client: bool,
     pub unblock_all_server: bool,
-    pub unblock_all_process: bool,
+    pub unblock_all_basecaller: bool,
+    pub unblock_all_mapper: bool,
     pub unblock_duration: f64, 
     pub raw_data_type: RawDataType,
     pub sample_minimum_chunk_size: u64,
@@ -231,35 +255,28 @@ pub struct ReadUntilConfig {
 // Dori RPC server configuration
 #[derive(Debug, Clone)]
 pub struct DoriConfig {
-    // TCP server connection  
     pub tcp_enabled: bool,
     pub tcp_port: u32,
     pub tcp_host: String,
-
-    // Unix domain socket connection
     pub uds_path: PathBuf,
     pub uds_path_override: bool,
-
-    // MinKNOW / Icarust connection from Dori 
-    // added for host/container setups
     pub minknow_host: String,
     pub minknow_port: u32,
     
-    // Basecaller supported: `dorado`
     pub basecaller: Basecaller, 
-    // Basecaller model path
-    pub basecaller_model_path: PathBuf,
-    // Classifier supported: `minimap2`, `kraken2`
-    pub classifier: Classifier,   
-    // Classifier reference path
-    pub classifier_reference_path: PathBuf,
-
-    // Executable paths
+    pub classifier: Classifier,
     pub basecaller_path: PathBuf,
     pub classifier_path: PathBuf,
+    pub classifier_reference: PathBuf,
 
     // Basecaller/classifier error log
     pub stderr_log: PathBuf,
+
+    // Guppy config
+    pub guppy_client_path: PathBuf,
+    pub guppy_server_address: String,
+    pub guppy_server_config: String,
+
 
     // Dorado config
     pub dorado_batch_size: u32,
@@ -268,6 +285,7 @@ pub struct DoriConfig {
     pub dorado_mm_kmer_size: u32,
     pub dorado_mm_window_size: u32,
     pub dorado_mm_index_batch_size: String,
+    pub dorado_basecaller_model: PathBuf,
 
     // Kraken2 config
     pub kraken2_threads: u16,
@@ -300,9 +318,9 @@ impl StreamfishConfig {
         let user_config_str = std::fs::read_to_string(user_config).expect("Failed to read user config TOML");
         let user_config: UserConfig = toml::from_str(&user_config_str).expect("Failed to load user config TOML");
 
-        let (unblock_all_client, unblock_all_server, unblock_all_process) = match user_config.readuntil.unblock_all {
+        let (unblock_all_client, unblock_all_server, unblock_all_basecaller, unblock_all_mapper) = match user_config.readuntil.unblock_all {
             true => UnblockAll::from_str(&user_config.readuntil.unblock_all_mode).get_config(),
-            false => (false, false, false)
+            false => (false, false, false, false)
         };
 
         let mut streamfish_config = Self {
@@ -329,9 +347,10 @@ impl StreamfishConfig {
                 init_delay: user_config.readuntil.init_delay,
                 unblock_all_client: unblock_all_client,
                 unblock_all_server: unblock_all_server,
-                unblock_all_process: unblock_all_process,
+                unblock_all_basecaller: unblock_all_basecaller,
+                unblock_all_mapper: unblock_all_mapper,
                 unblock_duration: user_config.readuntil.unblock_duration,
-                throttle: user_config.readuntil.throttle,
+                throttle: user_config.readuntil.action_throttle,
                 sample_minimum_chunk_size: user_config.readuntil.sample_minimum_chunk_size,
                 raw_data_type: RawDataType::Uncalibrated,
                 accepted_first_chunk_classifications: user_config.readuntil.accepted_first_chunk_classifications,
@@ -350,13 +369,16 @@ impl StreamfishConfig {
                 uds_path_override: user_config.dori.uds_override,
                 minknow_host: user_config.dori.minknow_host,
                 minknow_port: user_config.dori.minknow_port,
-                basecaller: Basecaller::Dorado,
-                basecaller_model_path: user_config.dori.basecaller_model,
+                basecaller: Basecaller::from_str(&user_config.dori.basecaller),
                 classifier: Classifier::from_str(&user_config.dori.classifier),
-                classifier_reference_path: user_config.experiment.reference,
                 basecaller_path: user_config.dori.basecaller_path,  // /usr/src/streamfish/scripts/cpp/cmake-build/test | /home/esteinig/dev/bin/dorado | /opt/dorado/bin/dorado
                 classifier_path: "".into(),
+                classifier_reference: user_config.minimap.reference,
+                guppy_client_path: user_config.guppy.client_path,
+                guppy_server_address: user_config.guppy.server_address,
+                guppy_server_config: user_config.guppy.server_config,
                 stderr_log: user_config.dori.basecaller_stderr,
+                dorado_basecaller_model: user_config.dorado.basecaller_model,
                 dorado_model_runners: user_config.dorado.model_runners,
                 dorado_batch_size: user_config.dorado.batch_size,
                 dorado_batch_timeout: user_config.dorado.batch_timeout,
@@ -373,7 +395,7 @@ impl StreamfishConfig {
 
         // Some checks and argument construction for basecaller/classifier configurations
 
-        if (streamfish_config.dori.classifier == Classifier::Minimap2Dorado || streamfish_config.dori.classifier == Classifier::Minimap2Rust) && streamfish_config.dori.classifier_reference_path.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
+        if (streamfish_config.dori.classifier == Classifier::Minimap2Dorado || streamfish_config.dori.classifier == Classifier::Minimap2Rust) && streamfish_config.dori.classifier_reference.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
             panic!("Classifier reference for minimap2 must be an index file (.mmi)")
         }
 
@@ -385,13 +407,13 @@ impl StreamfishConfig {
                 streamfish_config.dori.basecaller_args = format!(
                     "basecaller --verbose --batchsize {} --reference {} -I {} -k {} -w {} -g 64 --batch-timeout {} --num-runners {} --emit-sam {} -", // 
                     streamfish_config.dori.dorado_batch_size,
-                    streamfish_config.dori.classifier_reference_path.display(),
+                    streamfish_config.dori.classifier_reference.display(),
                     streamfish_config.dori.dorado_mm_index_batch_size,
                     streamfish_config.dori.dorado_mm_kmer_size,
                     streamfish_config.dori.dorado_mm_window_size,
                     streamfish_config.dori.dorado_batch_timeout,
                     streamfish_config.dori.dorado_model_runners,
-                    streamfish_config.dori.basecaller_model_path.display()
+                    streamfish_config.dori.dorado_basecaller_model.display()
                 ).split_whitespace().map(String::from).collect();  
             } else if streamfish_config.dori.basecaller == Basecaller::Dorado && (streamfish_config.dori.classifier == Classifier::Minimap2Rust  || streamfish_config.dori.classifier == Classifier::Kraken2) {
                 // Basecalling only configuration with stdout pipe from Dorado
@@ -400,7 +422,15 @@ impl StreamfishConfig {
                     streamfish_config.dori.dorado_batch_size,
                     streamfish_config.dori.dorado_batch_timeout,
                     streamfish_config.dori.dorado_model_runners,
-                    streamfish_config.dori.basecaller_model_path.display()
+                    streamfish_config.dori.dorado_basecaller_model.display()
+                ).split_whitespace().map(String::from).collect();
+            } else if streamfish_config.dori.basecaller == Basecaller::Guppy && (streamfish_config.dori.classifier == Classifier::Minimap2Rust  || streamfish_config.dori.classifier == Classifier::Kraken2) {
+                // Basecalling only configuration with stdout pipe from Dorado
+                streamfish_config.dori.basecaller_args = format!(
+                    "{} --address {} --config {}",
+                    streamfish_config.dori.guppy_client_path.display(),
+                    streamfish_config.dori.guppy_server_address,
+                    streamfish_config.dori.guppy_server_config,
                 ).split_whitespace().map(String::from).collect();
             } else {
                 panic!("Classifier configuration not supported")
@@ -410,7 +440,7 @@ impl StreamfishConfig {
         return streamfish_config
 
     }
-    pub fn cli_config(&mut self, channel_start: Option<u32>, channel_end: Option<u32>, port_dori: Option<u32>, log_latency: Option<PathBuf>) {
+    pub fn cli_config(&mut self, channel_start: Option<u32>, channel_end: Option<u32>, uds_dori: Option<PathBuf>, guppy_address: Option<String>, port_dori: Option<u32>, log_latency: Option<PathBuf>) {
 
         // Some general client configurations can be set from the command-line
         // and are overwritten before connection of the clients
@@ -426,6 +456,13 @@ impl StreamfishConfig {
         }
         if let Some(end) = channel_end {
             self.readuntil.channel_end = end;
+        }
+
+        if let Some(uds_dori) = uds_dori {
+            self.dori.uds_path = uds_dori;
+        }
+        if let Some(guppy_address) = guppy_address {
+            self.dori.guppy_server_address = guppy_address;
         }
     }
 }
@@ -452,7 +489,7 @@ impl Default for ExperimentConfig {
             version: String::from("v0.1.0"),
             description: String::from("Default adaptive sampling configuration uses host genome depletion with alignment"),
             config: Experiment::MappingExperiment(
-                MappingExperiment::HostDepletion(MappingConfig::host_depletion(Vec::new())) // whole reference genome
+                MappingExperiment::HostDepletion(MappingConfig::host_depletion(Vec::new(), 0)) // whole reference genome
             )
         }
     }
@@ -466,17 +503,17 @@ impl ExperimentConfig {
                 match user_config.experiment.r#type.as_str() {
                     "host_depletion" => {
                         Experiment::MappingExperiment(
-                            MappingExperiment::HostDepletion(MappingConfig::host_depletion(user_config.experiment.targets))
+                            MappingExperiment::HostDepletion(MappingConfig::host_depletion(user_config.experiment.targets, user_config.minimap.min_match_len))
                         )
                     },
                     "targeted_sequencing" => {
                         Experiment::MappingExperiment(
-                            MappingExperiment::TargetedSequencing(MappingConfig::targeted_sequencing(user_config.experiment.targets))
+                            MappingExperiment::TargetedSequencing(MappingConfig::targeted_sequencing(user_config.experiment.targets, user_config.minimap.min_match_len))
                         )
                     },
                     "unknown_sequences" => {
                         Experiment::MappingExperiment(
-                            MappingExperiment::UnknownSequences(MappingConfig::unknown_sequences())
+                            MappingExperiment::UnknownSequences(MappingConfig::unknown_sequences(user_config.minimap.min_match_len))
                         )
                     },
                     _ => unimplemented!("Experiment type not implemented for mapping mode")
@@ -514,9 +551,9 @@ pub enum MappingExperiment {
 }
 impl MappingExperiment {
     // Region of interest for alignment: known host genome [implemented]
-    pub fn host_depletion(targets: Vec<String>) -> Self {
+    pub fn host_depletion(targets: Vec<String>, min_match_len: i32) -> Self {
         MappingExperiment::HostDepletion(
-            MappingConfig::host_depletion(targets)
+            MappingConfig::host_depletion(targets, min_match_len)
         )
     }
     // Includes experiment variants with regions of interest for alignment:
@@ -525,15 +562,15 @@ impl MappingExperiment {
     //   - Targeted coverage depth: all known genomes within the sample, tracked for coverage depth [not implemented]
     //   - Low abundance enrichment: all genomes within the sample that can be identified as well as those that cannot [not implemented]
     //
-    pub fn targeted_sequencing(targets: Vec<String>) -> Self {
+    pub fn targeted_sequencing(targets: Vec<String>, min_match_len: i32) -> Self {
         MappingExperiment::TargetedSequencing(
-            MappingConfig::targeted_sequencing(targets)
+            MappingConfig::targeted_sequencing(targets, min_match_len)
         )
     }
     // Mapping against comprehensive database and targeting anything unknown
-    pub fn unknown_sequences() -> Self {
+    pub fn unknown_sequences(min_match_len: i32) -> Self {
         MappingExperiment::UnknownSequences(
-            MappingConfig::unknown_sequences()
+            MappingConfig::unknown_sequences(min_match_len)
         )
     }
 }
@@ -584,14 +621,15 @@ pub struct MappingConfig {
     pub no_map: DecisionConfig,
     // No sequence was obtained for the signal fragment.
     pub no_seq: DecisionConfig,
-    // No sequence was obtained for the signal fragment.
-    pub unblock_all: DecisionConfig
+    // Minimum matched mapping length when using `minimap2-rust`
+    pub min_match_len: i32,
 }
 impl MappingConfig {
-    pub fn host_depletion(targets: Vec<String>) -> Self {
+    pub fn host_depletion(targets: Vec<String>, min_match_len: i32) -> Self {
         Self {
             targets: targets.clone(),
             target_all: targets.is_empty(),
+            min_match_len: min_match_len,
 
             multi_on: DecisionConfig { 
                 decision: Decision::Unblock.into(), 
@@ -616,17 +654,15 @@ impl MappingConfig {
             no_seq: DecisionConfig { 
                 decision: Decision::Proceed.into(), 
                 flags: MappingFlags::None.sam() 
-            },
-            unblock_all: DecisionConfig { 
-                decision: Decision::Unblock.into(), 
-                flags: vec![4, 0, 10]  // NOT USED - tests latency for unblock-all
-            },
+            }
+
         }
     }
-    pub fn targeted_sequencing(targets: Vec<String>) -> Self {
+    pub fn targeted_sequencing(targets: Vec<String>, min_match_len: i32) -> Self {
         Self {
             targets: targets.clone(),
             target_all: targets.is_empty(),
+            min_match_len: min_match_len,
 
             multi_on: DecisionConfig { 
                 decision: Decision::StopData.into(), 
@@ -651,17 +687,14 @@ impl MappingConfig {
             no_seq: DecisionConfig { 
                 decision: Decision::Proceed.into(),
                 flags: MappingFlags::None.sam() 
-            },
-            unblock_all: DecisionConfig { 
-                decision: Decision::Unblock.into(), 
-                flags: vec![4, 0, 10]  // NOT USED - tests latency for unblock-all
             }
         }
     }
-    pub fn unknown_sequences() -> Self {
+    pub fn unknown_sequences(min_match_len: i32) -> Self {
         Self {
             targets: Vec::new(),
             target_all: true,  // all mapped
+            min_match_len: min_match_len,
 
             multi_on: DecisionConfig { 
                 decision: Decision::Unblock.into(), 
@@ -686,10 +719,6 @@ impl MappingConfig {
             no_seq: DecisionConfig { 
                 decision: Decision::Proceed.into(), 
                 flags: MappingFlags::None.sam() 
-            },
-            unblock_all: DecisionConfig { 
-                decision: Decision::Unblock.into(), 
-                flags: vec![4, 0, 10]  // NOT USED - tests latency for unblock-all
             }
         }
     }
@@ -716,17 +745,23 @@ impl MappingConfig {
         }
     }
     // Main method for `minimap2-rs` using the Mapping struct to get a configured experiment decision
-    pub fn decision_from_mapping(&self, mappings: Vec<Mapping>, unblock_all: bool, ) -> i32 {
+    pub fn decision_from_mapping(&self, mappings: Vec<Mapping>) -> i32 {
 
-        if unblock_all {
-            return self.unblock_all.decision;
-        }
+
+
+        let mappings: Vec<Mapping> = match self.min_match_len {
+            0 => mappings,
+            _ => {
+                mappings.into_iter().filter(|x| {
+                    x.match_len >= self.min_match_len
+                }).collect()
+            }
+        };
+        // log::info!("After filter: {:?}", mappings);
 
         if mappings.is_empty() {
             return self.no_map.decision
         }
-
-        let mappings: Vec<Mapping> = mappings.into_iter().filter(|x| x.match_len >= 100).collect();
 
         let num_mappings = mappings.len();
         
@@ -736,7 +771,7 @@ impl MappingConfig {
                 let mut mapped = Vec::new();
                 for mapping in mappings.into_iter() {
                     if let Some(tid) = mapping.target_name {
-                        log::info!("Detected mapping for {}", tid);
+                        log::debug!("Detected mapping for {}", tid);
                         mapped.push(tid);
                     }
                 }
@@ -755,14 +790,6 @@ impl MappingConfig {
         } else {
             self.no_map.decision
         }
-
-    }
-    // A test method that returns an unblock decision for unblock-all testing
-    pub fn unblock_all(&self, flag: &u32, tid: &str) -> i32 {
-        if self.unblock_all.flags.contains(flag) && (self.target_all || self.targets.iter().any(|x| x == tid)) {
-            // No action, always return unblock for testing, implements one lo logic check to reflect decision logic time
-        }
-        self.unblock_all.decision
     }
 }
 

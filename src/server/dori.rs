@@ -16,9 +16,9 @@ pub struct DoriServer { }
 impl DoriServer {
     pub async fn run(config: &StreamfishConfig) -> Result<(), Box<dyn std::error::Error>> {
 
-        let service = AdaptiveSamplingService::new(config);
+        log::info!("Dori server configuration: {:#?}", &config.dori);
 
-        log::info!("Dori server configuration: {:?}", &config.dori);
+        let service = AdaptiveSamplingService::new(config);
 
         if config.dori.tcp_enabled {
 

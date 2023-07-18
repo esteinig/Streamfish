@@ -10,7 +10,7 @@ output_path = "/tmp/"
 [parameters]
 
 sample_name = "test"
-experiment_name = "test_virus"
+experiment_name = "test_human"
 experiment_duration_set = 4800
 
 device_id = "Device"
@@ -20,13 +20,13 @@ flowcell_name = "FAQ12345"
 break_read_ms = 400
 
 [[sample]]
-name = "SARS-CoV-2 Wuhan 1"
-input_genome = "/tmp/squiggles/NC_045512.2.squiggle.npy" 
+name = "CHM13v2 Chromosome1"
+input_genome = "/tmp/squiggles/chr1.squiggle.npy"
 mean_read_length = 15000
 weight = 1
 
 [[sample]]
-name = "MPXV Rivers"
-input_genome = "/tmp/squiggles/NC_063383.1.squiggle.npy"
+name = "CHM13v2 Chromosome2"
+input_genome = "/tmp/squiggles/chr2.squiggle.npy"
 mean_read_length = 15000
 weight = 1

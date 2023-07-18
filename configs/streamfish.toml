@@ -22,18 +22,24 @@ uds_path                                = '/tmp/.dori/socket'
 uds_override                            = true
 minknow_host                            = "minknow_host"                                                     # Host ports forwarded inside container
 minknow_port                            = 10000                                                              # Manager service port inside container
-classifier                              = "minimap2-rs"                                                      # minimap2-rs (preferred) | minimap2-dorado (caution!) | kraken2
-basecaller_path                         = "/opt/dorado/bin/dorado"
-basecaller_model                        = "/tmp/models/dna_r9.4.1_e8_fast@v3.4"
+classifier                              = "minimap2-rs"                                                      # minimap2-rs | kraken2 | minimap2-dorado (instable)
+basecaller                              = "guppy"                                                            # guppy | dorado (instable)
+basecaller_path                         = "/home/esteinig/micromamba/envs/guppy/bin/python"
 basecaller_stderr                       = "/tmp/dori.pipeline.stderr"
 
-[dorado]  
-batch_size                              = 128
-batch_timeout                           = 1000                                                               # 1 ms
-model_runners                           = 2
-minimap_kmer_size                       = 15
-minimap_window_size                     = 10
-minimap_index_batch_size                = "32G"
+[guppy]
+client_path                             = "/usr/src/streamfish/scripts/guppy/guppy_client.py"
+server_address                          = "ipc:///tmp/.guppy_local/5556"
+server_config                           = "dna_r9.4.1_450bps_fast"
+# server_callers                          = 4
+# server_chunk_size                       = 160
+# server_ipc_threads                      = 16
+# server_runners                          = 8
+
+
+[minimap]
+reference                               = '/tmp/virosaurus_nosars.mmi'
+min_match_len                           = 100                                                                 # minimum matched mapping length for `minimap2-rs`
 
 [readuntil]
 device_name                             = "MS12345"
@@ -42,21 +48,32 @@ channel_end                             = 512
 init_delay                              = 10
 dori_tcp_host                           = 'dori-dev'                                                         # 'dori-dev' when running client inside container to connect to networked 'dori-dev' container, otherwise 'localhost' (port forwarded from inside container)
 dori_tcp_port                           = 10002                                                              # '10002' when running client inside container, otherwise '10002' (port forwarded from inside container) - no changes necessary, should match `dori.tcp_port`
-unblock_all                             = false
-unblock_all_mode                        = "process"
 read_cache                              = true
 read_cache_batch_rpc                    = false
 read_cache_min_chunks                   = 1
-read_cache_max_chunks                   = 2                                                      
+read_cache_max_chunks                   = 5                                                     
 latency_log                             = "/tmp/latency.log"
-throttle                                = 0                                                                  # Streaming actions (= 0) or batched actions (> 0) - in milliseconds
+action_throttle                         = 0                                                                  # Streaming actions (= 0) or batched actions (> 0) - in milliseconds
 unblock_duration                        = 0.1
 sample_minimum_chunk_size               = 200
 accepted_first_chunk_classifications    = [83, 65]
+unblock_all                             = false
+unblock_all_mode                        = "mapper"
 
 [experiment]  
 control                                 = false
 mode                                    = 'mapping'
 type                                    = 'unknown_sequences'
-reference                               = '/tmp/virosaurus_nosars.mmi'
-targets                                 = ["NC_063383.1"]                                                   # leave empty to target all sequences "NC_063383.1"
+targets                                 = []                                                                # leave empty to target all sequences "NC_063383.1"
+
+
+# Dorado is not completely stable, particularly when using reference alignment as well
+
+[dorado]  
+batch_size                              = 128
+batch_timeout                           = 1000                                                               # 1 ms
+model_runners                           = 2
+minimap_kmer_size                       = 15
+minimap_window_size                     = 10
+minimap_index_batch_size                = "32G"
+basecaller_model                        = "/tmp/models/dna_r9.4.1_e8_fast@v3.4"                              # "/tmp/models/dna_r9.4.1_e8_fast@v3.4"

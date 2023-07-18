@@ -105,8 +105,12 @@ impl ReadUntilClient {
         if config.readuntil.unblock_all_server {
             log::warn!("Unblocking reads after sending to Dori!");
         }
-        if config.readuntil.unblock_all_process {
-            log::warn!("Unblocking reads after processing on Dori!");
+        if config.readuntil.unblock_all_basecaller {
+            log::warn!("Unblocking reads after basecalling on Dori!");
+        }
+
+        if config.readuntil.unblock_all_mapper {
+            log::warn!("Unblocking reads after basecalling and mapping on Dori!");
         }
 
         // MinKNOW and Dori client connections
