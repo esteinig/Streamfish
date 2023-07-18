@@ -1,6 +1,6 @@
 # Streamfish <a href='https://github.com/esteinig'><img src='docs/logo.png' align="right" height="200" /></a>
 
-Low-latency adaptive sampling using asynchroneous streams and custom RPC server endpoints.
+Low-latency adaptive sampling using asynchroneous streams and RPC.
 
 ## Motivation
 
