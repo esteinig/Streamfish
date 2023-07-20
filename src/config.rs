@@ -19,7 +19,6 @@ pub struct UserConfig  {
     pub meta: UserConfigMetadata,
     pub minknow: UserConfigMinknow,
     pub icarust: UserConfigIcarust,
-    pub dorado: UserConfigDorado,
     pub guppy: UserConfigGuppy,
     pub dori: UserConfigDori,
     pub minimap: UserConfigMinimap,
@@ -70,7 +69,8 @@ pub struct UserConfigDori {
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserConfigReadUntil {
     pub init_delay: u64,
-    pub device_name: String,              
+    pub device_name: String,
+    pub channels: u32,              
     pub channel_start: u32,
     pub channel_end: u32,
     pub dori_tcp_host: String,  // can be different if outside of container
@@ -78,7 +78,6 @@ pub struct UserConfigReadUntil {
     pub unblock_all: bool,
     pub unblock_all_mode: String,
     pub read_cache: bool,
-    pub read_cache_batch_rpc: bool,
     pub read_cache_min_chunks: usize,
     pub read_cache_max_chunks: usize,
     pub action_throttle: u64,
@@ -87,18 +86,6 @@ pub struct UserConfigReadUntil {
     pub sample_minimum_chunk_size: u64,
     pub accepted_first_chunk_classifications: Vec<i32>
 }
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct UserConfigDorado{
-    pub batch_size: u32,
-    pub batch_timeout: u32,
-    pub model_runners: u32,
-    pub minimap_kmer_size: u32,
-    pub minimap_window_size: u32,
-    pub minimap_index_batch_size: String,
-    pub basecaller_model: PathBuf,
-}
-
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserConfigMinimap {
@@ -231,6 +218,7 @@ pub struct IcarustConfig {
 #[derive(Debug, Clone)]
 pub struct ReadUntilConfig {
     pub device_name: String,                 // Dori access to Minknow
+    pub channels: u32,
     pub channel_start: u32,
     pub channel_end: u32,
     pub dori_tcp_host: String,
@@ -247,7 +235,6 @@ pub struct ReadUntilConfig {
     pub throttle: u64,
     pub latency_log: Option<PathBuf>,          
     pub read_cache: bool,
-    pub read_cache_batch_rpc: bool,
     pub read_cache_min_chunks: usize,
     pub read_cache_max_chunks: usize
 }
@@ -269,23 +256,13 @@ pub struct DoriConfig {
     pub classifier_path: PathBuf,
     pub classifier_reference: PathBuf,
 
-    // Basecaller/classifier error log
+    // Pipeline error log
     pub stderr_log: PathBuf,
 
     // Guppy config
     pub guppy_client_path: PathBuf,
     pub guppy_server_address: String,
     pub guppy_server_config: String,
-
-
-    // Dorado config
-    pub dorado_batch_size: u32,
-    pub dorado_batch_timeout: u32,
-    pub dorado_model_runners: u32,
-    pub dorado_mm_kmer_size: u32,
-    pub dorado_mm_window_size: u32,
-    pub dorado_mm_index_batch_size: String,
-    pub dorado_basecaller_model: PathBuf,
 
     // Kraken2 config
     pub kraken2_threads: u16,
@@ -313,7 +290,7 @@ pub struct StreamfishConfig {
 }
 
 impl StreamfishConfig {
-    pub fn new(user_config: PathBuf) -> StreamfishConfig {
+    pub fn from_user_config(user_config: PathBuf) -> StreamfishConfig {
 
         let user_config_str = std::fs::read_to_string(user_config).expect("Failed to read user config TOML");
         let user_config: UserConfig = toml::from_str(&user_config_str).expect("Failed to load user config TOML");
@@ -323,7 +300,7 @@ impl StreamfishConfig {
             false => (false, false, false, false)
         };
 
-        let mut streamfish_config = Self {
+        let streamfish_config = Self {
             version: crate_version!().to_string(),
 
             experiment: ExperimentConfig::from(
@@ -340,6 +317,7 @@ impl StreamfishConfig {
 
             readuntil: ReadUntilConfig {
                 device_name: user_config.readuntil.device_name,
+                channels: user_config.readuntil.channels,
                 channel_start: user_config.readuntil.channel_start,
                 channel_end: user_config.readuntil.channel_end,
                 dori_tcp_host: user_config.readuntil.dori_tcp_host,
@@ -356,7 +334,6 @@ impl StreamfishConfig {
                 accepted_first_chunk_classifications: user_config.readuntil.accepted_first_chunk_classifications,
                 latency_log: user_config.readuntil.latency_log,
                 read_cache: user_config.readuntil.read_cache,
-                read_cache_batch_rpc: user_config.readuntil.read_cache_batch_rpc,
                 read_cache_min_chunks: user_config.readuntil.read_cache_min_chunks,
                 read_cache_max_chunks: user_config.readuntil.read_cache_max_chunks
             },
@@ -378,13 +355,6 @@ impl StreamfishConfig {
                 guppy_server_address: user_config.guppy.server_address,
                 guppy_server_config: user_config.guppy.server_config,
                 stderr_log: user_config.dori.basecaller_stderr,
-                dorado_basecaller_model: user_config.dorado.basecaller_model,
-                dorado_model_runners: user_config.dorado.model_runners,
-                dorado_batch_size: user_config.dorado.batch_size,
-                dorado_batch_timeout: user_config.dorado.batch_timeout,
-                dorado_mm_kmer_size: user_config.dorado.minimap_kmer_size,
-                dorado_mm_window_size: user_config.dorado.minimap_window_size,
-                dorado_mm_index_batch_size: user_config.dorado.minimap_index_batch_size,
                 kraken2_threads: 4,
                 kraken2_args: "--minimum-hit-groups 1 --threads 4 --memory-mapping".into(),
 
@@ -393,39 +363,18 @@ impl StreamfishConfig {
             }
         };
 
-        // Some checks and argument construction for basecaller/classifier configurations
+        return StreamfishConfig::configure(streamfish_config)
 
-        if (streamfish_config.dori.classifier == Classifier::Minimap2Dorado || streamfish_config.dori.classifier == Classifier::Minimap2Rust) && streamfish_config.dori.classifier_reference.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
-            panic!("Classifier reference for minimap2 must be an index file (.mmi)")
-        }
-
-        // Dorado basecaller setup
-        if streamfish_config.dori.basecaller_args.is_empty() {
-            // Construct arguments and set into config
-            if streamfish_config.dori.basecaller == Basecaller::Dorado  && streamfish_config.dori.classifier == Classifier::Minimap2Dorado {
-                // Minimap2 configuration integrated with Dorado - add window/k-mer options [TODO]
-                streamfish_config.dori.basecaller_args = format!(
-                    "basecaller --verbose --batchsize {} --reference {} -I {} -k {} -w {} -g 64 --batch-timeout {} --num-runners {} --emit-sam {} -", // 
-                    streamfish_config.dori.dorado_batch_size,
-                    streamfish_config.dori.classifier_reference.display(),
-                    streamfish_config.dori.dorado_mm_index_batch_size,
-                    streamfish_config.dori.dorado_mm_kmer_size,
-                    streamfish_config.dori.dorado_mm_window_size,
-                    streamfish_config.dori.dorado_batch_timeout,
-                    streamfish_config.dori.dorado_model_runners,
-                    streamfish_config.dori.dorado_basecaller_model.display()
-                ).split_whitespace().map(String::from).collect();  
-            } else if streamfish_config.dori.basecaller == Basecaller::Dorado && (streamfish_config.dori.classifier == Classifier::Minimap2Rust  || streamfish_config.dori.classifier == Classifier::Kraken2) {
-                // Basecalling only configuration with stdout pipe from Dorado
-                streamfish_config.dori.basecaller_args = format!(
-                    "basecaller --verbose --batchsize {} -g 64 --batch-timeout {} --num-runners {} --emit-fastq {} -",
-                    streamfish_config.dori.dorado_batch_size,
-                    streamfish_config.dori.dorado_batch_timeout,
-                    streamfish_config.dori.dorado_model_runners,
-                    streamfish_config.dori.dorado_basecaller_model.display()
-                ).split_whitespace().map(String::from).collect();
-            } else if streamfish_config.dori.basecaller == Basecaller::Guppy && (streamfish_config.dori.classifier == Classifier::Minimap2Rust  || streamfish_config.dori.classifier == Classifier::Kraken2) {
-                // Basecalling only configuration with stdout pipe from Dorado
+    }
+    pub fn configure(mut streamfish_config: StreamfishConfig) -> Self {
+            
+            // Some checks and argument construction for basecaller/classifier configurations
+            if (streamfish_config.dori.classifier == Classifier::Minimap2Dorado || streamfish_config.dori.classifier == Classifier::Minimap2Rust) && streamfish_config.dori.classifier_reference.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
+                panic!("Classifier reference for minimap2 must be an index file (.mmi)")
+            }
+    
+            if streamfish_config.dori.basecaller == Basecaller::Guppy && (streamfish_config.dori.classifier == Classifier::Minimap2Rust  || streamfish_config.dori.classifier == Classifier::Kraken2) {
+                
                 streamfish_config.dori.basecaller_args = format!(
                     "{} --address {} --config {}",
                     streamfish_config.dori.guppy_client_path.display(),
@@ -435,12 +384,11 @@ impl StreamfishConfig {
             } else {
                 panic!("Classifier configuration not supported")
             }
-        }
 
-        return streamfish_config
+            return streamfish_config
 
     }
-    pub fn cli_config(&mut self, channel_start: Option<u32>, channel_end: Option<u32>, uds_dori: Option<PathBuf>, guppy_address: Option<String>, port_dori: Option<u32>, log_latency: Option<PathBuf>) {
+    pub fn cli_config(&mut self, channel_start: Option<u32>, channel_end: Option<u32>, uds_dori: Option<PathBuf>, guppy_address: Option<String>, port_dori: Option<u32>, log_latency: Option<PathBuf>) -> Self {
 
         // Some general client configurations can be set from the command-line
         // and are overwritten before connection of the clients
@@ -457,13 +405,15 @@ impl StreamfishConfig {
         if let Some(end) = channel_end {
             self.readuntil.channel_end = end;
         }
-
         if let Some(uds_dori) = uds_dori {
             self.dori.uds_path = uds_dori;
         }
         if let Some(guppy_address) = guppy_address {
             self.dori.guppy_server_address = guppy_address;
         }
+        
+        return StreamfishConfig::configure(self.clone())
+
     }
 }
 

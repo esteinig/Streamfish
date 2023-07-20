@@ -57,8 +57,8 @@ services:
       - "${ICARUST_REPO_DIR}/squiggle_arrs:/squiggle_arrs"                          # access to squiggle arrays for running
       - "${ICARUST_REPO_DIR}/static:/static"                                        # access to static data for running
       - "${ICARUST_REPO_DIR}/docker/configs:/configs"                               # access to icarust configs for running
-
-    command: cargo watch -w src -w proto -w build.rs -w Cargo.toml -x "build --target x86_64-unknown-linux-musl --release -j4 && if [ -f /opt/streamfish/bin/streamfish ]; then rm /opt/streamfish/bin/streamfish; fi && cp /usr/src/streamfish/target/x86_64-unknown-linux-musl/release/streamfish /opt/streamfish/bin/"
+    tty: true
+    # command: cargo watch -w src -w proto -w build.rs -w Cargo.toml -x "build --target x86_64-unknown-linux-musl --release -j4 && if [ -f /opt/streamfish/bin/streamfish ]; then rm /opt/streamfish/bin/streamfish; fi && cp /usr/src/streamfish/target/x86_64-unknown-linux-musl/release/streamfish /opt/streamfish/bin/"
     depends_on:
       change-vol-ownership:
         # Wait for the ownership to change

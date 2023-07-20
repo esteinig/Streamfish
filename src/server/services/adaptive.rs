@@ -1,50 +1,31 @@
 
 use crate::client::minknow::MinKnowClient;
 use crate::config::{StreamfishConfig, MappingExperiment, Experiment, Classifier};
-use crate::services::dori_api::adaptive::{DoradoStreamRequest, DoradoStreamResponse};
+use crate::services::dori_api::adaptive::{StreamfishRequest, StreamfishResponse, Decision, RequestType};
 use crate::services::dori_api::adaptive::adaptive_sampling_server::AdaptiveSampling;
-use crate::services::dori_api::adaptive::{
-    DoradoCacheBatchRequest, 
-    DoradoCacheChannelRequest, 
-    DoradoCacheResponse, 
-    Decision, 
-    DoradoCacheRequestType
-};
 
 use std::collections::HashMap;
+use minimap2::*;
 use std::pin::Pin;
+use std::sync::Arc;
+use itertools::join;
+use tokio::sync::Mutex;
 use futures_core::Stream;
 use futures_util::StreamExt;
-use futures_util::io::{BufReader, Lines};
 use futures_util::AsyncWriteExt;
 use futures_util::io::AsyncBufReadExt;
 use tonic::{Request, Response, Status};
-use async_process::{Command, Stdio, ChildStdout, ChildStdin};
-use itertools::join;
-
-use std::sync::Arc;
-use tokio::sync::Mutex;
-
-// ArcMutex HashMap seems to work fine for now
-// leaving this in for potential future use
-// use moka::future::Cache;
+use byteorder::{LittleEndian, ByteOrder};
+use futures_util::io::{BufReader, Lines};
 use tokio::sync::mpsc::{Sender, Receiver};
-use minimap2::*;
+use async_process::{Command, Stdio, ChildStdout, ChildStdin};
+
 
 pub struct AdaptiveSamplingService {
     config: StreamfishConfig
 }
 impl AdaptiveSamplingService {
     pub fn new(config: &StreamfishConfig) -> Self {
-
-        // Some checks on server
-
-        if !config.dori.dorado_basecaller_model.exists() {
-            panic!("Dorado basecaller model path does not exist")
-        }
-        if !config.dori.classifier_reference.exists() {
-            panic!("Classifier reference path does not exist")
-        }
 
         if config.readuntil.unblock_all_client {
             log::warn!("Unblocking reads immediately after receipt from control server!");
@@ -55,7 +36,6 @@ impl AdaptiveSamplingService {
         if config.readuntil.unblock_all_basecaller {
             log::warn!("Unblocking reads after basecalling on Dori!");
         }
-
         if config.readuntil.unblock_all_mapper {
             log::warn!("Unblocking reads after basecalling and mapping on Dori!");
         }
@@ -67,17 +47,15 @@ impl AdaptiveSamplingService {
     }
 }
 
-
 // Service implementation matches the RPC definitions translated during build - see the trait annotations on BasecallerService
 #[tonic::async_trait]
 impl AdaptiveSampling for AdaptiveSamplingService {
 
-    type DoradoCacheBatchStream = Pin<Box<dyn Stream<Item = Result<DoradoCacheResponse, Status>> + Send  + 'static>>;
-    type DoradoCacheChannelStream = Pin<Box<dyn Stream<Item = Result<DoradoCacheResponse, Status>> + Send  + 'static>>;
-    type DoradoStreamStream = Pin<Box<dyn Stream<Item = Result<DoradoStreamResponse, Status>> + Send  + 'static>>;
+    type CacheStream = Pin<Box<dyn Stream<Item = Result<StreamfishResponse, Status>> + Send  + 'static>>;
+    type StreamStream = Pin<Box<dyn Stream<Item = Result<StreamfishResponse, Status>> + Send  + 'static>>;
 
     // Adaptive sampling with Dorado basecalling and no request/read cache - single request/read processing only
-    async fn dorado_stream(&self, _: Request<tonic::Streaming<DoradoStreamRequest>>) -> Result<Response<Self::DoradoStreamStream>, Status> {
+    async fn stream(&self, _: Request<tonic::Streaming<StreamfishRequest>>) -> Result<Response<Self::StreamStream>, Status> {
 
         log::info!("Initiated Dori::AdaptiveSamplingService::DoradoStream RPC");
 
@@ -88,7 +66,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
     // Distinct cache single/batch endpoints because modularizing the stream generators causes tons of latency
 
     // Adaptive sampling with Dorado basecalling and request/read cache implementation - single channel data transmission
-    async fn dorado_cache_channel(&self, request: Request<tonic::Streaming<DoradoCacheChannelRequest>>) -> Result<Response<Self::DoradoCacheChannelStream>, Status> {
+    async fn cache(&self, request: Request<tonic::Streaming<StreamfishRequest>>) -> Result<Response<Self::CacheStream>, Status> {
 
         log::info!("Initiated Dori::AdaptiveSamplingService::DoradoCacheChannel RPC");
 
@@ -115,7 +93,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let unblock_decision: i32 = Decision::Unblock.into();
 
         // Request types
-        let init_request: i32 = DoradoCacheRequestType::Init.into();
+        let init_request: i32 = RequestType::Init.into();
 
         // Connection to MinKNOW to obtain device calibration data
         let minknow_client = MinKnowClient::connect(
@@ -123,13 +101,11 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         ).await.expect("Failed to connect to MinKNOW");
 
         let (sample_rate, calibration) = minknow_client.get_device_data(
-            &self.config.readuntil.device_name, 
-            &self.config.readuntil.channel_start,  
-            &self.config.readuntil.channel_end
+            &self.config.readuntil.device_name, &1, &self.config.readuntil.channels
         ).await.expect("Failed to get device calibration from MinKNOW");
+
+        log::info!("Calibration: {:#?}", calibration);
         
-
-
         // ======================
         // Pipeline process setup
         // ======================
@@ -164,73 +140,71 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         // =========================
      
         // DO NOT PUT STREAM GENERATOR INTO DISTINCT FUNCTION - SEVERELY IMPACTS LATENCY (> 100 bp)
-
         
         let mut request_stream = request.into_inner();
-
-        // ADDING A QUEUE TX/RX INTO THE ASYNC STREAM GENERATORS AND THREADING THE REQUEST PROCESS LOOPS ADDS LATENCY (~ 7 bp)
-        // 
-        // Threading the writes to the basecaller does not make a difference despite all the ArcMutex and cloning going on
-        // keeping it simple instead and removing the threaded request parsing in the stream generator. NOT using Dorado
-        // alignment keeps things stable at the aligner end - even when increasing to 1024 pores and 256 batch size
-        // which adds a bit of latency due to larger batch size (~40 bp) - however when using alignment in Dorado it 
-        // becomes unstable with or without writer async threads, and batch size needs to be > 512 adding significant
-        // latency overall.
 
         let (cache_queue_tx, mut cache_queue_rx) = tokio::sync::mpsc::channel(1024); // handles cache removal instructions
         let (decision_tx, mut decision_rx) = tokio::sync::mpsc::channel(1024); // drains into output stream
         let (basecall_tx, mut basecall_rx): (Sender<(String, u32, u32, Vec<Vec<u8>>)>, Receiver<(String, u32, u32, Vec<Vec<u8>>)>) = tokio::sync::mpsc::channel(1024); // basecaller stdin
 
         let uncache_tx = cache_queue_tx.clone();
-        let cache_decision_tx = decision_tx.clone();
+        let decision_cache_tx = decision_tx.clone();
         
         // Read cache with standard HashMap
-
         let read_cache: Arc<Mutex<HashMap<String, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
         let read_cache_clone = Arc::clone(&read_cache);
-        
-        // A self clearing cache - this is important - the simple HashMap version previously
-        // implemented was not able to be cleared, because the incomping reads updated the
-        // cache too quickly OR because the ArcMutex lock was hogged by the input stream 
-        // - both causing instabilites. With the Arc values implemented below we only 
-        // clone the Arc on gets and set expiration times by which we expect
-        // chunks to be outdated - TTL is since insert, TTI is since last get
-        // let read_cache: Cache<String, Arc<Vec<Vec<u8>>>> = Cache::builder()
-        //         // Time to live (TTL): 
-        //         .time_to_live(std::time::Duration::from_secs(3))
-        //         // Time to idle (TTI):
-        //         .time_to_idle(std::time::Duration::from_secs(1))
-        //         // Create the cache.
-        //         .build();
-
-        // let read_cache_1 = read_cache.clone();
-        // let read_cache_2 = read_cache.clone();
-      
-        // Cache removal thread
+            
+        // Uncache thread
         tokio::spawn(async move {
             
             while let Some(read_id) = cache_queue_rx.recv().await {
                 let mut read_cache  = read_cache_clone.lock().await;
+                
+                // This log is useful to ensure cache is cleared continuously -
+                // seems to be a decent indicator of things going wrong in general
                 log::info!("Reads cached: {} ", read_cache.len());
+
                 read_cache.remove(&read_id);
-                // log::info!("Reads in cache: {}", read_cache_2.entry_count());
-                // read_cache_2.remove(&read_id).await;
+
             }
         
         });
 
-        // Basecaller submission thread
+        let channel_start = self.config.readuntil.channel_start.clone();
+        let channel_end = self.config.readuntil.channel_end.clone();
+
+        // Basecaller thread
         tokio::spawn(async move {
             
             while let Some((read_id, channel, number, cached)) = basecall_rx.recv().await {
+                                
+                // There may be a weird race condition with Icarust when 
+                // starting all slices in a slice-and-dice configuration
+                // simultaneously before Icarust spits out reads after 
+                // intials delay (works ok when starting sequentially 
+                // when reads have started) causing the wrong slice
+                // channel numbers to be transmitted to the slice 
+                // causing an out of bounds index error so we 
+                // check first here
+
+                // We could also just fet the full channel array 
+                // for the calibration (instead of the start - end)
+                // so this check won't be necessary, might be better
                 
-                // log::info!("Sending chunks to basecaller: {}", cached.len());
-                
+                // if channel > channel_end {
+                //     log::warn!("Likely race condition from control server (Icarust) in slice-and-dice!");
+                //     log::warn!("Ignore read and continue (channel = {}, channel start = {})", &channel, &channel_start);
+                //     continue;
+                // }
+
                 let channel_index = (channel - 1) as usize;
+                
+                log::info!("Channel {} index {} start {}", channel, channel_index, channel_start);
 
                 let data = get_dorado_input_string(
                     read_id,
                     cached.concat(),
+                    cached.len(),
                     channel,
                     number,
                     calibration.offsets[channel_index],
@@ -244,12 +218,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         
         });
 
-
-        // READ CACHE IS THE PROBLEM - FILLS UP FASTER THAN IT IS EMPTIED! PROBABLY LOCKED MORE BELOW THAN ABOVE
-
-        // Caching thread
+        // Cache thread
         tokio::spawn(async move {
-
 
             while let Some(dorado_request) = request_stream.next().await {
                 let dorado_request = dorado_request.unwrap();
@@ -270,203 +240,45 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
                 // Get the updated read and the number of chunks in the cache
                 let cached = cache.get(&read_id).expect("Failed to get data from read cache");
-
-                // Looks weird because we Arc the values, but actually works - does not work with expensive
-                // cloning of gets from the cache, when not using Arc:
-                //
-                // https://github.com/moka-rs/moka#example-size-aware-eviction
-                //
-                // let cached = match read_cache_1.get(&read_id) {
-                //     Some(data) => {
-                //         let cached = &*data;
-                //         let mut updated = Vec::new();
-                //         for chunk in cached {
-                //             updated.push(chunk.to_owned())
-                //         }
-                //         updated.push(dorado_request.data);
-                //         read_cache.insert(dorado_request.id, Arc::new(updated.clone())).await;
-                //         updated
-                //     },
-                //     None => {
-                //         let data = vec![dorado_request.data];
-                //         read_cache.insert(dorado_request.id, Arc::new(data.clone())).await;
-                //         data
-                //     }
-                // };
-                
                 let num_chunks = cached.len();
 
                 if num_chunks < run_config_1.readuntil.read_cache_min_chunks {
-                    // If we have less chunks than the minimum number required
-                    // no action is taken, simply continue parsing requests until
-                    // a sufficient number of chunks is available
                     continue;
-
                 } else if num_chunks > run_config_1.readuntil.read_cache_max_chunks {
-                    // If we have reached the maximum chunks in cache,
-                    // do not process and send a stop response for
-                    // ceasing data acquisition. This will also send
-                    // a remove from cache request as we cannot do this
-                    // below because of the required mutable borrow of the cache
 
-                    // read_cache.remove(&number); not possible!
-
-                    log::debug!("Maximum chunk size exceeded, stop data decision for: {} (chunks = {})", &read_id, &num_chunks);
-                    cache_decision_tx.send(DoradoCacheResponse { 
+                    decision_cache_tx.send(StreamfishResponse { 
                         channel: dorado_request.channel, 
                         number: dorado_request.number, 
                         decision: stop_decision
                     }).await.expect("Failed to send stop further data into decision response queue");
 
-                    log::debug!("Sending remove-from-cache instructions: {} (chunks = {})", &read_id, &num_chunks);
-                    cache_queue_tx.send(read_id).await.expect("Failed to send uncache instruction to queue");
+                    cache_queue_tx.send(read_id).await.expect("Failed to send instruction to uncache thread");
 
                 } else {
-                    // If we have an acceptable number of chunks between the limits, process 
-                    // the read by concatenating the chunks and sending it into the basecall
-                    // and alignment pipeline 
                     
-                    // If unblock-all testing is active, send response after channel cache decisions
                     if run_config_1.readuntil.unblock_all_server {
                         
-                        log::debug!("Unblock all active before processing, unblock decision before: {} (chunks = {})", &read_id, &num_chunks);
-                        cache_decision_tx.send(DoradoCacheResponse { 
+                        decision_cache_tx.send(StreamfishResponse { 
                             channel: dorado_request.channel, 
                             number: dorado_request.number, 
                             decision: unblock_decision
                         }).await.expect("Failed to send stop further data into decision response queue");
 
-                        cache_queue_tx.send(read_id).await.expect("Failed to send uncache instruction to queue");
+                        cache_queue_tx.send(read_id).await.expect("Failed to send instruction to uncache thread");
 
                     } else {
-                                                    
-                        log::debug!("Process cached read data and send into pipeline: {} (chunks = {})", &read_id, &num_chunks);
-                        
-                        let data = cached.to_owned();
-                        basecall_tx.send((read_id, dorado_request.channel, dorado_request.number, data)).await.expect("Failed to send data into basecaller input");
+                                                
+                        basecall_tx.send((read_id, dorado_request.channel, dorado_request.number, cached.to_owned())).await.expect("Failed to send data to basecaller input thread");
 
                     }
                 }
             }
         });
 
-            // while let Some(dorado_request) = request_stream.next().await {
-            //     let dorado_request = dorado_request.unwrap();
-                
-            //     let channel = dorado_request.channel;
-            //     let number = dorado_request.number;
-    
-            //     if dorado_request.request == init_request {
-            //         // No action, continue and wait for data stream
-            //         log::info!("Waiting {} seconds for pipeline initialisation ...", &run_config_1.readuntil.init_delay);
-            //         tokio::time::sleep(tokio::time::Duration::new(run_config_1.readuntil.init_delay, 0)).await;
-
-            //         // No response is sent
-            //         continue;
-            //     }
-                
-            //     let channel_index = (channel-1) as usize; // need to cast
-            //     let read_cache = &mut channel_caches[channel_index];
-                
-            //     // Boolean value is just placeholer for `prost` syntax around `oneof`
-            //     if dorado_request.request == cache_request {
-            //         // If the request is a remove-read-from-cache request, do this
-            //         // before any further processing - this gets around the mutable
-            //         // borrow issue below and allows for other decisions to send
-            //         // cache removal requests later
-            //         log::debug!("Removing chunks from cache on request: {} {}", &channel, &number);
-            //         read_cache.remove(&number);
-
-            //         // No response is sent
-            //         continue;
-
-            //     } else {
-
-            //         // Find cached read or insert new one, update the cache with the current read
-            //         read_cache.entry(number).or_insert(Vec::new()).push(dorado_request.data);
-
-            //         // Get the updated read and the number of chunks in the cache
-            //         let cached = read_cache.get(&number).expect("Failed to get data from channel cache");
-            //         let num_chunks = cached.len();
-
-            //         if num_chunks < run_config_1.readuntil.read_cache_min_chunks {
-            //             // If we have less chunks than the minimum number required
-            //             // send a continue response for more data acquisition on 
-            //             // this read (no action)
-
-            //             // No response is sent
-            //             continue;
-
-            //         } else if num_chunks > run_config_1.readuntil.read_cache_max_chunks {
-            //             // If we have reached the maximum chunks in cache,
-            //             // do not process and send a stop response for
-            //             // ceasing data acquisition. This will also send
-            //             // a remove from cache request as we cannot do this
-            //             // below because of the required mutable borrow of the cache
-
-            //             // read_cache.remove(&number); not possible!
-
-            //             log::debug!("Maximum chunk size exceeded, stop data decision: {} {} (chunks = {})", &channel, &number, &num_chunks);
-
-            //             yield DoradoCacheResponse { 
-            //                 channel, 
-            //                 number,
-            //                 decision: stop_decision
-            //             }
-
-            //         } else {
-            //             // If we have an acceptable number of chunks between the limits, process 
-            //             // the read by concatenating the chunks and sending it into the basecall
-            //             // and alignment pipeline 
-                        
-            //             // If unblock-all testing is active, send response after channel cache decisions
-            //             if run_config_1.readuntil.unblock_all_server {
-            //                 yield DoradoCacheResponse { 
-            //                     channel, 
-            //                     number,
-            //                     decision: unblock_decision
-            //                 }
-
-            //             } else {
-                                                        
-            //                 log::debug!("Processing cached read: {} {} (chunks = {})", &channel, &number, &num_chunks);
-
-            //                 let data: Vec<String> = cached.iter().map(|raw_data| {
-            //                     get_dorado_input_string(
-            //                         raw_data.to_vec(),
-            //                         channel,
-            //                         number,
-            //                         calibration.offsets[channel_index],
-            //                         calibration.pa_ranges[channel_index],
-            //                         calibration.digitisation,
-            //                         sample_rate
-            //                     )
-            //                 }).collect();
-                            
-
-            //                 pipeline_stdin.write_all(data.concat().as_bytes()).await.expect("Failed to write to pipeline standard input");
-                            
-            //                 // No response is sent
-            //                 continue;
-            //             }
-            //         }
-            //     }
-        
-
-
         // =========================
         // Process stream processing
         // =========================
-
-        // Async queue to yield decision responses into the stream
         
-        // SAM or FASTQ output from Dorado
-        let sam_output = match self.config.dori.classifier { 
-            Classifier::Minimap2Dorado => true,
-             _ => false 
-        };
-
-
         tokio::spawn(async move {
 
             // Build the mm2 aligner for testing
@@ -496,123 +308,85 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
                 // let dynamic_mapping_config = dynamic_mapping_config_stream.lock().await; 
 
-                match sam_output {
-                    // FASTQ OUTPUT FROM DORADO - UNBLOCKS ALL
-                    false => {
+                if line_counter == 0 {
 
-                        if line_counter == 0 {
+                    // Parse
+                    let identifiers: Vec<&str> = line.split("::").collect();
 
-                            // Parse
-                            let identifiers: Vec<&str> = line.split("::").collect();
+                    current_id = identifiers[0].trim_start_matches("@").to_string();
+                    current_channel = identifiers[1].parse::<u32>().unwrap();
+                    current_number = identifiers[2].parse::<u32>().unwrap();
 
-                            current_id = identifiers[0].trim_start_matches("@").to_string();
-                            current_channel = identifiers[1].parse::<u32>().unwrap();
-                            current_number = identifiers[2].parse::<u32>().unwrap();
+                    line_counter += 1;
+
+                } else {
+                    if line_counter == 3 {
+                        // Reset line counter of FASTQ
+                        line_counter = 0;
+                    } else if line_counter == 1 {
+                        
+                        // Get the sequence and align it in async thread
+
+                        // let response_tx = decision_tx.clone();
+                        // let aligner_clone = aligner.clone();
+                        // let c = current_channel.clone();
+                        // let n = current_number.clone();
+                        
+                        if run_config_2.readuntil.unblock_all_basecaller {
+                            
+                            log::info!("Unblocking reads from basecaller: {} {}", &current_channel, &current_number);
+                            decision_tx.send(StreamfishResponse { 
+                                channel: current_channel, 
+                                number: current_number, 
+                                decision: unblock_decision
+                            }).await.expect("Failed to send decision response to queue");
+                            uncache_tx.send(current_id.clone()).await.expect("Failed to send uncache identifier to queue");
 
                             line_counter += 1;
-
-                        } else {
-                            if line_counter == 3 {
-                                // Reset line counter of FASTQ
-                                line_counter = 0;
-                            } else if line_counter == 1 {
-                                
-                                // Get the sequence and align it in async thread
-
-                                // let response_tx = decision_tx.clone();
-                                // let aligner_clone = aligner.clone();
-                                // let c = current_channel.clone();
-                                // let n = current_number.clone();
-                                
-                                if run_config_2.readuntil.unblock_all_basecaller {
-                                    
-                                    log::info!("Unblocking reads from basecaller: {} {}", &current_channel, &current_number);
-                                    decision_tx.send(DoradoCacheResponse { 
-                                        channel: current_channel, 
-                                        number: current_number, 
-                                        decision: unblock_decision
-                                    }).await.expect("Failed to send decision response to queue");
-                                    uncache_tx.send(current_id.clone()).await.expect("Failed to send uncache identifier to queue");
-
-                                    line_counter += 1;
-                                    continue;
-                                }
-
-                                let mappings = aligner.map(line.as_bytes(), false, false, None, None).expect("Failed to map read");
-                                
-                                // log::info!("{:?}", mappings);
-
-                                if run_config_2.readuntil.unblock_all_mapper {
-                                    
-                                    decision_tx.send(DoradoCacheResponse { 
-                                        channel: current_channel, 
-                                        number: current_number, 
-                                        decision: unblock_decision
-                                    }).await.expect("Failed to send decision response to queue");
-
-                                    uncache_tx.send(current_id.clone()).await.expect("Failed to send uncache identifier to queue");
-
-                                    line_counter += 1;
-                                    continue;
-                                }
-
-                                // log::info!("{:?}", line);
-
-                                // DO NOT LOG THE MAPPINGS OR USE BORROWS ON THEM - FOR SOME ULTRA ARCANE REASON THIS BRAKES EVERYTHING
-
-                                // MAYBE THIS IS MUSL BUILD RELATED? I THINK IT IS - NORMAL X86_64 BUILDS DO NOT RUN WILD EXCEPT FOR MISCONFIGURED EXPERIMENTS
-                                
-                                let decision = mapping_config.decision_from_mapping(mappings);
-
-                                if decision == stop_decision || decision == unblock_decision {
-                                    uncache_tx.send(current_id.clone()).await.expect("Failed to send uncache identifier to queue");
-                                }
-                               
-                                decision_tx.send(DoradoCacheResponse { 
-                                    channel: current_channel, 
-                                    number: current_number, 
-                                    decision: decision
-                                }).await.expect("Failed to send decision response to queue");
-
-                                line_counter += 1;
-
-                            } else {
-                                line_counter += 1;
-                            }
+                            continue;
                         }
-                    },
-                    true => {
-                        // SAM OUTPUTS USING MINIMAP2-DORADO - REDUCED LATENCY WITH SMALL REFERENCE INDEX
-                        // 
-                        // !WARNING! - WHEN STREAMING STDIN/STDOUT DORADO ALIGNMENT IS UNSTABLE WITH LARGER REFERENCE INDICES - !WARNING!
-                        //
-                        // Weirdly, instability also occurs when providing no reference but emitting SAM (--emit-sam) - something may
-                        // be interacting with my hacky stream implementation of Dorado.
-                        //
-                        // Actually now that the decision queue and threaded parser are implemented it appears that the responses with
-                        // Dorado SAM are also stable with larger reference indices - maybe in these async streams, we need to always
-                        // use the queues and thread the output parser?
 
-                        if line.starts_with('@') { 
-                            continue; 
-                        }
-                        let content: Vec<&str> = line.split('\t').collect();
-                        let identifiers: Vec<&str> = content[0].split("::").collect();
-
-                        let flag = content[1].parse::<u32>().unwrap();
-                        let tid = content[2];
+                        let mappings = aligner.map(line.as_bytes(), false, false, None, None).expect("Failed to map read");
                         
-                        let decision = mapping_config.decision_from_sam(&flag, tid);
+                        // log::info!("{:?}", mappings);
 
-                        log::info!("mapped={:<21} flag={:<4} action={:<1} ", tid, &flag, &decision);
+                        if run_config_2.readuntil.unblock_all_mapper {
+                            
+                            decision_tx.send(StreamfishResponse { 
+                                channel: current_channel, 
+                                number: current_number, 
+                                decision: unblock_decision
+                            }).await.expect("Failed to send decision response to queue");
 
-                        decision_tx.send(DoradoCacheResponse { 
-                            channel: identifiers[1].parse::<u32>().unwrap(), 
-                            number: identifiers[2].parse::<u32>().unwrap(), 
-                            decision
+                            uncache_tx.send(current_id.clone()).await.expect("Failed to send uncache identifier to queue");
+
+                            line_counter += 1;
+                            continue;
+                        }
+
+                        // log::info!("{:?}", line);
+
+                        // DO NOT LOG THE MAPPINGS OR USE BORROWS ON THEM - FOR SOME ULTRA ARCANE REASON THIS BRAKES EVERYTHING
+
+                        // MAYBE THIS IS MUSL BUILD RELATED? I THINK IT IS - NORMAL X86_64 BUILDS DO NOT RUN WILD EXCEPT FOR MISCONFIGURED EXPERIMENTS
+                        
+                        let decision = mapping_config.decision_from_mapping(mappings);
+
+                        if decision == stop_decision || decision == unblock_decision {
+                            uncache_tx.send(current_id.clone()).await.expect("Failed to send uncache identifier to queue");
+                        }
+                        
+                        decision_tx.send(StreamfishResponse { 
+                            channel: current_channel, 
+                            number: current_number, 
+                            decision: decision
                         }).await.expect("Failed to send decision response to queue");
-                    },
-                    
+
+                        line_counter += 1;
+
+                    } else {
+                        line_counter += 1;
+                    }
                 }
             }
         });
@@ -633,237 +407,10 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         //     pipeline_response_stream, 
         // );
 
-        Ok(Response::new(Box::pin(pipeline_response_stream) as Self::DoradoCacheChannelStream))
+        Ok(Response::new(Box::pin(pipeline_response_stream) as Self::CacheStream))
 
     }
-
-    // Adaptive sampling with Dorado basecalling and request/read cache implementation - batched channel data transmission
-    async fn dorado_cache_batch(&self, request: Request<tonic::Streaming<DoradoCacheBatchRequest>>) -> Result<Response<Self::DoradoCacheBatchStream>, Status> {
-        
-        log::info!("Initiated Dori::AdaptiveSamplingService::DoradoCacheBatch RPC");
-
-        // Used in generators, needs distinct clones
-        let run_config_1 = self.config.clone();
-        let run_config_2 = self.config.clone();
-
-        // Experiment config - see how to update this one
-        let experiment = self.config.experiment.config.clone();
-
-        let mapping_config = match experiment {
-            Experiment::MappingExperiment(MappingExperiment::HostDepletion(host_depletion_config)) => host_depletion_config,
-            Experiment::MappingExperiment(MappingExperiment::TargetedSequencing(targeted_sequencing_config)) => targeted_sequencing_config,
-            Experiment::MappingExperiment(MappingExperiment::UnknownSequences(unknown_config)) => unknown_config
-        };
-
-        // Define the decisions as <i32> - repeated into() calls in the stream processing
-        // loops introduce a tiny bit of latency! Make sure calls like this are minimized.
-        
-        // Action sent to MinKNOW
-        let stop_decision: i32 = Decision::StopData.into();
-        let unblock_decision: i32 = Decision::Unblock.into();
-
-        // Request types
-        let init_request: i32 = DoradoCacheRequestType::Init.into();
-        let cache_request: i32 = DoradoCacheRequestType::Cache.into();
-
-        // Connection to MinKNOW to obtain device calibration data
-        let minknow_client = MinKnowClient::connect(
-            &self.config.minknow, &self.config.icarust
-        ).await.expect("Failed to connect to MinKNOW");
-
-        let (sample_rate, calibration) = minknow_client.get_device_data(
-            &self.config.readuntil.device_name, 
-            &self.config.readuntil.channel_start,  
-            &self.config.readuntil.channel_end
-        ).await.expect("Failed to get device calibration from MinKNOW");
-        
-        // Use channel specific caches due to not having to use a string value for lookup
-        let mut channel_caches: Vec<HashMap<u32, Vec<Vec<u8>>>> = Vec::new();
-
-        for _ in 0..self.config.readuntil.channel_end {
-            channel_caches.push(HashMap::new())
-        }
-        
-        // ======================
-        // Pipeline process setup
-        // ======================
-
-        let (mut pipeline_stdin, mut pipeline_stdout) = init_pipeline(&self.config);
-
-        // =========================
-        // Request stream processing
-        // =========================
-     
-        // DO NOT PUT STREAM GENERATOR INTO DISTINCT FUNCTION - SEVERELY IMPACTS LATENCY (> 100 bp)
-
-        let mut request_stream = request.into_inner();
-        
-        let request_response_stream = async_stream::try_stream! {
-    
-            while let Some(dorado_request) = request_stream.next().await {
-                let dorado_request = dorado_request?;
-                
-                let request_type = dorado_request.request;
-    
-                if request_type == init_request {
-                    // No action, continue and wait for data stream
-                    log::info!("Waiting {} seconds for pipeline initialisation ...", &run_config_1.readuntil.init_delay);
-                    tokio::time::sleep(tokio::time::Duration::new(run_config_1.readuntil.init_delay, 0)).await;
-                    continue;
-                }
-    
-                // Per channel processing
-                for (channel, read_data) in dorado_request.channels {
-    
-                    let channel_index = (channel-1) as usize; // need to cast
-                    let read_cache = &mut channel_caches[channel_index];
-                    
-                    // Boolean value is just placeholer for `prost` syntax around `oneof`
-                    if request_type == cache_request {
-                        // If the request is a remove-read-from-cache request, do this
-                        // before any further processing - this gets around the mutable
-                        // borrow issue below and allows for other decisions to send
-                        // cache removal requests later
-                        log::debug!("Received remove from cache request: {} {}", &channel, &read_data.number);
-                        read_cache.remove(&read_data.number);
-    
-                        continue;
-    
-                    } else {
-    
-                        let number = read_data.number;
-    
-                        // Find cached read or insert new one, update the cache with the current read
-                        read_cache.entry(read_data.number).or_insert(Vec::new()).push(read_data.raw_data);
-    
-                        // Get the updated read and the number of chunks in the cache
-                        let cached = read_cache.get(&number).expect("Failed to get data from channel cache");
-                        let num_chunks = cached.len();
-    
-                        if num_chunks < run_config_1.readuntil.read_cache_min_chunks {
-                            // If we have less chunks than the minimum number required
-                            // send a continue response for more data acquisition on 
-                            // this read (no action)
-                            continue;
-    
-                        } else if num_chunks > run_config_1.readuntil.read_cache_max_chunks {
-                            // If we have reached the maximum chunks in cache,
-                            // do not process and send a stop response for
-                            // ceasing data acquisition. This will also send
-                            // a remove from cache request as we cannot do this
-                            // below because of the required mutable borrow of the cache
-    
-                            // read_cache.remove(&number); not possible!
-                            log::info!("Sending stop data decision: {} {} (chunks = {})", &channel, &number, &num_chunks);
-
-                            yield  DoradoCacheResponse { 
-                                channel, 
-                                number,
-                                decision: stop_decision
-                            }
-    
-                        } else {
-                            // If we have an acceptable number of chunks between the limits, process 
-                            // the read by concatenating the chunks and sending it into the basecall
-                            // and alignment pipeline 
-
-
-                            // If unblock-all testing is active, send
-                            // response after channel cache decisions
-                            if run_config_1.readuntil.unblock_all_server {
-                                yield DoradoCacheResponse { 
-                                    channel, 
-                                    number,
-                                    decision: unblock_decision
-                                }
-                            } else {
-                                log::debug!("Processing cached read: {} {} (chunks = {})", &channel, &number, &num_chunks);
-    
-                                let data: Vec<String> = cached.iter().map(|raw_data| {
-                                    get_dorado_input_string(
-                                        "dori".to_string(),
-                                        raw_data.to_vec(),
-                                        channel,
-                                        number,
-                                        calibration.offsets[channel_index],
-                                        calibration.pa_ranges[channel_index],
-                                        calibration.digitisation,
-                                        sample_rate
-                                    )
-                                }).collect();
-        
-                                pipeline_stdin.write_all(data.concat().as_bytes()).await?;
-        
-                                // Send a none decision response to take no action after writing into process
-                                // this response is mainly for logging 
-                                continue;
-                            }
-                            
-                        }
-                    }
-                }
-            }
-        };
-        
-
-        // =========================
-        // Process stream processing
-        // =========================
-
-        let sam_output = true;
-        let pipeline_response_stream = async_stream::try_stream! {
-
-            while let Some(line) = pipeline_stdout.next().await {
-                let line = line?;
-
-                match sam_output {
-                    // SAM HEADER OUTPUTS - MAPPING CONFIGURATION
-                    true => {
-                        if line.starts_with('@') { 
-                            continue; 
-                        }
-                        let content: Vec<&str> = line.split('\t').collect();
-                        let identifiers: Vec<&str> = content[0].split("::").collect();
-
-                        let flag = content[1].parse::<u32>().unwrap();
-                        let tid = content[2];
-
-                        let decision = match run_config_2.readuntil.unblock_all_mapper {
-                            true => unblock_decision,
-                            false => mapping_config.decision_from_sam(&flag, tid)
-                        };
-
-                        log::info!("mapped={:<21} flag={:<4} action={:<1} targets={:?}", tid, &flag, &decision, mapping_config.targets);
-
-                        yield DoradoCacheResponse { 
-                            channel: identifiers[1].parse::<u32>().unwrap(), 
-                            number: identifiers[2].parse::<u32>().unwrap(), 
-                            decision
-                        }
-                    },
-                    // FASTQ THROUGHPUT FOR TESTING - UNBLOCKS ALL
-                    false =>  {
-                        continue                        
-                    }
-                }
-        }
-        };
-
-
-        // =========================
-        // Response stream merge
-        // =========================
-
-        let response_stream = futures::stream::select(
-            request_response_stream,
-            pipeline_response_stream, 
-        );
-
-        Ok(Response::new(Box::pin(response_stream) as Self::DoradoCacheBatchStream))
-    }
-
 }
-
 
 // Initiates the process pipeline from configuration
 fn init_pipeline(config: &StreamfishConfig) -> (ChildStdin, Lines<BufReader<ChildStdout>>) {
@@ -893,9 +440,7 @@ fn init_pipeline(config: &StreamfishConfig) -> (ChildStdin, Lines<BufReader<Chil
 
 
 
-use byteorder::{LittleEndian, ByteOrder};
-
-pub fn get_dorado_input_string(id: String, raw_data: Vec<u8>, channel: u32, number: u32, offset: f32, range: f32, digitisation: u32, sample_rate: u32) -> String {
+pub fn get_dorado_input_string(id: String, raw_data: Vec<u8>, chunks: usize, channel: u32, number: u32, offset: f32, range: f32, digitisation: u32, sample_rate: u32) -> String {
 
     // UNCALBIRATED SIGNAL CONVERSON BYTES TO SIGNED INTEGERS
     let mut signal_data: Vec<i16> = Vec::new();
@@ -903,27 +448,5 @@ pub fn get_dorado_input_string(id: String, raw_data: Vec<u8>, channel: u32, numb
         signal_data.push(LittleEndian::read_i16(&raw_data[i..]));
     }
 
-    // TODO CHECK EFFECTS: Float formatting precision - POD5 inspection suggest 13 digits for range (PYTHON) - not sure if necessary
-    //
-    // We are not using read identifiers, just the channel and numbers - this saves allocation of Strings but means we have to trace outputs by channel/number if 
-    // for example cross reference with standard Guppy basecalls - we should not end up doing this because we will evaluate on Dorado calls from BLOW5/POD5 and can
-    // modify the identifiers there.
-    //
-    // This adds a change to the Dorado input stream processing where we did this before by concatenating the channel::number to the read identifier
-    // chich is now removed in commit: f08d3aed27818e44d1637f76e8b9cb00c7c79a6b on branch `dori-stdin-v0.3.1` - no changes to output parsing functions necessary
-    format!("{}::{}::{} {} {} {} {:.1} {:.11} {} {}\n", id, channel, number, channel, number, digitisation, offset, range, sample_rate, join(&signal_data, " ")) 
+    format!("{}::{}::{}::{} {} {} {} {:.1} {:.11} {} {}\n", id, channel, number, chunks, channel, number, digitisation, offset, range, sample_rate, join(&signal_data, " ")) 
 }
-
-// impl DoradoStreamRequest {
-//     pub fn to_stdin(&self, offset: f32, range: f32, digitisation: u32, sample_rate: u32) -> String {
-
-//         // UNCALBIRATED SIGNAL CONVERSON BYTES TO SIGNED INTEGERS
-//         let mut signal_data: Vec<i16> = Vec::new();
-//         for i in (0..self.data.len()).step_by(2) {
-//             signal_data.push(LittleEndian::read_i16(&self.data[i..]));
-//         }
-
-//         // TODO CHECK EFFECTS: Float formatting precision - POD5 inspection suggest 13 digits for range (PYTHON) - not sure if necessary
-//         format!("{} {} {} {} {:.1} {:.11} {} {}\n", self.id, self.channel, self.number, digitisation, offset, range, sample_rate, join(&signal_data, " ")) 
-//     }
-// }

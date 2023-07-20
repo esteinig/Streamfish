@@ -55,7 +55,7 @@ We further configure the control server using the setup action request and set a
 **Icarust control server**: configuration of the `Icarust` simulation mirrors those of the initital `MinKNOW` play-back run. We retained the default `break_reads_after_seconds` equivalent parameter `break_reads_ms=400` (0.4. seconds) and set the channel sequencing to 512 to emulate a MinION flowcell. In addition, we set `working_pore_percent=25` to simulate a low-occupancy flowcell comparable to the play-back run in `MinKNOW`. The experiment we configured was a two-bacterial default experiments using the R9.4.1 squiggle arrays provided for *Pseudomonas aeruginosa* () and *Bacillus anthracis* () which we implemented with 4000 bp mean read length distributions. Since all reads are immediately unblocked and our evaluation considered only latency comparisons of unblocked reads (no basecalls, alignments, decision logic implemented) the chosen organism was not of relevance, except to provide sufficient mean read lengths for unblock calls to occurr in case of high latency. We describe additional `Icarust` configurations for in-depth analysis in the benchmark experiments section, and refer to this configuration only in the initial comparison to `MinKNOW`.
 
 
-**Readfish cient**: we used the default 
+**Readfish client**: we used the default 
 
 
 
@@ -72,7 +72,7 @@ We further configure the control server using the setup action request and set a
 
 #### Baseline 
 
-1. Experiment baselines run to show that long-running unblocked distributions are equivalent to short-running ones - justifies usign short test runs for parameter optimization and exploration.
+1. Experiment baselines run to show that long-running unblocked distributions are equivalent to short-running ones - justifies using short test runs for parameter optimization and exploration.
 
 #### Preliminary
 
@@ -84,8 +84,4 @@ We further configure the control server using the setup action request and set a
 
 
 
-
-
-
 ## Supplementary Data
-

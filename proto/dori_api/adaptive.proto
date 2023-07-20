@@ -6,43 +6,24 @@ import "minknow_api/data.proto";
 
 // Basecall reads streamed from the Streamfish::ReadUntilClient
 //
-// This service implements a single endpoint to basecall and align reads with Dorado,
-// as there is not available server implementation (for now) and it is not clear if  
-// the proposed "drop-in" by ONT is going to be more transparent in how things work
-// than the annopying Guppy server implementations.
-//
-// The idea behind this is that we build a bi-directional streaming endpoint that
-// runs a modified version of Dorado that takes in raw data from the endpoint
-// through a standard input stream and processes reads as they arrive - this is
-// different than the batch-wise implementation for example in Readfish and the
-// ONT implementation.
-//
 // Since 1.0
 service AdaptiveSampling {
   
-  // A version of the Dorado pipeline that implements a request [read] cache that allows
-  // for using multiple chunks of sampled raw data to be processed in a streaming fashion
-  // which is slightly different than the batched processing with cache in Readfish.
-  rpc DoradoCacheBatch(stream DoradoCacheBatchRequest) returns (stream DoradoCacheResponse) { }
-
-
-  rpc DoradoCacheChannel(stream DoradoCacheChannelRequest) returns (stream DoradoCacheResponse) { }
-
+  rpc Cache(stream StreamfishRequest) returns (stream StreamfishResponse) { }
 
   // A version of the Dorado pipeline that implements single chunk stream logic which is
   // leaner and has less latency than the cached version, but may require improvements
   // in processing basecalled sequences for decision making due to smaller alignments
   // - this is mainly for comparison to the cached version and running experiments
   // leading up to the signal classification implementation 
-  rpc DoradoStream(stream DoradoStreamRequest) returns (stream DoradoStreamResponse) { }
+  rpc Stream(stream StreamfishRequest) returns (stream StreamfishResponse) { }
 
 }
 
 
-enum DoradoCacheRequestType {
+enum RequestType {
   INIT = 0;
   DATA = 1;
-  CACHE = 2;
 }
 
 
@@ -53,32 +34,11 @@ enum Decision {
   NONE = 3;
 }
 
-
-// Streaming as batch
-message DoradoCacheBatchRequest {
-  
-
-  // Type of request being made
-  DoradoCacheRequestType request = 1;
-
-  // Any uncalibrated channel data from the data stream
-  map<uint32, minknow_api.data.GetLiveReadsResponse.ReadData> channels = 2;
-
-  // Channel for cache request
-  uint32 channel = 3;
-
-  // Number for cache request
-  uint32 number = 4;
-
-
-}
-
 // Streaming by channel
-message DoradoCacheChannelRequest {
+message StreamfishRequest {
   
-
   // Type of request being made
-  DoradoCacheRequestType request = 1;
+  RequestType request = 1;
 
   // Data for a particular channel
   bytes data = 2;
@@ -94,7 +54,7 @@ message DoradoCacheChannelRequest {
 
 }
 
-message DoradoCacheResponse { 
+message StreamfishResponse { 
 
   // The number of the read in the channel returned in `minknow_api.data.GetLiveReadsResponse.ReadData.number` 
   uint32 number = 1;
@@ -104,37 +64,5 @@ message DoradoCacheResponse {
 
   // Action decision for client to act on
   Decision decision = 3;
-
-}
-
-message DoradoStreamRequest {
-  
-  // The ID of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData` 
-  string id = 1;
-
-  // The number of the read in the channel returned in `minknow_api.data.GetLiveReadsResponse.ReadData.number` 
-  uint32 number = 2;
-
-  // The channel of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData.channels` 
-  uint32 channel = 3;
-
-  // Array of raw data values returned in `minknow_api.data.GetLiveReadsResponse.ReadData` 
-  //
-  // Raw data values must be UNCALIBRATED as set in `minknow_api.data.GetLiveReadsRequest.RawDataType` 
-  bytes data = 4;
-
-}
-
-message DoradoStreamResponse { 
-
-  // The number of the read in the channel returned in `minknow_api.data.GetLiveReadsResponse.ReadData.number` 
-  uint32 number = 1;
-
-  // The channel of the read returned in `minknow_api.data.GetLiveReadsResponse.ReadData.channels` 
-  uint32 channel = 2;
-
-  // Action decision for client to act on
-  Decision decision = 4;
-
 
 }

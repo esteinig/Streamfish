@@ -1,10 +1,5 @@
 """
-I'm not sure whether Dorado performs as well as the Guppy server with the (hacky) streaming input. There are plans to
-provide a (hopefully open-source) drop-in client for a Dorado server. All in all, it might be a good idea to at least
-test a simple Guppy implementation that - unfortuantely - runs through Python, which implements the C++ client, and is
-in this case called as a process script in the pipeline as drop-in for the default Dorado process IO.
-
-Let's see if this works...
+Important to run the --device cuda:all:100% option on the server!
 """
 
 import sys
@@ -36,7 +31,7 @@ def guppy_client(
             8, help="Client threads"  # important, test this
         ),
         max_reads_queued: int = typer.Option(
-            4096, help="Maximum number of reads in queue"
+            256, help="Maximum number of reads in queue"
         ),
 ):
     """
@@ -76,7 +71,7 @@ def guppy_client(
                     daq_scaling=float(line[5]) / float(line[3])
                 )   
 
-                success = client.pass_read(input_data)
+                success = caller.pass_read(input_data)
 
                 read_count += 1
 
