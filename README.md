@@ -22,7 +22,9 @@ Low-latency adaptive sampling using asynchroneous streams and RPC.
 
 I wanted to better understand how the adaptive sampling mechanics work. Streamfish started as a side project to re-implement the [`ReadUntil API`](https://github.com/nanoporetech/read_until_api) and parts of the [`Minknow API`](https://github.com/nanoporetech/minknow_api/tree/master/proto/minknow_api) in Rust.
 
-While Streamfish approaches the adaptive sampling mechanics from a slightly different angle than [Readfish](https://github.com/LooseLab/Readfish), it implements many of the principles explored by the [LooseLab](https://github.com/LooseLab). You could consider Streamfish a highly experimental derivative of Readfish. Please cite the [Readfish publication] if - for whatever arcane reason - you should use Streamfish for your research. It is very much recommended **not** to use it for real sequencing runs, unless you are swimming in money or something.
+While Streamfish approaches the adaptive sampling mechanics from a slightly different angle than [Readfish](https://github.com/LooseLab/Readfish), it implements many of the principles explored by the [LooseLab](https://github.com/LooseLab). You could consider Streamfish a highly experimental derivative of Readfish.
+
+It is very much recommended **not** to use it for real sequencing runs, unless you are swimming in money or something.
 
 ## Features
 
