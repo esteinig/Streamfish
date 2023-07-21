@@ -20,7 +20,7 @@ Low-latency adaptive sampling using asynchroneous streams and RPC.
 
 ## Motivation
 
-I wanted to better understand how the adaptive sampling mechanics work. Streamfish started as a side project to re-implement the [`ReadUntil API`](https://github.com/nanoporetech/read_until_api) and parts of the [`Minknow API`](https://github.com/nanoporetech/minknow_api/tree/master/proto/minknow_api) in Rust.
+I wanted to better understand how the adaptive sampling mechanics work. Streamfish started as a side project to re-implement the [ReadUntil API](https://github.com/nanoporetech/read_until_api) and parts of the [Minknow API](https://github.com/nanoporetech/minknow_api/tree/master/proto/minknow_api) in Rust.
 
 While Streamfish approaches the adaptive sampling mechanics from a slightly different angle than [Readfish](https://github.com/LooseLab/Readfish), it implements many of the principles explored by the [LooseLab](https://github.com/LooseLab). You could consider Streamfish a highly experimental derivative of Readfish.
 
@@ -33,8 +33,8 @@ It is very much recommended **not** to use it for real sequencing runs, unless y
 * `Guppy` and `Dorado` implementations, configurablefor for multiple GPUs
 * Adaptive sampling experiment for depletion, targeted sequencing, coverage balancing and unknown sequences
 * Experiment testing and latency optimization runners using [`Icarust`](https://github.com/LooseLab/Icarust)
-* "Slice-an-dice" partioning of flow cells using multiple clients for latency optimization and high throughput
-* Dynamic adaptive sampling feedback loops for experimental condition switches
+* "Slice-an-dice" partitioning of flow cells for high throughput latency optimization using multiple clients
+* Dynamic adaptive sampling feedback loops for experimental condition switches and "slow" real-time analysis
 
 ## Documentation
 
@@ -54,7 +54,7 @@ This is an experimental version. **It is not user-friendly**.
 
 ## Resources
 
-I have mainly tested this system on a gaming computer running Ubuntu 20.04 LTS with 16 threads (AMD), NVIDIA GTX 3060 12GB RAM with drivers supporting CUDA 11.4 or higher (configured in container) and 48 GB RAM. `Streamfish` client and server run their asynchroneous routines on a single thread. However, basecalling and reference mapping require some more resources depending on the throughput and experiment configuration you want to run.
+I have mainly tested this system on a gaming computer running Ubuntu 20.04 LTS with 16 threads (AMD), NVIDIA GTX 3060 12GB RAM with drivers supporting CUDA 11.4 or higher (configured in container) and 48 GB RAM. Streamfish client and server run their asynchroneous routines on a single thread. However, basecalling and reference mapping require some more resources depending on the throughput and experiment configuration you want to run.
 
 ## Quick start
 
