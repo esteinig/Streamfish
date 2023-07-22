@@ -10,12 +10,13 @@ Low-latency adaptive sampling using asynchroneous streams and RPC.
 ## Table of contents
 
 1. [Motivation]()
-2. [Features]()
-3. [Documentation]()
+2. [Documentation]()
+3. [Features]()
 4. [Warnings]()
 5. [System requirements]()
 6. [Installation]()
-8. [Dependencies]()
+7. [Dependencies]()
+8. [Schematics]()
 
 ## Motivation
 
