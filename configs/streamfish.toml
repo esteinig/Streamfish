@@ -10,7 +10,7 @@ token                                   = 'ea953950-a67e-405b-ab3f-82bd728d0105'
 certificate                             = '/opt/ont/minknow/conf/rpc-certs/ca.crt'
 
 [icarust]       
-enabled                                 = true
+enabled                                 = true                                                               # uses minknow configurtation for host, port, certificate
 position_port                           = 10001
 sample_rate                             = 4000
 
@@ -20,43 +20,49 @@ tcp_host                                = '0.0.0.0'                             
 tcp_port                                = 10002
 uds_path                                = '/tmp/.dori/socket'
 uds_override                            = true
-minknow_host                            = "minknow_host"                                                     # Host ports forwarded inside container
-minknow_port                            = 10000                                                              # Manager service port inside container
-classifier                              = "minimap2-rs"                                                      # minimap2-rs | kraken2 | minimap2-dorado (instable)
-basecaller                              = "guppy"                                                            # guppy | dorado (instable)
-basecaller_path                         = "/home/esteinig/micromamba/envs/guppy/bin/python"
-basecaller_stderr                       = "/tmp/dori.pipeline.stderr"
+minknow_host                            = "127.0.0.1"                                                        # Host ports forwarded to container: minknow_host
+minknow_port                            = 10000                                                              # Manager service port on: minknow_host
+classifier                              = "minimap2-rs"                                                      # minimap2-rs | kraken2 
+basecaller                              = "guppy"                                                            # guppy 
+stderr_log                              = "/tmp/dori.stderr"
 
-[guppy]
-client_path                             = "/usr/src/streamfish/scripts/guppy/guppy_client.py"
-# client_throttle                         = 0.01
-# client_threads                          = 8
-# client_max_reads_queued                 = 256
 
-server_address                          = "ipc:///tmp/.guppy_local/5556"
-server_config                           = "dna_r9.4.1_450bps_fast"
-# server_callers                          = 4
-# server_chunk_size                       = 160
-# server_ipc_threads                      = 8
-# server_runners                          = 8
+[guppy.client]
+path                                    = "/data/opt/conda/envs/guppy/bin/python" # "/home/esteinig/micromamba/envs/guppy/bin/python" # 
+script                                  = "/data/dev/meta-gp/reefsquid/scripts/guppy/guppy_client.py" # "/usr/src/streamfish/scripts/guppy/guppy_client.py"  # 
+address                                 = "ipc:///tmp/.guppy_local/5556"
+config                                  = "dna_r9.4.1_450bps_fast"
+throttle                                = 0.01
+threads                                 = 8
+max_reads_queued                        = 256
 
+[guppy.server]
+path                                    = "/opt/ont/guppy/bin/guppy_basecall_server" 
+port                                    = "/tmp/.guppy_local/5556"
+config                                  = "dna_r9.4.1_450bps_fast.cfg"
+callers                                 = 4
+chunks                                  = 160
+threads                                 = 8
+runners                                 = 8
+device                                  = "cuda:all"
+log_path                                = "/tmp/guppy.log"
+stderr_log                              = "/tmp/guppy.stderr"
 
 [minimap]
-reference                               = '/tmp/viruses.mmi'
-min_match_len                           = 0                                                                  # minimum matched mapping length for `minimap2-rs`
+reference                               = '/tmp/chm13v2_ont.mmi'
 
 [readuntil]
 device_name                             = "MS12345"
-channels                                = 512
+channels                                = 1024
 channel_start                           = 1
-channel_end                             = 512
+channel_end                             = 1024
 init_delay                              = 10
 dori_tcp_host                           = 'dori-dev'                                                         # 'dori-dev' when running client inside container to connect to networked 'dori-dev' container, otherwise 'localhost' (port forwarded from inside container)
 dori_tcp_port                           = 10002                                                              # '10002' when running client inside container, otherwise '10002' (port forwarded from inside container) - no changes necessary, should match `dori.tcp_port`
 read_cache                              = true
 read_cache_batch_rpc                    = false
 read_cache_min_chunks                   = 1
-read_cache_max_chunks                   = 12                                                    
+read_cache_max_chunks                   = 3                                                    
 latency_log                             = "/tmp/latency.log"
 action_throttle                         = 0                                                                  # Streaming actions (= 0) or batched actions (> 0) - in milliseconds
 unblock_duration                        = 0.1
@@ -64,9 +70,12 @@ sample_minimum_chunk_size               = 200
 accepted_first_chunk_classifications    = [83, 65]
 unblock_all                             = false
 unblock_all_mode                        = "mapper"
+launch_dori_server                      = true
+launch_basecall_server                  = true
 
 [experiment]  
 control                                 = false
 mode                                    = 'mapping'
 type                                    = 'targeted_sequencing'
-targets                                 = ["NC_063383.1"]                                                    # leave empty to target all sequences "NC_063383.1"
+targets                                 = ["chr1"]                                                    # leave empty to target all sequences "NC_063383.1"
+min_match_len                           = 0                                                                  # minimum matched mapping length for `minimap2-rs`

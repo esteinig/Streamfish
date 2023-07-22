@@ -3,16 +3,13 @@
 
 use thiserror::Error;
 use std::collections::HashMap;
-use tonic::transport::{ClientTlsConfig, Certificate, Channel};
-
-
+use crate::config::IcarustConfig;
+use crate::client::error::ClientError;
 use crate::client::services::data::DataClient;
 use crate::client::services::manager::ManagerClient;
-use crate::config::IcarustConfig;
-use crate::{config::MinKnowConfig, services::minknow_api::manager::FlowCellPosition};
-
-use super::services::device::{DeviceClient, DeviceCalibration};
-
+use tonic::transport::{ClientTlsConfig, Certificate, Channel};
+use crate::client::services::device::{DeviceClient, DeviceCalibration};
+use crate::{config::MinknowConfig, services::minknow_api::manager::FlowCellPosition};
 
 
 #[derive(Error, Debug)]
@@ -63,18 +60,18 @@ impl ActivePositions {
 
 #[derive(Debug, Clone)]
 // Main client for the MinKnow API
-pub struct MinKnowClient{
+pub struct MinknowClient{
     pub tls: ClientTlsConfig,
-    pub config: MinKnowConfig,
+    pub config: MinknowConfig,
     pub icarust: IcarustConfig,
     pub clients: ActiveClients,
     pub channels: ActiveChannels,
     pub positions: ActivePositions
 }
 
-impl MinKnowClient {
+impl MinknowClient {
 
-    pub async fn connect(config: &MinKnowConfig, icarust: &IcarustConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn connect(config: &MinknowConfig, icarust: &IcarustConfig) -> Result<Self, ClientError> {
 
         // When connecting to MinKnow we require a secure channel (TLS). However, we were getting 
         // an error through the underlying TLS certificate library, solution is documented here.
@@ -90,38 +87,37 @@ impl MinKnowClient {
         //
         //      https://github.com/rustls/rustls/issues/127
         //
-        // However, we need to modify the ClientTlsConfig in `tonic` to disable certificate verifiction.
+        // We need to modify the ClientTlsConfig in `tonic` to disable certificate verifiction, using
+        // this modified version of `tonic` which is available as a forkon my GitHub 
         //
-        // The insane thing is that this actually worked thanks to the commenter in the issue... holy fuck,
-        // this is such a hack. It now requires a modified version of `tonic` which is available as a fork
-        // on my GitHub (https://github.com/esteinig/tonic @ v0.9.2-r1)
+        //      https://github.com/esteinig/tonic @ v0.9.2-r1
 
-        let cert = std::fs::read_to_string(&config.tls_cert_path).expect(
-            &format!("Failed to read certificate from path: {}", &config.tls_cert_path.display()) 
+        let cert = std::fs::read_to_string(&config.certificate).expect(
+            &format!("Failed to read certificate from path: {}", &config.certificate.display()) 
         );
         let tls = ClientTlsConfig::new()
             .domain_name("localhost")
             .ca_certificate(Certificate::from_pem(cert));
 
-
         // ========================
         // ManagerClient Initiation 
         // ========================
 
-        log::info!("Connecting to: https://{}:{}", config.host, config.port);
+        log::info!("Connecting to control server on: https://{}:{}", config.host, config.port);
 
         // Establish a secure channel to the MinKnow manager service, that will be 
         // available throughout to request data from the manager service
+
         let manager_channel = Channel::from_shared(
             format!("https://{}:{}", config.host, config.port)
-        )?.tls_config(tls.clone())?.connect().await?;
+        ).map_err(|_| ClientError::InvalidUri)?
+         .tls_config(tls.clone())
+         .map_err( |_| ClientError::InvalidTls)?
+         .connect().await
+         .map_err(|_| ClientError::ControlServerConnectionInitiation)?;
 
         // Use a simple interceptor for authentication - this might have to be generalised
         // using `tower` middleware - but it's too complex for my simple brain right now.
-
-        // We clone the established channel (cheap, see below) and instantiate a new manger 
-        // service client, that allows us to send the implemented requests. This is a general
-        // patterns to create the client wrappers.
 
         log::info!("Channel established on: https://{}:{}", config.host, config.port);
         
@@ -150,33 +146,7 @@ impl MinKnowClient {
         let active_positions: HashMap<String, FlowCellPosition> = HashMap::from_iter(
             position_response.positions.iter().map(|p| (p.name.clone(), p.clone()))
         );
-        
-        // # Multiplexing requests [from Tonic]
-        //
-        // Sending a request on a channel requires a `&mut self` and thus can only send
-        // one request in flight. This is intentional and is required to follow the `Service`
-        // contract from the `tower` library which this channel implementation is built on
-        // top of.
-        //
-        // `tower` itself has a concept of `poll_ready` which is the main mechanism to apply
-        // back pressure. `poll_ready` takes a `&mut self` and when it returns `Poll::Ready`
-        // we know the `Service` is able to accept only one request before we must `poll_ready`
-        // again. Due to this fact any `async fn` that wants to poll for readiness and submit
-        // the request must have a `&mut self` reference.
-        //
-        // To work around this and to ease the use of the channel, `Channel` provides a
-        // `Clone` implementation that is _cheap_. This is because at the very top level
-        // the channel is backed by a `tower_buffer::Buffer` which runs the connection
-        // in a background task and provides a `mpsc` channel interface. Due to this
-        // cloning the `Channel` type is cheap and encouraged.
-        //
-        // Performance wise we have found you can get a decent amount of throughput by just
-        // clonling a single channel. Though the best comes when you load balance a few 
-        // channels and also clone them around (https://github.com/hyperium/tonic/issues/285)
-
-        // I may have to revisit this as the requests get more complex, e.g. on streaming 
-        // acquisition data or sending off reads for basecalling.
-    
+            
         Ok(Self {
             tls: tls.clone(),
             config: config.clone(),
@@ -213,9 +183,6 @@ impl MinKnowClient {
     // Opens a new channel to the requested position and logs the channel state stream into an async queue (one receiver, multiple sender) for testing
     pub async fn stream_channel_states_queue_log(&self, position_name: &str, first_channel: u32, last_channel: u32) -> Result<(), Box<dyn std::error::Error>> {
 
-        // Opens a new secure channel to the requested position RPC port and 
-        // issues the request to start streaming channel data
-
         let mut data_client = DataClient::from_minknow_client(&self, position_name).await?;
 
         let mut stream = data_client.stream_channel_states(
@@ -225,14 +192,6 @@ impl MinKnowClient {
             false,
             Some(prost_types::Duration { seconds: 1, nanos: 0 })  // 0.1 seconds = 100000000 ns
          ).await?;
-
-
-        // The channel will buffer up to the provided number of messages. Once the buffer is full, attempts to
-        // send new messages will wait until a message is received from the channel. All data sent on Sender 
-        // will become available on Receiver in the same order as it was sent. The Sender can be cloned to 
-        // send to the same channel from multiple code locations. Only one Receiver is supported. If the 
-        // Receiver is disconnected while trying to send, the send method will return a SendError. 
-        // Similarly, if Sender is disconnected while trying to recv, the recv method will return None.
         
         let (state_tx, mut state_rx) = tokio::sync::mpsc::channel(1000);
         

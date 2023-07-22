@@ -1,13 +1,10 @@
 
 
 
-use indoc::formatdoc;
 use minimap2::Mapping;
 use std::path::PathBuf;
-use clap::crate_version;
-use serde::Deserialize;
-
-use crate::services::{minknow_api::data::get_live_reads_request::RawDataType, dori_api::adaptive::Decision};
+use serde::{Deserialize, Deserializer};
+use crate::{services::{minknow_api::data::get_live_reads_request::RawDataType, dori_api::adaptive::Decision}, error::StreamfishError};
 
 fn get_env_var(var: &str) -> Option<String> {
     std::env::var(var).ok()
@@ -15,26 +12,26 @@ fn get_env_var(var: &str) -> Option<String> {
 
 // An exposed subset of configurable parameters for the user
 #[derive(Debug, Clone, Deserialize)]
-pub struct UserConfig  {
-    pub meta: UserConfigMetadata,
-    pub minknow: UserConfigMinknow,
-    pub icarust: UserConfigIcarust,
-    pub guppy: UserConfigGuppy,
-    pub dori: UserConfigDori,
-    pub minimap: UserConfigMinimap,
-    pub readuntil: UserConfigReadUntil,
-    pub experiment: UserConfigExperiment
+pub struct StreamfishConfig  {
+    pub meta: MetaConfig,
+    pub minknow: MinknowConfig,
+    pub icarust: IcarustConfig,
+    pub guppy: GuppyConfig,
+    pub dori: DoriConfig,
+    pub minimap: MinimapConfig,
+    pub readuntil: ReadUntilConfig,
+    pub experiment: ExperimentConfig
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct UserConfigMetadata {
+pub struct MetaConfig {
     pub name: String,
     pub version: String,
     pub description: String
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct UserConfigMinknow {
+pub struct MinknowConfig {
     pub port: i32,
     pub host: String,
     pub token: String,
@@ -43,31 +40,31 @@ pub struct UserConfigMinknow {
 
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct UserConfigIcarust {
+pub struct IcarustConfig {
     pub enabled: bool,
     pub position_port: u32,
-    pub sample_rate: u32
+    pub sample_rate: u32,
 }
 
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct UserConfigDori {
+pub struct DoriConfig {
+    
+    pub minknow_host: String,
+    pub minknow_port: u32,
+    pub classifier: Classifier,
+    pub basecaller: Basecaller,
     pub tcp_enabled: bool,
     pub tcp_port: u32,
     pub tcp_host: String,           // inside docker to expose must be 0.0.0.0
     pub uds_path: PathBuf,
     pub uds_override: bool,
-    pub minknow_host: String,
-    pub minknow_port: u32,
-    pub classifier: String,
-    pub basecaller: String,
-    pub basecaller_path: PathBuf,
-    pub basecaller_stderr: PathBuf
+    pub stderr_log: PathBuf,
 }
 
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct UserConfigReadUntil {
+pub struct ReadUntilConfig {
     pub init_delay: u64,
     pub device_name: String,
     pub channels: u32,              
@@ -84,30 +81,76 @@ pub struct UserConfigReadUntil {
     pub latency_log: Option<PathBuf>,
     pub unblock_duration: f64,
     pub sample_minimum_chunk_size: u64,
-    pub accepted_first_chunk_classifications: Vec<i32>
+    pub accepted_first_chunk_classifications: Vec<i32>,
+    pub launch_dori_server: bool,
+    pub launch_basecall_server: bool,
+
+    #[serde(skip_deserializing)]
+    pub unblock_all_client: bool,
+    #[serde(skip_deserializing)]
+    pub unblock_all_server: bool,
+    #[serde(skip_deserializing)]
+    pub unblock_all_basecaller: bool,
+    #[serde(skip_deserializing)]
+    pub unblock_all_mapper: bool,
+    #[serde(skip_deserializing)]
+    pub raw_data_type: RawDataType
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct UserConfigMinimap {
-    pub reference: PathBuf,
-    pub min_match_len: i32
+pub struct MinimapConfig {
+    pub reference: PathBuf
 }
 
 
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct UserConfigGuppy {
-    pub client_path: PathBuf,
-    pub server_address: String,
-    pub server_config: String,
+pub struct GuppyConfig {
+    pub client: GuppyClientConfig,
+    pub server: GuppyServerConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct UserConfigExperiment {
+pub struct GuppyClientConfig {
+    pub path: PathBuf,
+    pub script: PathBuf,
+    pub address: String,
+    pub config: String,
+    pub throttle: f32,
+    pub threads: u32,
+    pub max_reads_queued: u32,
+
+    #[serde(skip_deserializing)]
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GuppyServerConfig {
+    pub path: PathBuf,
+    pub port: String,
+    pub config: String,
+    pub callers: u32,
+    pub chunks: u32,
+    pub runners: u32,
+    pub threads: u32,
+    pub device: String,
+    pub log_path: PathBuf,
+    pub stderr_log: PathBuf,
+
+    #[serde(skip_deserializing)]
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExperimentConfig {
     pub control: bool,
     pub mode: String,
     pub r#type: String,
     pub targets: Vec<String>,
+    pub min_match_len: i32,
+
+    #[serde(skip_deserializing)]
+    pub experiment: Experiment
 }
 
 /// Unblock all circuits for testing
@@ -149,8 +192,8 @@ pub enum Basecaller {
 impl Basecaller {
     pub fn from_str(s: &str) -> Self {
         match s {
-            "dorado" => Self::Dorado,
-            "guppy" => Self::Guppy,
+            "dorado" => Basecaller::Dorado,
+            "guppy" => Basecaller::Guppy,
             _ => unimplemented!("Basecaller `{}` is not implemented", s)
         }
     }
@@ -161,18 +204,28 @@ impl Basecaller {
         }
     }
 }
+impl<'de> Deserialize<'de> for Basecaller {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where D: Deserializer<'de>
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(match s.as_str() {
+            "dorado" => Basecaller::Dorado,
+            "guppy" => Basecaller::Guppy,
+            _ => unimplemented!("Basecaller `{}` is not implemented", s)
+        })
+    }
+}
 
 /// Classifiers
 #[derive(Debug, Clone, PartialEq)]
 pub enum Classifier {
-    Minimap2Dorado,
     Minimap2Rust,
     Kraken2
 }
 impl Classifier {
     pub fn from_str(s: &str) -> Self {
         match s {
-            "minimap2-dorado" => Self::Minimap2Dorado,
             "minimap2-rs" => Self::Minimap2Rust,
             "kraken2" => Self::Kraken2,
             _ => unimplemented!("Classifier `{}` is not implemented", s)
@@ -180,290 +233,118 @@ impl Classifier {
     }
     pub fn as_str(&self) -> &str {
         match self {
-            Classifier::Minimap2Dorado => "minimap2-dorado",
             Classifier::Minimap2Rust => "minimap2-rs",
             Classifier::Kraken2 => "kraken2"
         }
     }
 }
-
-#[derive(Debug, Clone)]
-pub struct MinKnowConfig {
-    // Host address that runs MinKnow
-    pub host: String,
-    // Port of MinKnow manager service [9502]
-    pub port: i32,
-    // Developer token generated in MinKnow UI
-    pub token: String,
-    // TLS certificate path, required to connect to MinKnow API
-    pub tls_cert_path: PathBuf
-}
-
-// Uses the MinKnow connection but adds required additional parameters
-#[derive(Debug, Clone)]
-pub struct IcarustConfig {
-    // Whether the data generation is simulated by Icarust
-    pub enabled: bool,
-    // Port of the device connection - usually sourced 
-    // from MinKNOW after connection, needs to be
-    // specified with Icarust
-    pub position_port: u32,
-    // Icarust does not expose the sample rate from device endpoint
-    // so we must set this manually for now (defualt 4000)
-    pub sample_rate: u32,
-}
-
-
-// ReadUntil client configuration
-#[derive(Debug, Clone)]
-pub struct ReadUntilConfig {
-    pub device_name: String,                 // Dori access to Minknow
-    pub channels: u32,
-    pub channel_start: u32,
-    pub channel_end: u32,
-    pub dori_tcp_host: String,
-    pub dori_tcp_port: u32,
-    pub init_delay: u64,                     // u64 because of duration type
-    pub unblock_all_client: bool,
-    pub unblock_all_server: bool,
-    pub unblock_all_basecaller: bool,
-    pub unblock_all_mapper: bool,
-    pub unblock_duration: f64, 
-    pub raw_data_type: RawDataType,
-    pub sample_minimum_chunk_size: u64,
-    pub accepted_first_chunk_classifications: Vec<i32>,
-    pub throttle: u64,
-    pub latency_log: Option<PathBuf>,          
-    pub read_cache: bool,
-    pub read_cache_min_chunks: usize,
-    pub read_cache_max_chunks: usize
-}
-
-// Dori RPC server configuration
-#[derive(Debug, Clone)]
-pub struct DoriConfig {
-    pub tcp_enabled: bool,
-    pub tcp_port: u32,
-    pub tcp_host: String,
-    pub uds_path: PathBuf,
-    pub uds_path_override: bool,
-    pub minknow_host: String,
-    pub minknow_port: u32,
-    
-    pub basecaller: Basecaller, 
-    pub classifier: Classifier,
-    pub basecaller_path: PathBuf,
-    pub classifier_path: PathBuf,
-    pub classifier_reference: PathBuf,
-
-    // Pipeline error log
-    pub stderr_log: PathBuf,
-
-    // Guppy config
-    pub guppy_client_path: PathBuf,
-    pub guppy_server_address: String,
-    pub guppy_server_config: String,
-
-    // Kraken2 config
-    pub kraken2_threads: u16,
-    pub kraken2_args: String,
-
-    // Internal configs
-    pub classifier_args: Vec<String>,
-    pub basecaller_args: Vec<String>
-}
-
-#[derive(Debug, Clone)]
-pub struct StreamfishConfig {
-    // Streamfish version
-    pub version: String,
-    // Dori server configuration
-    pub dori: DoriConfig,
-    // MinKnow client configuration
-    pub minknow: MinKnowConfig,
-    // Icarust -> Minknow configuration
-    pub icarust: IcarustConfig,
-    // ReadUntil client configuration
-    pub readuntil: ReadUntilConfig,
-    // Adaptive sampling experiment configuration
-    pub experiment: ExperimentConfig
+impl<'de> Deserialize<'de> for Classifier {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where D: Deserializer<'de>
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(match s.as_str() {
+            "minimap2-rs" => Classifier::Minimap2Rust,
+            "kraken2" => Classifier::Kraken2,
+            _ => unimplemented!("Classifier `{}` is not implemented", s)
+        })
+    }
 }
 
 impl StreamfishConfig {
-    pub fn from_user_config(user_config: PathBuf) -> StreamfishConfig {
+    pub fn from_toml(file: PathBuf) -> Result<Self, StreamfishError> {
 
-        let user_config_str = std::fs::read_to_string(user_config).expect("Failed to read user config TOML");
-        let user_config: UserConfig = toml::from_str(&user_config_str).expect("Failed to load user config TOML");
+        let toml_str = std::fs::read_to_string(file).map_err(|err| StreamfishError::TomlConfigFile(err))?;
+        let mut config: StreamfishConfig = toml::from_str(&toml_str).map_err(|err| StreamfishError::TomlConfigParse(err))?;
 
-        let (unblock_all_client, unblock_all_server, unblock_all_basecaller, unblock_all_mapper) = match user_config.readuntil.unblock_all {
-            true => UnblockAll::from_str(&user_config.readuntil.unblock_all_mode).get_config(),
+        let (unblock_all_client, unblock_all_server, unblock_all_basecaller, unblock_all_mapper) = match config.readuntil.unblock_all {
+            true => UnblockAll::from_str(&config.readuntil.unblock_all_mode).get_config(),
             false => (false, false, false, false)
         };
 
-        let streamfish_config = Self {
-            version: crate_version!().to_string(),
+        // Host ports forwarded allows `docker-compose` to set the host via environmental variable
+        config.minknow.host = match get_env_var("STREAMFISH_MINKNOW_HOST") { Some(var) => var, None => config.minknow.host.clone() };
 
-            experiment: ExperimentConfig::from(
-                user_config.clone()
-            ),
+        // Always sample uncalibrated data for now
+        config.readuntil.raw_data_type = RawDataType::Uncalibrated;
 
-            minknow: MinKnowConfig {
-                host: match get_env_var("STREAMFISH_MINKNOW_HOST") { Some(var) => var, None => user_config.minknow.host.clone() },  // needed for Docker container forward host
-                port: user_config.minknow.port.clone(),
-                token: user_config.minknow.token.clone(),
-                tls_cert_path: user_config.minknow.certificate.clone(),
-            },
-            icarust: IcarustConfig { enabled: user_config.icarust.enabled, position_port: user_config.icarust.position_port, sample_rate: user_config.icarust.sample_rate },
+        // Easier access to the values in stream loops
+        config.readuntil.unblock_all_client = unblock_all_client;
+        config.readuntil.unblock_all_server = unblock_all_server;
+        config.readuntil.unblock_all_basecaller = unblock_all_basecaller;
+        config.readuntil.unblock_all_mapper = unblock_all_mapper;
 
-            readuntil: ReadUntilConfig {
-                device_name: user_config.readuntil.device_name,
-                channels: user_config.readuntil.channels,
-                channel_start: user_config.readuntil.channel_start,
-                channel_end: user_config.readuntil.channel_end,
-                dori_tcp_host: user_config.readuntil.dori_tcp_host,
-                dori_tcp_port: user_config.readuntil.dori_tcp_port,
-                init_delay: user_config.readuntil.init_delay,
-                unblock_all_client: unblock_all_client,
-                unblock_all_server: unblock_all_server,
-                unblock_all_basecaller: unblock_all_basecaller,
-                unblock_all_mapper: unblock_all_mapper,
-                unblock_duration: user_config.readuntil.unblock_duration,
-                throttle: user_config.readuntil.action_throttle,
-                sample_minimum_chunk_size: user_config.readuntil.sample_minimum_chunk_size,
-                raw_data_type: RawDataType::Uncalibrated,
-                accepted_first_chunk_classifications: user_config.readuntil.accepted_first_chunk_classifications,
-                latency_log: user_config.readuntil.latency_log,
-                read_cache: user_config.readuntil.read_cache,
-                read_cache_min_chunks: user_config.readuntil.read_cache_min_chunks,
-                read_cache_max_chunks: user_config.readuntil.read_cache_max_chunks
-            },
+        // Configure the experiment and mapping settings
+        config.experiment.configure();
 
-            dori: DoriConfig {
-                tcp_enabled: user_config.dori.tcp_enabled,
-                tcp_port: user_config.dori.tcp_port,
-                tcp_host: user_config.dori.tcp_host,  // inside docker to expose must be 0.0.0.0
-                uds_path: user_config.dori.uds_path,
-                uds_path_override: user_config.dori.uds_override,
-                minknow_host: user_config.dori.minknow_host,
-                minknow_port: user_config.dori.minknow_port,
-                basecaller: Basecaller::from_str(&user_config.dori.basecaller),
-                classifier: Classifier::from_str(&user_config.dori.classifier),
-                basecaller_path: user_config.dori.basecaller_path,  // /usr/src/streamfish/scripts/cpp/cmake-build/test | /home/esteinig/dev/bin/dorado | /opt/dorado/bin/dorado
-                classifier_path: "".into(),
-                classifier_reference: user_config.minimap.reference,
-                guppy_client_path: user_config.guppy.client_path,
-                guppy_server_address: user_config.guppy.server_address,
-                guppy_server_config: user_config.guppy.server_config,
-                stderr_log: user_config.dori.basecaller_stderr,
-                kraken2_threads: 4,
-                kraken2_args: "--minimum-hit-groups 1 --threads 4 --memory-mapping".into(),
+        // Configure the basecaller and classifier arguments
+        config.configure();
 
-                basecaller_args: Vec::new(),
-                classifier_args: Vec::new()
-            }
-        };
-
-        return StreamfishConfig::configure(streamfish_config)
+        Ok(config)
 
     }
-    pub fn configure(mut streamfish_config: StreamfishConfig) -> Self {
+}
+
+impl StreamfishConfig {
+    // Configure internal fields for basecaller and classifer arguments
+    pub fn configure(&mut self) {
             
-            // Some checks and argument construction for basecaller/classifier configurations
-            if (streamfish_config.dori.classifier == Classifier::Minimap2Dorado || streamfish_config.dori.classifier == Classifier::Minimap2Rust) && streamfish_config.dori.classifier_reference.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
-                panic!("Classifier reference for minimap2 must be an index file (.mmi)")
-            }
-    
-            if streamfish_config.dori.basecaller == Basecaller::Guppy && (streamfish_config.dori.classifier == Classifier::Minimap2Rust  || streamfish_config.dori.classifier == Classifier::Kraken2) {
-                
-                streamfish_config.dori.basecaller_args = format!(
-                    "{} --address {} --config {}",
-                    streamfish_config.dori.guppy_client_path.display(),
-                    streamfish_config.dori.guppy_server_address,
-                    streamfish_config.dori.guppy_server_config,
-                ).split_whitespace().map(String::from).collect();
-            } else {
-                panic!("Classifier configuration not supported")
-            }
+        // Some checks and argument construction for basecaller configurations
+        if self.dori.classifier == Classifier::Minimap2Rust && self.minimap.reference.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
+            panic!("Classifier reference must be an index file (.mmi)")
+        }
 
-            return streamfish_config
+        if self.dori.basecaller == Basecaller::Guppy && (self.dori.classifier == Classifier::Minimap2Rust  || self.dori.classifier == Classifier::Kraken2) {
+            
+            self.guppy.client.args = format!(
+                "{} --address {} --config {} --throttle {} --max-reads-queued {} --threads {}",
+                self.guppy.client.script.display(),
+                self.guppy.client.address,
+                self.guppy.client.config,
+                self.guppy.client.throttle,
+                self.guppy.client.max_reads_queued,
+                self.guppy.client.threads,
+            ).split_whitespace().map(String::from).collect();
 
-    }
-    pub fn cli_config(&mut self, channel_start: Option<u32>, channel_end: Option<u32>, uds_dori: Option<PathBuf>, guppy_address: Option<String>, port_dori: Option<u32>, log_latency: Option<PathBuf>) -> Self {
+            self.guppy.server.args = format!(
+                "--log_path {} --port {} --config {} --ipc_threads {} --device {} --gpu_runners_per_device {} --num_callers {} --chunks_per_runner {}",
+                self.guppy.server.log_path.display(),
+                self.guppy.server.port,
+                self.guppy.server.config,
+                self.guppy.server.threads,
+                self.guppy.server.device,
+                self.guppy.server.runners,
+                self.guppy.server.callers,
+                self.guppy.server.chunks,
+            ).split_whitespace().map(String::from).collect();
 
-        // Some general client configurations can be set from the command-line
-        // and are overwritten before connection of the clients
+        } else {
+            panic!("Classifier configuration not supported")
+        }
 
-        if let Some(log_file) = log_latency {
-            self.readuntil.latency_log = Some(log_file)
-        }
-        if let Some(tcp_port) = port_dori {
-            self.dori.tcp_port = tcp_port;
-        }
-        if let Some(start) = channel_start {
-            self.readuntil.channel_start = start;
-        }
-        if let Some(end) = channel_end {
-            self.readuntil.channel_end = end;
-        }
-        if let Some(uds_dori) = uds_dori {
-            self.dori.uds_path = uds_dori;
-        }
-        if let Some(guppy_address) = guppy_address {
-            self.dori.guppy_server_address = guppy_address;
-        }
-        
-        return StreamfishConfig::configure(self.clone())
 
-    }
 }
-
-
-
-// A configuration for the experimental setup that should be dynamically
-// editable through linking a slow analysis loop into the stream loop 
-// (not quite sure how to do this yet) 
-#[derive(Debug, Clone, Deserialize)]
-pub struct ExperimentConfig {
-    pub control: bool,
-    pub name: String,
-    pub version: String,
-    pub description: String,
-    pub config: Experiment
-}
-
-impl Default for ExperimentConfig {
-    fn default() -> Self {
-        Self {
-            control: false,
-            name: String::from("Default"),
-            version: String::from("v0.1.0"),
-            description: String::from("Default adaptive sampling configuration uses host genome depletion with alignment"),
-            config: Experiment::MappingExperiment(
-                MappingExperiment::HostDepletion(MappingConfig::host_depletion(Vec::new(), 0)) // whole reference genome
-            )
-        }
-    }
 }
 
 impl ExperimentConfig {
-    pub fn from(user_config: UserConfig) -> Self {
+    pub fn configure(&mut self) {
 
-        let experiment = match user_config.experiment.mode.as_str() {
+        let experiment = match self.mode.as_str() {
             "mapping" => {  
-                match user_config.experiment.r#type.as_str() {
+                match self.r#type.as_str() {
                     "host_depletion" => {
                         Experiment::MappingExperiment(
-                            MappingExperiment::HostDepletion(MappingConfig::host_depletion(user_config.experiment.targets, user_config.minimap.min_match_len))
+                            MappingExperiment::HostDepletion(MappingConfig::host_depletion(self.targets.clone(), self.min_match_len))
                         )
                     },
                     "targeted_sequencing" => {
                         Experiment::MappingExperiment(
-                            MappingExperiment::TargetedSequencing(MappingConfig::targeted_sequencing(user_config.experiment.targets, user_config.minimap.min_match_len))
+                            MappingExperiment::TargetedSequencing(MappingConfig::targeted_sequencing(self.targets.clone(), self.min_match_len))
                         )
                     },
                     "unknown_sequences" => {
                         Experiment::MappingExperiment(
-                            MappingExperiment::UnknownSequences(MappingConfig::unknown_sequences(user_config.minimap.min_match_len))
+                            MappingExperiment::UnknownSequences(MappingConfig::unknown_sequences(self.min_match_len))
                         )
                     },
                     _ => unimplemented!("Experiment type not implemented for mapping mode")
@@ -472,13 +353,8 @@ impl ExperimentConfig {
             _ => unimplemented!("Experiment mode not implemented")
         };
 
-        Self {
-            control: user_config.experiment.control,
-            name: user_config.meta.name,
-            version: user_config.meta.version,
-            description: user_config.meta.description,
-            config: experiment
-        }
+        self.experiment = experiment;
+
     }
 }
 
@@ -487,7 +363,20 @@ pub enum Experiment {
     // Alignment based experiment
     MappingExperiment(MappingExperiment)
 }
-
+impl Experiment {
+    pub fn get_mapping_config(&self) -> MappingConfig {
+        match self {
+            Experiment::MappingExperiment(MappingExperiment::HostDepletion(host_depletion_config)) => host_depletion_config.clone(),
+            Experiment::MappingExperiment(MappingExperiment::TargetedSequencing(targeted_sequencing_config)) => targeted_sequencing_config.clone(),
+            Experiment::MappingExperiment(MappingExperiment::UnknownSequences(unknown_config)) => unknown_config.clone()
+        }
+    }
+}
+impl Default for Experiment {
+    fn default() -> Self {
+        Experiment::MappingExperiment(MappingExperiment::HostDepletion(MappingConfig::host_depletion(vec![], 0)))
+    }
+}
 
 
 // An enumeration of `MappingConfig` variants wrapping configured structs
@@ -697,8 +586,6 @@ impl MappingConfig {
     // Main method for `minimap2-rs` using the Mapping struct to get a configured experiment decision
     pub fn decision_from_mapping(&self, mappings: Vec<Mapping>) -> i32 {
 
-
-
         let mappings: Vec<Mapping> = match self.min_match_len {
             0 => mappings,
             _ => {
@@ -740,28 +627,5 @@ impl MappingConfig {
         } else {
             self.no_map.decision
         }
-    }
-}
-
-
-impl std::fmt::Display for StreamfishConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let s = formatdoc! {"
-
-        ========================
-        Streamfish configuration
-        ========================
-
-        MinKnow Host    {minknow_host}
-        MinKnow Port    {minknow_port}
-        MinKnow Token   {minknow_token}
-
-        ",
-        minknow_host = self.minknow.host,
-        minknow_port = self.minknow.port,
-        minknow_token = self.minknow.token,
-    };
-        
-        write!(f, "{}", s)
     }
 }

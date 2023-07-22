@@ -1,10 +1,4 @@
 
-use crate::client::minknow::MinKnowClient;
-use crate::config::{StreamfishConfig, MappingExperiment, Experiment, Classifier};
-use crate::services::dori_api::adaptive::{StreamfishRequest, StreamfishResponse, Decision, RequestType};
-use crate::services::dori_api::adaptive::adaptive_sampling_server::AdaptiveSampling;
-
-use std::collections::HashMap;
 use minimap2::*;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -12,13 +6,18 @@ use itertools::join;
 use tokio::sync::Mutex;
 use futures_core::Stream;
 use futures_util::StreamExt;
+use std::collections::HashMap;
 use futures_util::AsyncWriteExt;
 use futures_util::io::AsyncBufReadExt;
 use tonic::{Request, Response, Status};
 use byteorder::{LittleEndian, ByteOrder};
 use futures_util::io::{BufReader, Lines};
 use tokio::sync::mpsc::{Sender, Receiver};
+use crate::client::minknow::MinknowClient;
+use crate::config::{StreamfishConfig, Basecaller};
 use async_process::{Command, Stdio, ChildStdout, ChildStdin};
+use crate::services::dori_api::adaptive::adaptive_sampling_server::AdaptiveSampling;
+use crate::services::dori_api::adaptive::{StreamfishRequest, StreamfishResponse, Decision, RequestType};
 
 
 pub struct AdaptiveSamplingService {
@@ -40,8 +39,8 @@ impl AdaptiveSamplingService {
             log::warn!("Unblocking reads after basecalling and mapping on Dori!");
         }
         
-        log::info!("Basecaller: {} Path: {:?} Args: {:?}", config.dori.basecaller.as_str(), config.dori.basecaller_path, config.dori.basecaller_args.join(" "));
-        log::info!("Classifier: {} Path: {:?} Args: {:?}", config.dori.classifier.as_str(), config.dori.classifier_path, config.dori.classifier_args.join(" "));
+        log::info!("Basecall client: {} Path: {:?} Args: {:?}", config.dori.basecaller.as_str(), config.guppy.client.path.display(), config.guppy.client.args.join(" "));
+        log::info!("Basecall server: {} Path: {:?} Args: {:?}", config.dori.basecaller.as_str(), config.guppy.server.path.display(), config.guppy.server.args.join(" "));
 
         Self { config: config.clone() }
     }
@@ -75,14 +74,9 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let run_config_2 = self.config.clone();
 
         // Adaptive sampling experiment configuration
-        let experiment = self.config.experiment.config.clone();
+        let experiment = self.config.experiment.experiment.clone();
 
-        let mapping_config = match experiment {
-            Experiment::MappingExperiment(MappingExperiment::HostDepletion(host_depletion_config)) => host_depletion_config,
-            Experiment::MappingExperiment(MappingExperiment::TargetedSequencing(targeted_sequencing_config)) => targeted_sequencing_config,
-            Experiment::MappingExperiment(MappingExperiment::UnknownSequences(unknown_config)) => unknown_config
-        };
-
+        let mapping_config = experiment.get_mapping_config();
         log::info!("Mapping configuration: {:#?}", mapping_config);
 
         // Define the decisions as <i32> - repeated into() calls in the stream processing
@@ -96,16 +90,28 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let init_request: i32 = RequestType::Init.into();
 
         // Connection to MinKNOW to obtain device calibration data
-        let minknow_client = MinKnowClient::connect(
+        let minknow_client = MinknowClient::connect(
             &self.config.minknow, &self.config.icarust
-        ).await.expect("Failed to connect to MinKNOW");
+        ).await.expect("Failed to connect to control server");
+
+
+        // There may be a weird race condition with Icarust when 
+        // starting all slices in a slice-and-dice configuration
+        // simultaneously before Icarust spits out reads after 
+        // intials delay (works ok when starting sequentially 
+        // when reads have started) causing the wrong slice
+        // channel numbers to be transmitted to the slice 
+        // causing an out of bounds index error so we 
+        // check first here
+
+        // We could also just fet the full channel array 
+        // for the calibration (instead of the start - end)
+        // so this check won't be necessary, might be better
 
         let (sample_rate, calibration) = minknow_client.get_device_data(
             &self.config.readuntil.device_name, &1, &self.config.readuntil.channels
         ).await.expect("Failed to get device calibration from MinKNOW");
 
-        log::info!("Calibration: {:#?}", calibration);
-        
         // ======================
         // Pipeline process setup
         // ======================
@@ -171,35 +177,15 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         });
 
         let channel_start = self.config.readuntil.channel_start.clone();
-        let channel_end = self.config.readuntil.channel_end.clone();
 
         // Basecaller thread
         tokio::spawn(async move {
             
             while let Some((read_id, channel, number, cached)) = basecall_rx.recv().await {
                                 
-                // There may be a weird race condition with Icarust when 
-                // starting all slices in a slice-and-dice configuration
-                // simultaneously before Icarust spits out reads after 
-                // intials delay (works ok when starting sequentially 
-                // when reads have started) causing the wrong slice
-                // channel numbers to be transmitted to the slice 
-                // causing an out of bounds index error so we 
-                // check first here
-
-                // We could also just fet the full channel array 
-                // for the calibration (instead of the start - end)
-                // so this check won't be necessary, might be better
-                
-                // if channel > channel_end {
-                //     log::warn!("Likely race condition from control server (Icarust) in slice-and-dice!");
-                //     log::warn!("Ignore read and continue (channel = {}, channel start = {})", &channel, &channel_start);
-                //     continue;
-                // }
-
                 let channel_index = (channel - 1) as usize;
                 
-                log::info!("Channel {} index {} start {}", channel, channel_index, channel_start);
+                log::debug!("Channel {} index {} start {}", channel, channel_index, channel_start);
 
                 let data = get_dorado_input_string(
                     read_id,
@@ -285,7 +271,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
             let aligner = Aligner::builder()
             .map_ont()
-            .with_index(run_config_2.dori.classifier_reference.clone(), None)
+            .with_index(run_config_2.minimap.reference.clone(), None)
             .expect("Unable to build index");
             log::info!("Built the minimap2-rs aligner in stream thread");
 
@@ -421,20 +407,26 @@ fn init_pipeline(config: &StreamfishConfig) -> (ChildStdin, Lines<BufReader<Chil
         &format!("Failed to create basecaller stderr file: {}", config.dori.stderr_log.display())
     ));
 
-    let mut pipeline_process = Command::new(config.dori.basecaller_path.as_os_str())
-        .args(config.dori.basecaller_args.clone())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(process_stderr)
-        .spawn()
-        .expect("Failed to spawn basecaller process");
+    match config.dori.basecaller {
+        Basecaller::Guppy => {
+            let mut pipeline_process = Command::new(config.guppy.client.path.as_os_str())
+                .args(config.guppy.client.args.clone())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(process_stderr)
+                .spawn()
+                .expect("Failed to spawn basecaller process for Guppy client");
 
-    (
-        pipeline_process.stdin.take().expect("Failed to open basecaller STDIN"),
-        BufReader::new(
-            pipeline_process.stdout.take().expect("Failed to open basecaller STDOUT")
-        ).lines()
-    )
+            (
+                pipeline_process.stdin.take().expect("Failed to open basecaller STDIN"),
+                BufReader::new(
+                    pipeline_process.stdout.take().expect("Failed to open basecaller STDOUT")
+                ).lines()
+            )
+        },
+        _ => unimplemented!("Dorado is not implemented yet!")
+    }
+    
 }
 
 

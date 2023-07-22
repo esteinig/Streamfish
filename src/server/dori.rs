@@ -1,103 +1,56 @@
 //! Dori is a basecall and analysis RPC implementation for Streamfish::ReadUntilClient 
 
-use tower::service_fn;
-use tokio::net::{UnixListener, UnixStream};
-use tokio_stream::wrappers::UnixListenerStream;
-use tonic::transport::{Server, Endpoint, Channel};
-
+use tokio::net::UnixListener;
+use tonic::transport::Server;
 use crate::config::StreamfishConfig;
-use crate::server::error::DoriError;
+use crate::server::error::ServerError;
+use tokio_stream::wrappers::UnixListenerStream;
 use crate::server::services::adaptive::AdaptiveSamplingService;
 use crate::services::dori_api::adaptive::adaptive_sampling_server::AdaptiveSamplingServer;
-use crate::services::dori_api::adaptive::adaptive_sampling_client::AdaptiveSamplingClient;
 
 pub struct DoriServer { }
 
 impl DoriServer {
-    pub async fn run(config: &StreamfishConfig) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(config: StreamfishConfig) -> Result<(), ServerError> {
 
-        log::info!("Dori server configuration: {:#?}", &config.dori);
-
-        let service = AdaptiveSamplingService::new(config);
+        let service = AdaptiveSamplingService::new(&config);
 
         if config.dori.tcp_enabled {
 
-            let address = format!("{}:{}", config.dori.tcp_host, config.dori.tcp_port).parse().unwrap();
+            let address = format!("{}:{}", config.dori.tcp_host, config.dori.tcp_port).parse().map_err(|_| ServerError::InvalidSocketAddress)?;
 
             log::info!("Dori TCP connection listening on: {}", address);
 
             Server::builder()
                 .add_service(AdaptiveSamplingServer::new(service))
                 .serve(address)
-                .await?;
+                .await.map_err(|_| ServerError::ServeTcp)?;
             
         } else {
-            let uds_path_parent_dir = config.dori.uds_path.parent().unwrap();
+            let uds_path_parent_dir = match config.dori.uds_path.parent() {
+                Some(path) => path,
+                None => return Err(ServerError::UnixDomainSocketParentDirectoryPath)
+            };
 
-            if config.dori.uds_path.exists() && config.dori.uds_path_override {
-                std::fs::remove_file(&config.dori.uds_path)?;
+            if config.dori.uds_path.exists() && config.dori.uds_override {
+                std::fs::remove_file(&config.dori.uds_path).map_err(|_| ServerError::UnixDomainSocketRemove)?;
                 log::warn!("UDS override configured! Replaced existing socket: {}", config.dori.uds_path.display());
             }
     
             if !uds_path_parent_dir.exists() {
-                std::fs::create_dir_all(config.dori.uds_path.parent().unwrap())?;
+                std::fs::create_dir_all(uds_path_parent_dir).map_err(|_| ServerError::UnixDomainSocketParentDirectoryCreate)?;
                 log::debug!("UDS parent directory created at: {}", &config.dori.uds_path.display());
             }
     
-            let uds = UnixListener::bind(&config.dori.uds_path)?;
+            let uds = UnixListener::bind(&config.dori.uds_path).map_err(|_| ServerError::UnixDomainSocketListener)?;
             let uds_stream = UnixListenerStream::new(uds);
     
             Server::builder()
                 .add_service(AdaptiveSamplingServer::new(service))
                 .serve_with_incoming(uds_stream)
-                .await?;
+                .await.map_err(|_| ServerError::ServeUds)?;
         }
         
-
         Ok(())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct DoriClient { 
-    pub client: AdaptiveSamplingClient<Channel>
-}
-
-impl DoriClient {
-    pub async fn connect(config: &StreamfishConfig) -> Result<Self, Box<dyn std::error::Error>> {
-        
-        log::info!("Dori server configuration: {:#?}", &config.dori);
-
-        if config.dori.tcp_enabled {
-            
-            let address = format!("http://{}:{}", config.readuntil.dori_tcp_host, config.readuntil.dori_tcp_port);
-
-            log::info!("Dori client connecting to: {}", &address);
-
-            let channel = Channel::from_shared(address.clone())?.connect().await.map_err(|err| DoriError::ConnectionFailure(err))?;
-
-            log::info!("Dori client connected on TCP channel");
-
-            Ok(Self {  client: AdaptiveSamplingClient::new(channel) })
-
-        } else {
-            let uds_path = config.dori.uds_path.clone();
-
-
-            log::info!("Dori client connecting to: {}", &uds_path.display());
-            
-            // We will ignore this URI because UDS do not use it
-            let channel = Endpoint::try_from("http://[::]:50051")?
-                .connect_with_connector(service_fn(move |_|  { 
-                    UnixStream::connect(uds_path.clone()) 
-            })).await?;
-
-            log::info!("Dori client connected on UDS channel");
-
-            Ok(Self { client: AdaptiveSamplingClient::new(channel) })
-        }
-        
-
-        
     }
 }

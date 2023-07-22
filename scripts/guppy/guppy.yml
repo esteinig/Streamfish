@@ -1,0 +1,11 @@
+name: guppy
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python =3.10
+  - pip
+  - pip:
+    - ont-pyguppy-client-lib
+    - typer

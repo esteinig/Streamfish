@@ -213,7 +213,7 @@ def read_length_density_all(data: Dict[str, MappingSummary], output_file: str, m
     fig, ax = plt.subplots()
     
     for i, (ref, summary) in enumerate(data.items()): 
-        lengths = [d for d in summary.read_lengths if d >= min_length and d < max_length]
+        lengths = [d for d in summary.read_lengths_unblocked if d >= min_length and d < max_length] + [d for d in summary.read_lengths_pass if d >= min_length and d < max_length]
         sns.kdeplot(lengths, ax=ax, label=ref, color=colors[i+1], fill=True, alpha=0.8)
 
     # Set the plot labels and title
@@ -225,6 +225,7 @@ def read_length_density_all(data: Dict[str, MappingSummary], output_file: str, m
     sns.despine()
     ax.grid(False)
     
+    plt.xlim(0, max_length)
     plt.savefig(output_file, dpi=300, bbox_inches='tight', transparent=False)
     plt.close()
 
@@ -240,18 +241,25 @@ def read_length_histogram_all(data: Dict[str, MappingSummary], output_file: str,
     # Create a figure and axes
     fig, ax = plt.subplots()
     
+    length_data = {'read_length': [], 'target': []}
     for i, (ref, summary) in enumerate(data.items()): 
-        lengths = [d for d in summary.read_lengths if d >= min_length and d < max_length]
-        sns.histplot(lengths, kde=False, ax=ax, color=colors[i+1], bins='auto', fill=True, alpha=0.8)
+        lengths = [d for d in summary.read_lengths_unblocked if d >= min_length and d < max_length] + [d for d in summary.read_lengths_pass if d >= min_length and d < max_length]
+        length_data['read_length'] += lengths
+        length_data['target'] += [ref for _ in lengths]
+
+    df = pandas.DataFrame.from_dict(length_data)
+    print(df)
+    sns.histplot(data=df, x="read_length", hue="target", kde=False, ax=ax, bins='auto', fill=True, alpha=0.8)
 
     # Set the plot labels and title
     ax.set_xlabel('bp')
     ax.set_ylabel('Reads')
-    ax.set_title('Read lengt', fontdict={'weight': 'bold'})
+    ax.set_title('Read length', fontdict={'weight': 'bold'})
 
     sns.despine()
     ax.grid(False)
     
+    plt.xlim(0, max_length)    
     plt.savefig(output_file, dpi=300, bbox_inches='tight', transparent=False)
     plt.close()
 
@@ -275,7 +283,7 @@ def read_length_histogram_distinct(data: Dict[str, MappingSummary], output_file:
         except IndexError:
             max_length = max_lengths[0]
 
-        lengths = [d for d in summary.read_lengths if d >= min_length and d < max_length]
+        lengths = [d for d in summary.read_lengths_unblocked if d >= min_length and d < max_length] + [d for d in summary.read_lengths_pass if d >= min_length and d < max_length]
         sns.histplot(lengths, kde=False, ax=ax, color=colors[i+1], bins='auto', fill=True, alpha=1.)
 
         # Set the plot labels and title
@@ -436,6 +444,9 @@ def evaluation(
     active_ends: Path = typer.Option(
         ..., help="CSV file with endreasons from `--endreason-fast5`"
     ),
+    outdir_plots: Path = typer.Option(
+        ..., help="Output directory for figures"
+    ),
     active_output: Path = typer.Option(
         None, help="Output table of summary values per read in CSV"
     ),
@@ -470,10 +481,9 @@ def evaluation(
         print(df_combined)
     
     
-    # read_length_density_all(summary, f"read_lengths_density_all.png", min_length=50, max_length=4000, colors=LAPUTA_MEDIUM)
-    # read_length_histogram_all(summary, f"read_lengths_histogram_all.png", min_length=50, max_length=4000, colors=LAPUTA_MEDIUM)
-    # read_length_histogram_distinct(summary, f"read_lengths_histogram_distinct.png", min_length=50, max_lengths=[1000, 4000], colors=LAPUTA_MEDIUM)
-
+    read_length_density_all(active_summary, outdir_plots / f"read_lengths_density_all.png", min_length=50, max_length=40000, colors=LAPUTA_MEDIUM)
+    read_length_histogram_all(active_summary, outdir_plots / f"read_lengths_histogram_all.png", min_length=50, max_length=40000, colors=LAPUTA_MEDIUM)
+    read_length_histogram_distinct(active_summary, outdir_plots / f"read_lengths_histogram_distinct.png", min_length=50, max_lengths=[1000, 40000], colors=LAPUTA_MEDIUM)
 
 
 app()

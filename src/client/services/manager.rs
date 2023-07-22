@@ -1,9 +1,14 @@
 
+use tonic::Request;
+use tonic::transport::Channel;
+use crate::client::error::ClientError;
+use crate::client::auth::AuthInterceptor;
+use tonic::metadata::{MetadataValue, Ascii};
+use tonic::service::interceptor::InterceptedService;
+use crate::services::minknow_api::instance::GetVersionInfoResponse;
+use crate::services::minknow_api::device::get_device_info_response::DeviceType;
 use crate::services::minknow_api::manager::manager_service_client::ManagerServiceClient;
 
-use crate::services::minknow_api::instance::{
-    GetVersionInfoResponse
-};
 use crate::services::minknow_api::manager::{
     GetVersionInfoRequest, 
     FlowCellPositionsRequest, 
@@ -14,15 +19,8 @@ use crate::services::minknow_api::manager::{
     FlowCellPosition,
     flow_cell_position::State
 };
-use crate::services::minknow_api::device::get_device_info_response::DeviceType;
 
 
-use tonic::Request;
-use tonic::transport::Channel;
-use tonic::metadata::{MetadataValue, Ascii};
-use tonic::service::interceptor::InterceptedService;
-
-use crate::client::auth::AuthInterceptor;
 
 
 // A wrapper around the MangerServiceClient, which requests 
@@ -41,10 +39,10 @@ impl ManagerClient {
         Self { client }
     }    
     // Get the current version information
-    pub async fn get_version_info(&mut self) -> Result<GetVersionInfoResponse, Box<dyn std::error::Error>>  {
+    pub async fn get_version_info(&mut self) -> Result<GetVersionInfoResponse, ClientError>  {
 
         let request = Request::new(GetVersionInfoRequest {});
-        let response = self.client.get_version_info(request).await?.into_inner();
+        let response = self.client.get_version_info(request).await.map_err(|status| ClientError::ResponseError(status.to_string()))?.into_inner();
 
         Ok(response)
     }
@@ -53,13 +51,13 @@ impl ManagerClient {
     // Provides a snapshot of places where users can insert flow cells. It has a streamed response
     // in case there are too many positions to fit into a single response, but normally there should
     // only be a single response.
-    pub async fn get_flow_cell_positions(&mut self) -> Result<FlowCellPositionsResponse, Box<dyn std::error::Error>>  {
+    pub async fn get_flow_cell_positions(&mut self) -> Result<FlowCellPositionsResponse, ClientError>  {
 
         let request = Request::new(FlowCellPositionsRequest {});
-        let mut stream = self.client.flow_cell_positions(request).await?.into_inner();
+        let mut stream = self.client.flow_cell_positions(request).await.map_err(|status| ClientError::ResponseError(status.to_string()))?.into_inner();
 
         let mut responses = Vec::new();
-        while let Some(position_response) = stream.message().await? {
+        while let Some(position_response) = stream.message().await.map_err(|status| ClientError::ResponseError(status.to_string()))? {
             responses.push(position_response)
         }
 
@@ -94,22 +92,22 @@ impl ManagerClient {
     //
     // Note that MinKNOW Core 5.5 and earlier required the P2 Solo device name to be "P2S" followed
     // by four digits. This is no longer recommended.
-    pub async fn add_simulated_device(&mut self, device_name: &str, device_type: SimulatedDeviceType) -> Result<(), Box<dyn std::error::Error>>  {
+    pub async fn add_simulated_device(&mut self, device_name: &str, device_type: SimulatedDeviceType) -> Result<(), ClientError>  {
 
         let request = Request::new(AddSimulatedDeviceRequest { 
             name: device_name.to_string(), r#type: device_type.into()
         });
-        self.client.add_simulated_device(request).await?.into_inner();
+        self.client.add_simulated_device(request).await.map_err(|status| ClientError::ResponseError(status.to_string()))?.into_inner();
 
         Ok(())
     }
     // Remove a simulated device [AUTHENTICATION REQUIRED]
-    pub async fn remove_simulated_device(&mut self, device_name: &str) -> Result<(), Box<dyn std::error::Error>>  {
+    pub async fn remove_simulated_device(&mut self, device_name: &str) -> Result<(), ClientError>  {
 
         let request = Request::new(RemoveSimulatedDeviceRequest { 
             name: device_name.to_string()
         });
-        self.client.remove_simulated_device(request).await?.into_inner();
+        self.client.remove_simulated_device(request).await.map_err(|status| ClientError::ResponseError(status.to_string()))?.into_inner();
 
         Ok(())
     }

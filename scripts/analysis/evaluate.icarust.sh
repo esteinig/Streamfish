@@ -21,7 +21,7 @@ FAST5_ACTIVE_DIR=$2
 
 ANALYSIS_DIR="/tmp/streamfish_analysis_${ANALYSIS_ID}"
 
-MAPPING_REFERENCE='/tmp/viruses.mmi'
+MAPPING_REFERENCE='/tmp/chm13v2_chr1_chr2.mmi'
 DORADO_FST_MODEL='/tmp/models/dna_r9.4.1_e8_fast@v3.4'
 
 # FAST5_CONTROL_DIR="/tmp/test_bacteria/test/20230711_0611_XIII_FAQ12345_5ef1fa3b9/fast5_pass/"
@@ -58,7 +58,8 @@ python /usr/src/streamfish/scripts/analysis/evaluate.icarust.py evaluation \
     --summary-table ${ANALYSIS_DIR}/${ANALYSIS_ID}.summary.csv \
     --active-sam ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.fst.sam \
     --active-ends ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.endreasons.csv \
-    --active-output ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.summary.csv # \
+    --active-output ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.summary.csv \
+    --outdir-plots ${ANALYSIS_DIR} # \
     # --control-sam ${ANALYSIS_DIR}/${ANALYSIS_ID}.control.fst.sam \
     # --control-ends ${ANALYSIS_DIR}/${ANALYSIS_ID}.control.endreasons.csv \
     # --control-output ${ANALYSIS_DIR}/${ANALYSIS_ID}.control.summary.csv
