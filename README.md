@@ -1,10 +1,8 @@
-# Streamfish <a href='https://github.com/esteinig'><img src='docs/logo.png' align="right" height="200" alt="Salmon body-slamming fisherman" /></a>
+# Streamfish <a href='https://github.com/esteinig'><img src='docs/asesets/logo.png' align="right" height="200" alt="Giant salmon body-slamming fisherman" /></a>
 
 ![](https://img.shields.io/badge/version-0.1.0-black.svg)
 
 Low-latency adaptive sampling using asynchroneous streams and RPC.
-
-
 
 
 ## Table of contents

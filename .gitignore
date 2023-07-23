@@ -24,3 +24,6 @@ testing/
 
 # C++
 cmake-build/
+
+# mkdocs
+site/

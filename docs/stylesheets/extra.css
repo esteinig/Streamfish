@@ -1,0 +1,7 @@
+
+.md-header__title[data-md-component=header-title] {
+    margin-left: -0.3rem;
+}
+.md-logo[data-md-component=logo] {
+    padding-top: 0.6rem;
+}
