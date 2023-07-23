@@ -57,4 +57,7 @@ pub struct GlobalOptions {
     /// TOML configuration file for Streamfish.
     #[clap(long, short, global = true, default_value="streamfish.toml")]
     pub config: PathBuf,
+    /// TOML configuration file for slice-and-dice operation with Streamfish.
+    #[clap(long, short, global = true)]
+    pub slice_dice: Option<PathBuf>,
 }

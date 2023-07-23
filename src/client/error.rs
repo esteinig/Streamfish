@@ -25,7 +25,6 @@ pub enum ClientError {
     // this usually occurs because the connection has been terminated
     #[error("Control server connection has terminated")]
     ControlServerConnectionTermination,
-
     // Represent a failure to launch the Dori processing server as a task
     #[error("Failed to launch the processing server")]
     DoriServerLaunch,
@@ -51,6 +50,10 @@ pub enum ClientError {
     // Represents failure to send a termination signal into the shutdown queue
     #[error("Failed to send a termination signal into the shutdown queue")]
     ShutdownQueueSend,
+
+    // Represents failure to send a termination signal into the shutdown queue
+    #[error("Failed to send a status request to the control server acquitision endpoint")]
+    ControlServerAcquisitionStatusRequest,
     // Represents failure to create the logging file
     #[error("Failed to create the log file")]
     LogFileCreate,

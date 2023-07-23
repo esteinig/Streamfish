@@ -5,7 +5,6 @@ use crate::client::auth::AuthInterceptor;
 use crate::client::minknow::MinknowClient;
 use tonic::metadata::{MetadataValue, Ascii};
 use tonic::service::interceptor::InterceptedService;
-use crate::services::minknow_api::acquisition::{CurrentStatusRequest, CurrentStatusResponse};
 use crate::services::minknow_api::acquisition::acquisition_service_client::AcquisitionServiceClient;
 
 
@@ -44,11 +43,5 @@ impl AcquisitionClient {
         let client = AcquisitionServiceClient::with_interceptor(channel, AuthInterceptor { token });
 
         Ok(Self { client })
-    }   
-    pub async fn get_current_status(&mut self) -> Result<CurrentStatusResponse, Box<dyn std::error::Error>> {
-
-        let request = tonic::Request::new(CurrentStatusRequest {});
-        let response = self.client.current_status(request).await?.into_inner();
-        Ok(response)
-    }
+    }  
 }

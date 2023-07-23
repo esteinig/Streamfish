@@ -271,7 +271,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
             let aligner = Aligner::builder()
             .map_ont()
-            .with_index(run_config_2.minimap.reference.clone(), None)
+            .with_index(run_config_2.experiment.reference.clone(), None)
             .expect("Unable to build index");
             log::info!("Built the minimap2-rs aligner in stream thread");
 

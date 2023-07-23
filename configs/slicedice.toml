@@ -1,0 +1,39 @@
+# Slice-and-dice configuration for multiple Streamfish clients and servers
+
+channels                                = 2048
+launch_dori_server                      = true  # recommended, otherwise manual setup necessary
+launch_basecall_server                  = true  # recommended, otherwise manual setup necessary
+
+
+[[slice]]
+client_name                             = "StreamfishClient 1"
+channel_start                           = 1
+channel_end                             = 512
+dori_uds_path                           = '/tmp/.dori1/socket'
+guppy_server_port                       = '/tmp/.guppy_local/5556' 
+guppy_client_address                    = 'ipc:///tmp/.guppy_local/5556'
+
+[[slice]]
+client_name                             = "StreamfishClient 2"
+channel_start                           = 513
+channel_end                             = 1024
+dori_uds_path                           = '/tmp/.dori2/socket'
+guppy_server_port                       = '/tmp/.guppy_local/5557' 
+guppy_client_address                    = 'ipc:///tmp/.guppy_local/5557'
+
+[[slice]]
+client_name                             = "StreamfishClient 3"
+channel_start                           = 1025
+channel_end                             = 1536
+dori_uds_path                           = '/tmp/.dori3/socket'
+guppy_server_port                       = '/tmp/.guppy_local/5558' 
+guppy_client_address                    = 'ipc:///tmp/.guppy_local/5558'
+
+[[slice]]
+client_name                             = "StreamfishClient 4"
+channel_start                           = 1537
+channel_end                             = 2048
+dori_uds_path                           = '/tmp/.dori4/socket'
+guppy_server_port                       = '/tmp/.guppy_local/5559' 
+guppy_client_address                    = 'ipc:///tmp/.guppy_local/5559'
+

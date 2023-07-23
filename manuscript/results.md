@@ -82,6 +82,10 @@ We further configure the control server using the setup action request and set a
 3. Experiment type - reference size and runnign actual experiment vs. unblock-all, interactions with throughput and basecaller, impact on logic / decision matrix on latency
 4. Impact on mapper - single threaded (can we even do multithread)
 
+Mean length unblocked is influenced by max chunk size cached - logner reads are allowed to iterate through the classification loop (few) - median length is more constant and relflects the weight of the center of gravity for the unblock read length distribution.
 
+Slice and dice rescues latency (effect somewhat mild, but may be more pronounced at longer run times - compare with single thread, looks like we reach limits imposed mainly by basecallling and maybe mapping - need to investigate)
+
+Compare max read chunks (allowign longer unblocks) with the gain in unblocked percent of target and ratio of target/non-target - looks like lower read chunks might be more effective than allowing larger one, despite lower percentage unblocked of target.
 
 ## Supplementary Data

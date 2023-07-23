@@ -2,38 +2,39 @@
 name                                    = 'streamfish-icarust-test'
 version                                 = '0.1.0'
 description                             = 'Streamfish default configuration for Icarust testing'
+client_name                             = 'ReadfishClient'                                                   # Named for more informative messages in slice configurations
+server_name                             = 'DoriServer'                                                       # Named for better distinction from client in terminal logs 
 
 [minknow]       
-port                                    = 10000                                                              # MinKNOW (9502) or Icarust (10000)
-host                                    = 'localhost'                                                        # Address where this runs - if connecting from container (Dori) use the DoriConfig
-token                                   = 'ea953950-a67e-405b-ab3f-82bd728d0105'  
-certificate                             = '/opt/ont/minknow/conf/rpc-certs/ca.crt'
+host                                    = 'localhost'                                                        # Control server host - should always be 'localhost' for now
+port                                    = 10000                                                              # Control server manager service port - defaults for MinKNOW (9502) or Icarust (10000)
+token                                   = 'ea953950-a67e-405b-ab3f-82bd728d0105'                             # MinKNOW developer token for authentication
+certificate                             = '/opt/ont/minknow/conf/rpc-certs/ca.crt'                           # MinKNOW certificate needed for MinKNOW and Icarust 
 
 [icarust]       
-enabled                                 = true                                                               # uses minknow configurtation for host, port, certificate
-position_port                           = 10001
-sample_rate                             = 4000
+enabled                                 = true                                                               # Uses MinKNOW configuration of host, port and certificate
+position_port                           = 10001                                                              # Required position port to connect to device
+sample_rate                             = 4000                                                               # Sample rate is currently not configuratble in Icarust, included for later modifications
 
-[dori]
-tcp_enabled                             = false
-tcp_host                                = '0.0.0.0'                                                          # `0.0.0.0` inside container to make available on forwarded ports
-tcp_port                                = 10002
-uds_path                                = '/tmp/.dori/socket'
-uds_override                            = true
-minknow_host                            = "127.0.0.1"                                                        # Host ports forwarded to container: minknow_host
-minknow_port                            = 10000                                                              # Manager service port on: minknow_host
-classifier                              = "minimap2-rs"                                                      # minimap2-rs | kraken2 
-basecaller                              = "guppy"                                                            # guppy 
-stderr_log                              = "/tmp/dori.stderr"
-
+[dori] 
+uds_path                                = '/tmp/.dori/socket'                                                # Unix domain socket path on 'localhost', parent directory is created if not exists - SSD/NVME drives recommended, can be mounted in multiple containers for connections
+uds_override                            = true                                                               # Allows overwriting an existing socket path
+tcp_enabled                             = false                                                              # TCP connection to Dori processing server - not preferred
+tcp_host                                = '0.0.0.0'                                                          # TCP server host - `0.0.0.0` inside container to make available on forwarded ports
+tcp_port                                = 10002                                                              # TCP server port - can be mapped from container to host
+minknow_host                            = "127.0.0.1"                                                        # Host port of control server (MinKNOW or Icarust) for access from Dori - if forwarded to container the value is `minknow_host` (docker/docker-compose.dev.yml)
+minknow_port                            = 10000                                                              # Manager service port on `minknow_host` - this matches the `minknow.port` above but can be alternatively configured inside container
+classifier                              = "minimap2-rs"                                                      # Classifier for adaptive sampling algorithm running on Dori [`minimap2-rs`]
+basecaller                              = "guppy"                                                            # Basecaller fpr adapaitve sampling algorithm running through Dori [`guppy`]
+stderr_log                              = "/tmp/dori.stderr"                                                 # Basecaller/classifier error output log as process is launched on Dori for now
 
 [guppy.client]
-path                                    = "/data/opt/conda/envs/guppy/bin/python" # "/home/esteinig/micromamba/envs/guppy/bin/python" # 
-script                                  = "/data/dev/meta-gp/reefsquid/scripts/guppy/guppy_client.py" # "/usr/src/streamfish/scripts/guppy/guppy_client.py"  # 
+path                                    = "/data/opt/conda/envs/guppy/bin/python"                            # "/home/esteinig/micromamba/envs/guppy/bin/python"
+script                                  = "/data/dev/meta-gp/reefsquid/scripts/guppy/guppy_client.py"        # "/usr/src/streamfish/scripts/guppy/guppy_client.py"
 address                                 = "ipc:///tmp/.guppy_local/5556"
 config                                  = "dna_r9.4.1_450bps_fast"
-throttle                                = 0.01
-threads                                 = 8
+throttle                                = 0.01                                                               # Receiver throttle for requests for completed reads
+threads                                 = 4
 max_reads_queued                        = 256
 
 [guppy.server]
@@ -42,20 +43,19 @@ port                                    = "/tmp/.guppy_local/5556"
 config                                  = "dna_r9.4.1_450bps_fast.cfg"
 callers                                 = 4
 chunks                                  = 160
-threads                                 = 8
+threads                                 = 4
 runners                                 = 8
 device                                  = "cuda:all"
 log_path                                = "/tmp/guppy.log"
 stderr_log                              = "/tmp/guppy.stderr"
 
 [minimap]
-reference                               = '/tmp/chm13v2_ont.mmi'
 
 [readuntil]
 device_name                             = "MS12345"
-channels                                = 1024
+channels                                = 2048
 channel_start                           = 1
-channel_end                             = 1024
+channel_end                             = 2048
 init_delay                              = 10
 dori_tcp_host                           = 'dori-dev'                                                         # 'dori-dev' when running client inside container to connect to networked 'dori-dev' container, otherwise 'localhost' (port forwarded from inside container)
 dori_tcp_port                           = 10002                                                              # '10002' when running client inside container, otherwise '10002' (port forwarded from inside container) - no changes necessary, should match `dori.tcp_port`
@@ -77,5 +77,6 @@ launch_basecall_server                  = true
 control                                 = false
 mode                                    = 'mapping'
 type                                    = 'targeted_sequencing'
+reference                               = '/tmp/chm13v2_chr1_chr2.mmi'
+min_match_len                           = 0                                                           # minimum matched mapping length
 targets                                 = ["chr1"]                                                    # leave empty to target all sequences "NC_063383.1"
-min_match_len                           = 0                                                                  # minimum matched mapping length for `minimap2-rs`

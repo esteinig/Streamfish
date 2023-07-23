@@ -2,6 +2,7 @@
 #![allow(non_camel_case_types)]
 
 use clap::Parser;
+use config::SliceDiceConfig;
 use crate::utils::init_logger;
 use crate::error::StreamfishError;
 use crate::server::dori::DoriServer;
@@ -30,14 +31,25 @@ async fn main() -> Result<(), StreamfishError> {
     match &terminal.command {
         Commands::ReadUntil ( _  ) => {
 
-            let mut client = ReadUntilClient::connect(&config).await?;
+            let client = ReadUntilClient::new();
             
-            if config.readuntil.read_cache {
-                client.run_cached().await?;
-            } else {
-                unimplemented!("Streaming RPC not implemented")
+            match terminal.global.slice_dice {
+                Some(slice_config) => {
+                    let slice_cfg = SliceDiceConfig::from_toml(&slice_config)?;
+                    client.run_slice_dice(&config, &slice_cfg).await?;
+                },
+                None => {
+
+                    if config.readuntil.read_cache {
+                        client.run_cached(config).await?;
+                    } else {
+                        unimplemented!("Streaming RPC not implemented")
+                    }
+        
+                }
             }
 
+          
         },
         Commands::DoriServer ( _ ) => {
 

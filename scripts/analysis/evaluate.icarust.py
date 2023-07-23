@@ -293,6 +293,8 @@ def read_length_histogram_distinct(data: Dict[str, MappingSummary], output_file:
 
         sns.despine()
         ax.grid(False)
+
+        ax.set_xlim(0, max_length)    
     
     plt.savefig(output_file, dpi=300, bbox_inches='tight', transparent=False)
     plt.close()

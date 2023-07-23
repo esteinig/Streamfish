@@ -10,11 +10,11 @@ use crate::client::error::ClientError;
 use crate::client::minknow::MinknowClient;
 use crate::client::services::data::DataClient;
 use crate::services::dori_api::adaptive::Decision;
-use crate::config::{StreamfishConfig, Basecaller};
+use crate::config::{StreamfishConfig, Basecaller, SliceDiceConfig};
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use crate::client::services::acquisition::AcquisitionClient;
 use crate::services::minknow_api::data::GetLiveReadsRequest;
-use crate::services::minknow_api::acquisition::MinknowStatus;
+use crate::services::minknow_api::acquisition::{MinknowStatus, CurrentStatusRequest};
 use crate::services::minknow_api::data::get_live_reads_request::action;
 use crate::services::dori_api::adaptive::{RequestType, StreamfishRequest};
 
@@ -77,20 +77,68 @@ fn send_termination_signal(sender: &UnboundedSender<ClientErrorSignal>, error: C
 pub struct ClientErrorSignal { }
 
 
+    
+
 #[derive(Debug, Clone)]
-pub struct ReadUntilClient {
-    pub minknow: MinknowClient,
-    pub config: StreamfishConfig
-}
+pub struct ReadUntilClient { }
 
 // Do not use Strings when it can be avoided, introduces too much latency, use str refs (&str) or enumerations
 // this introducted a bit of latency into the logging as string name conversion
 
 impl ReadUntilClient {
 
-    pub async fn connect(config: &StreamfishConfig) -> Result<Self, ClientError> {
+    pub fn new() -> Self {
+        Self { }
+    }
 
-        // Unblock-all warnings visible on startup
+    // Run a slice-and-dice configuration
+    pub async fn run_slice_dice(self, config: &StreamfishConfig, slice_dice: &SliceDiceConfig) -> Result<(), ClientError> {
+
+        let slice_configs = slice_dice.get_configs(config);
+        let client_names = slice_configs.iter().map(|x| x.meta.client_name.clone()).collect::<Vec<String>>();
+
+        log::info!("Launching slice-and-dice configuration for adaptive sampling client:");
+        log::info!("{}", &slice_dice);
+
+        let mut task_handles = Vec::new();
+        for (i, slice_cfg) in slice_configs.into_iter().enumerate() {
+            
+            let client = self.clone();  // clone the client and control server channel
+
+            log::info!("Launching slice runner with configuration:");
+            log::info!("{}", &slice_dice.slice[i]);
+
+            let handle = tokio::spawn(async move {
+                client.run_cached(slice_cfg).await?;  // run the slice config
+                Ok::<(), ClientError>(())
+            });
+            task_handles.push(handle);
+        }
+
+        // Await the spawned tasks to return error and shutdown messages for each slice
+        for (i, handle) in task_handles.into_iter().enumerate() {
+            match handle.await {
+                Ok(Ok(())) => { },
+                Ok(Err(e)) => log::warn!("{}: {}", client_names[i], e.to_string()),
+                Err(e) => log::error!("Join error on slice {}: {}", i, e.to_string())
+            };
+        };
+
+        Ok(())
+    }
+    pub async fn run_cached(&self, config: StreamfishConfig) -> Result<(), ClientError> {
+
+        // Control server connection - moved into main routine because cloning the client with
+        // the established connections results in PoisonError
+        // 
+        // Update: caused by mismatch in number of channels - Icarust (1024) vs Streamfish (2048) but
+        // keeping this structure as StreamfishConfig has only to be passed once into the run methods
+        let minknow_client = MinknowClient::connect(&config.minknow, &config.icarust).await?;
+
+        // Wait a little just in case
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Unblock-all warnings on startup
         if config.readuntil.unblock_all_client {
             log::warn!("Unblocking reads immediately after receipt from control server!");
         }
@@ -100,22 +148,9 @@ impl ReadUntilClient {
         if config.readuntil.unblock_all_basecaller {
             log::warn!("Unblocking reads after basecalling on Dori!");
         }
-
         if config.readuntil.unblock_all_mapper {
             log::warn!("Unblocking reads after basecalling and mapping on Dori!");
         }
-
-        // MinKNOW and Dori client connections
-        let minknow_client = MinknowClient::connect(&config.minknow, &config.icarust).await?;
-
-        Ok(Self { 
-            minknow: minknow_client,
-            config: config.clone()
-        })
-    }
-
-    pub async fn run_cached(&mut self) -> Result<(), ClientError> {
-
 
         // Define the decisions as <i32> - repeated into() calls in the stream processing
         // loops introduce a tiny bit of latency! Make sure calls like this are minimized.
@@ -128,8 +163,8 @@ impl ReadUntilClient {
         let data_request: i32 = RequestType::Data.into();
         let init_request: i32 = RequestType::Init.into();
 
-        let run_config = self.config.readuntil.clone();
-        let experiment_config = self.config.experiment.clone();
+        let run_config = config.readuntil.clone();
+        let experiment_config = config.experiment.clone();
 
         let clock = Clock::new();
 
@@ -138,13 +173,13 @@ impl ReadUntilClient {
         // ==============================================
 
 
-        let dori_thread_handle = match self.config.readuntil.launch_dori_server {
+        let dori_task_handle = match config.readuntil.launch_dori_server {
             false => {
                 log::warn!("Dori server will not be launched - manual setup required");
                 None
             },
             true => {
-                let dori_config =  self.config.clone();
+                let dori_config =  config.clone();
 
                 log::info!("Launching Dori in async task...");
                 let dori_thread_handle = tokio::spawn(async move {
@@ -152,36 +187,43 @@ impl ReadUntilClient {
                     Ok::<(), ClientError>(())
                 });
 
-                if self.config.dori.tcp_enabled {
-                    log::info!("Dori launched, available on TCP (http://{}:{})",  self.config.dori.tcp_host,  self.config.dori.tcp_port)
+                if config.dori.tcp_enabled {
+                    log::info!("Dori launched, available on TCP (http://{}:{})",  config.dori.tcp_host,  config.dori.tcp_port)
                 } else {
-                    log::info!("Dori launched, available on UDS ({})",  self.config.dori.uds_path.display())
+                    log::info!("Dori launched, available on UDS ({})",  config.dori.uds_path.display())
                 }
+
+                // Wait a little - race condition in async slice-and-dice
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
                 Some(dori_thread_handle)
             },
         };
 
-        let basecaller_process_handle = match (self.config.readuntil.launch_basecall_server, self.config.dori.basecaller.clone() ) {
+        let basecaller_process_handle = match (config.readuntil.launch_basecall_server, config.dori.basecaller.clone() ) {
             (false, _) => {
-                log::warn!("Basecall server will not be launched - manual setup required.");
+                log::warn!("Basecall server will not be launched - manual setup required");
                 None
             },
             (true, Basecaller::Guppy) => {
                 
                 log::info!("Launching Guppy server in process thread...");
                 
-                let process_stderr = std::process::Stdio::from(std::fs::File::create( self.config.guppy.server.stderr_log.clone()).expect(
-                    &format!("Failed to create basecall server log file: {}",  self.config.guppy.server.stderr_log.display())
+                let process_stderr = std::process::Stdio::from(std::fs::File::create( config.guppy.server.stderr_log.clone()).expect(
+                    &format!("Failed to create basecall server log file: {}",  config.guppy.server.stderr_log.display())
                 ));
 
-                let process = std::process::Command::new( self.config.guppy.server.path.as_os_str())
-                    .args(self.config.guppy.server.args.clone())
+                let process = std::process::Command::new( config.guppy.server.path.as_os_str())
+                    .args(config.guppy.server.args.clone())
                     .stdout(std::process::Stdio::null())
                     .stderr(process_stderr)
                     .spawn()
                     .expect("Failed to spawn basecall server process for Guppy server");
                 
-                log::info!("Guppy server launched, available on: {}",  self.config.guppy.client.address);
+                log::info!("Guppy server launched, available on: {}",  config.guppy.client.address);
+
+                // Wait a little - race condition in async slice-and-dice
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
                 Some(process)
 
@@ -221,30 +263,35 @@ impl ReadUntilClient {
         // MPSC message queues: senders and receivers
         // ==========================================
 
-        // Do this here for clarity - all errors send a signal into this queue 
+        // All errors send a signal into this queue 
 
-        let termination_handle = tokio::spawn(async move {
+        let client_name = config.meta.client_name.clone();
+        tokio::spawn(async move {
 
             log::info!("Spawned task for graceful shutdowns...");
             
             tokio::select! {
-                _ = signal::ctrl_c() => log::warn!("Received manual shutdown signal"),
-                _ = shutdown_rx.recv() => log::warn!("Received shutdown signal"),
+                _ = signal::ctrl_c() => log::warn!("{}: received manual shutdown signal", client_name),
+                _ = shutdown_rx.recv() => log::warn!("{}: received shutdown signal", client_name),
             }
             
             if let Some(mut basecaller_thread) = basecaller_process_handle {
-                log::warn!("Shutting down basecall server process...");
+                log::warn!("{}: shutting down basecall server process...", client_name);
 
-                basecaller_thread.kill().map_err(|err| err).unwrap();
+                basecaller_thread.kill().map_err(|err| err).expect("Failed to kill basecaller thread - you may need to do this manually");
             }
 
-            if let Some(dori_thread) = dori_thread_handle {
-                log::warn!("Shutting down Dori server task...");
-                dori_thread.abort();
+            if let Some(dori_task) = dori_task_handle {
+                log::warn!("{}: shutting down processing server task...", client_name);
+                dori_task.abort();
             }
 
-            log::warn!("Shutting down Streamfish client...");
-            log::info!("So long, and thanks for all the fish");
+            log::warn!("{}: shutting down Streamfish client...", client_name);
+            log::info!("{}: so long, and thanks for all the fish! 🐟", client_name);
+
+            // Give some time for shutdowns
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
             std::process::exit(1)
 
         });
@@ -253,21 +300,19 @@ impl ReadUntilClient {
         // Client connections
         // ===================
 
-
-
-        let mut dori = DoriClient::connect(&self.config).await.map_err(|_| {
+        let mut dori_rpc = DoriClient::connect(&config).await.map_err(|_| {
             send_termination_signal(&shutdown_tx, ClientError::DoriServerConnectionInitiation)
         })?;
 
-        let mut data_client = DataClient::from_minknow_client(
-            &self.minknow, &run_config.device_name
+        let mut data_rpc = DataClient::from_minknow_client(
+            &minknow_client, &run_config.device_name
         ).await.map_err(|err| {
             send_termination_signal(&shutdown_tx, err)
         })?;
 
 
-        let mut acquisition_client = AcquisitionClient::from_minknow_client(
-            &self.minknow, &run_config.device_name
+        let mut acquisition_rpc = AcquisitionClient::from_minknow_client(
+            &minknow_client, &run_config.device_name
         ).await.map_err(|err| {
             send_termination_signal(&shutdown_tx, err)
         })?;
@@ -304,9 +349,11 @@ impl ReadUntilClient {
 
         loop {
             interval.tick().await;
-            let response = acquisition_client.get_current_status().await.map_err(|_| {
-                shutdown_tx.send(ClientErrorSignal { })
-            }).unwrap();
+
+            let request = tonic::Request::new(CurrentStatusRequest {});
+            let response = acquisition_rpc.client.current_status(request).await.map_err(|_| {
+                send_termination_signal(&shutdown_tx, ClientError::ControlServerAcquisitionStatusRequest)
+            })?.into_inner();
 
             if response.status() == MinknowStatus::Processing {
                 log::info!("Device started processing data...");  // must be processing not starting for request stream init
@@ -337,7 +384,7 @@ impl ReadUntilClient {
         })?;
 
         // DataService response stream is initiated with the data request stream to MinKNOW
-        let mut minknow_stream = data_client.client.get_live_reads(tonic::Request::new(data_request_stream)).await.map_err(|_| {
+        let mut minknow_stream = data_rpc.client.get_live_reads(tonic::Request::new(data_request_stream)).await.map_err(|_| {
             send_termination_signal(&shutdown_tx, ClientError::ControlServerStreamInit)
         })?.into_inner();
 
@@ -346,7 +393,7 @@ impl ReadUntilClient {
             send_termination_signal(&shutdown_tx, ClientError::DoriServerStreamInitSend)
         })?;
 
-        let mut dori_stream = dori.client.cache(tonic::Request::new(dori_request_stream)).await.map_err(|_| {
+        let mut dori_stream = dori_rpc.client.cache(tonic::Request::new(dori_request_stream)).await.map_err(|_| {
             send_termination_signal(&shutdown_tx, ClientError::DoriServerStreamInit)
         })?.into_inner();
 
@@ -576,8 +623,6 @@ impl ReadUntilClient {
                 Err(e) => log::error!("Join error: {}", e.to_string())
             };
         };
-
-        termination_handle.await.expect("Failed to join termination handle");
 
         Ok(())
 

@@ -18,7 +18,6 @@ pub struct StreamfishConfig  {
     pub icarust: IcarustConfig,
     pub guppy: GuppyConfig,
     pub dori: DoriConfig,
-    pub minimap: MinimapConfig,
     pub readuntil: ReadUntilConfig,
     pub experiment: ExperimentConfig
 }
@@ -27,7 +26,9 @@ pub struct StreamfishConfig  {
 pub struct MetaConfig {
     pub name: String,
     pub version: String,
-    pub description: String
+    pub description: String,
+    pub client_name: String,
+    pub server_name: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -98,13 +99,6 @@ pub struct ReadUntilConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct MinimapConfig {
-    pub reference: PathBuf
-}
-
-
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct GuppyConfig {
     pub client: GuppyClientConfig,
     pub server: GuppyServerConfig,
@@ -148,6 +142,7 @@ pub struct ExperimentConfig {
     pub r#type: String,
     pub targets: Vec<String>,
     pub min_match_len: i32,
+    pub reference: PathBuf,
 
     #[serde(skip_deserializing)]
     pub experiment: Experiment
@@ -290,7 +285,7 @@ impl StreamfishConfig {
     pub fn configure(&mut self) {
             
         // Some checks and argument construction for basecaller configurations
-        if self.dori.classifier == Classifier::Minimap2Rust && self.minimap.reference.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
+        if self.dori.classifier == Classifier::Minimap2Rust && self.experiment.reference.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
             panic!("Classifier reference must be an index file (.mmi)")
         }
 
@@ -627,5 +622,74 @@ impl MappingConfig {
         } else {
             self.no_map.decision
         }
+    }
+}
+
+
+
+// Slice-and-dice configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct SliceDiceConfig {
+    pub channels: u32, 
+    pub launch_dori_server: bool,
+    pub launch_basecall_server: bool,
+    pub slice: Vec<SliceConfig>
+}
+impl SliceDiceConfig {
+    pub fn from_toml(file: &PathBuf) -> Result<Self, StreamfishError> {
+
+        let toml_str = std::fs::read_to_string(file).map_err(|err| StreamfishError::TomlConfigFile(err))?;
+        let config: SliceDiceConfig = toml::from_str(&toml_str).map_err(|err| StreamfishError::TomlConfigParse(err))?;
+
+        Ok(config)
+    }
+    // Get the re-configured core configs for each slice
+    pub fn get_configs(&self, config: &StreamfishConfig) -> Vec<StreamfishConfig> {
+
+        let mut configs = Vec::new();
+        for slice in &self.slice {
+
+            let mut slice_config = config.clone();
+
+            slice_config.meta.client_name = slice.client_name.clone();
+            slice_config.readuntil.launch_dori_server = self.launch_dori_server;
+            slice_config.readuntil.launch_basecall_server = self.launch_basecall_server;
+
+            slice_config.readuntil.channels = self.channels;
+            slice_config.readuntil.channel_start = slice.channel_start;
+            slice_config.readuntil.channel_end = slice.channel_end;
+            slice_config.dori.uds_path = slice.dori_uds_path.clone();
+            slice_config.guppy.server.port = slice.guppy_server_port.clone();
+            slice_config.guppy.client.address = slice.guppy_client_address.clone();
+
+            slice_config.configure(); // re-configure the basecaller server/client args
+
+            configs.push(slice_config);
+        }
+        configs
+    }
+}
+
+impl std::fmt::Display for SliceDiceConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "SliceDice: channels={} slices={} launch_dori={} launch_basecaller={}", self.channels, self.slice.len(), self.launch_dori_server, self.launch_basecall_server)
+    }
+}
+
+// Slice configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct SliceConfig {
+    pub client_name: String,
+    pub channel_start: u32,
+    pub channel_end: u32,
+    pub dori_uds_path: PathBuf,
+    pub guppy_server_port: String,
+    pub guppy_client_address: String,
+}
+
+
+impl std::fmt::Display for SliceConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}: start={} end={} dori={} guppy={}", self.client_name, self.channel_start, self.channel_end, self.dori_uds_path.display(), self.guppy_client_address)
     }
 }
