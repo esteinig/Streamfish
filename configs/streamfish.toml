@@ -53,16 +53,16 @@ stderr_log                              = "/tmp/guppy.stderr"
 
 [readuntil]
 device_name                             = "MS12345"
-channels                                = 2048
+channels                                = 1024
 channel_start                           = 1
-channel_end                             = 2048
+channel_end                             = 1024
 init_delay                              = 10
 dori_tcp_host                           = 'dori-dev'                                                         # 'dori-dev' when running client inside container to connect to networked 'dori-dev' container, otherwise 'localhost' (port forwarded from inside container)
 dori_tcp_port                           = 10002                                                              # '10002' when running client inside container, otherwise '10002' (port forwarded from inside container) - no changes necessary, should match `dori.tcp_port`
 read_cache                              = true
 read_cache_batch_rpc                    = false
 read_cache_min_chunks                   = 1
-read_cache_max_chunks                   = 3                                                    
+read_cache_max_chunks                   = 12                                                   
 latency_log                             = "/tmp/latency.log"
 action_throttle                         = 0                                                                  # Streaming actions (= 0) or batched actions (> 0) - in milliseconds
 unblock_duration                        = 0.1
@@ -77,6 +77,6 @@ launch_basecall_server                  = true
 control                                 = false
 mode                                    = 'mapping'
 type                                    = 'targeted_sequencing'
-reference                               = '/tmp/chm13v2_chr1_chr2.mmi'
+reference                               = '/tmp/chm13v2_chr11.mmi'
 min_match_len                           = 0                                                           # minimum matched mapping length
-targets                                 = ["chr1"]                                                    # leave empty to target all sequences "NC_063383.1"
+targets                                 = ["chr11::9365480::9400673"]                                 # leave empty to target all sequences "NC_063383.1" - TMEM41B "chr11::9365480::9400673"

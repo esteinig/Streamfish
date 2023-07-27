@@ -103,7 +103,7 @@ impl ReadUntilClient {
         let mut task_handles = Vec::new();
         for (i, slice_cfg) in slice_configs.into_iter().enumerate() {
             
-            let client = self.clone();  // clone the client and control server channel
+            let client = self.clone();  // clone the clien
 
             log::info!("Launching slice runner with configuration:");
             log::info!("{}", &slice_dice.slice[i]);

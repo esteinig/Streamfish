@@ -50,8 +50,7 @@ pub enum ClientError {
     // Represents failure to send a termination signal into the shutdown queue
     #[error("Failed to send a termination signal into the shutdown queue")]
     ShutdownQueueSend,
-
-    // Represents failure to send a termination signal into the shutdown queue
+    // Represents failure to send a request for experiment status to the acquisition endpoint on the control server
     #[error("Failed to send a status request to the control server acquitision endpoint")]
     ControlServerAcquisitionStatusRequest,
     // Represents failure to create the logging file

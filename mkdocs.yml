@@ -52,11 +52,12 @@ markdown_extensions:
   - pymdownx.superfences
 
 nav:
-  - 'Introduction': 'index.md'
-  - 'Documentation': 'streamfish/index.md'
-  - 'Experiments': 'experiments/index.md'
-  - 'Benchmarks': 'benchmarks/index.md'
-  - 'Tutorials': 'streamfish/tutorials.md'
-  - 'Publications': 'streamfish/publications.md'
-  - 'Dependencies': 'streamfish/dependencies.md'
-  - 'Changelog': 'streamfish/changelog.md'
+  - 'Introduction': 'introduction.md'
+  - 'Installation': 'installation.md'
+  - 'Configuration': 'configuration.md'
+  - 'Experiments': 'experiments.md'
+  - 'Benchmarks': 'benchmarks.md'
+  - 'Tutorials': 'tutorials.md'
+  - 'Publications': 'publications.md'
+  - 'Dependencies': 'dependencies.md'
+  - 'Changelog': 'changelog.md'

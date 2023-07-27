@@ -3,8 +3,10 @@
 
 use minimap2::Mapping;
 use std::path::PathBuf;
+use std::io::BufRead;
+use serde::de::Error;
 use serde::{Deserialize, Deserializer};
-use crate::{services::{minknow_api::data::get_live_reads_request::RawDataType, dori_api::adaptive::Decision}, error::StreamfishError};
+use crate::{services::{minknow_api::data::get_live_reads_request::RawDataType, dori_api::adaptive::Decision}, error::StreamfishConfigError};
 
 fn get_env_var(var: &str) -> Option<String> {
     std::env::var(var).ok()
@@ -49,8 +51,7 @@ pub struct IcarustConfig {
 
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct DoriConfig {
-    
+pub struct DoriConfig {    
     pub minknow_host: String,
     pub minknow_port: u32,
     pub classifier: Classifier,
@@ -140,12 +141,83 @@ pub struct ExperimentConfig {
     pub control: bool,
     pub mode: String,
     pub r#type: String,
-    pub targets: Vec<String>,
+    pub targets: Vec<Target>,
+    pub target_file: Option<PathBuf>,
     pub min_match_len: i32,
     pub reference: PathBuf,
 
     #[serde(skip_deserializing)]
     pub experiment: Experiment
+}
+
+
+// The output is wrapped in a Result to allow matching on errors
+// Returns an Iterator to the Reader of the lines of the file.
+fn read_lines<P>(filename: P) -> std::io::Result<std::io::Lines<std::io::BufReader<std::fs::File>>>
+where P: AsRef<std::path::Path>, {
+    let file = std::fs::File::open(filename)?;
+    Ok(std::io::BufReader::new(file).lines())
+}
+
+/// A target specification for targeted sequencing experiments
+/// Add negative checks due to i32 `minimap2-rs` types
+#[derive(Debug, Clone)]
+pub struct Target {
+    name: String,
+    start: Option<i32>,  
+    end: Option<i32>,  
+}
+impl Target {
+    pub fn from(s: String, delimiter: &str) -> Result<Self, StreamfishConfigError> {
+        let components = s.split(&delimiter).into_iter().collect::<Vec<&str>>();
+        match components.len() {
+            1 => Ok(Target { name: components[0].to_string(), start: None, end: None }),
+            3 => Ok(Target { 
+                name: components[0].to_string(), 
+                start: Some(components[1].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone()))?), 
+                end: Some(components[2].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone()))?) 
+            }),
+            _ => Err(StreamfishConfigError::TargetFormat(s))    
+        }
+    }
+}
+
+pub struct TargetFile {
+    targets: Vec<Target>
+}
+impl TargetFile {
+    pub fn from(path: PathBuf, delimiter: &str) -> Result<Self, StreamfishConfigError> {
+        let mut targets = Vec::new();
+        if let Ok(lines) = read_lines(&path) {
+            for line in lines {
+                if let Ok(s) = line {
+                    targets.push(Target::from(s, delimiter)?)
+                }
+            }
+        }
+        Ok(Self{ targets })
+    }
+}
+
+
+
+
+impl<'de> Deserialize<'de> for Target {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where D: Deserializer<'de>
+    {
+        let s = String::deserialize(deserializer)?;
+        let components = s.split("::").into_iter().collect::<Vec<&str>>();
+        match components.len() {
+            1 => Ok(Target { name: components[0].to_string(), start: None, end: None }),
+            3 => Ok(Target { 
+                name: components[0].to_string(), 
+                start: Some(components[1].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone())).map_err(D::Error::custom)?), 
+                end: Some(components[2].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone())).map_err(D::Error::custom)?) 
+            }),
+            _ => Err(StreamfishConfigError::TargetFormat(s)).map_err(D::Error::custom)
+        }
+    }
 }
 
 /// Unblock all circuits for testing
@@ -247,10 +319,10 @@ impl<'de> Deserialize<'de> for Classifier {
 }
 
 impl StreamfishConfig {
-    pub fn from_toml(file: PathBuf) -> Result<Self, StreamfishError> {
+    pub fn from_toml(file: PathBuf) -> Result<Self, StreamfishConfigError> {
 
-        let toml_str = std::fs::read_to_string(file).map_err(|err| StreamfishError::TomlConfigFile(err))?;
-        let mut config: StreamfishConfig = toml::from_str(&toml_str).map_err(|err| StreamfishError::TomlConfigParse(err))?;
+        let toml_str = std::fs::read_to_string(file).map_err(|err| StreamfishConfigError::TomlConfigFile(err))?;
+        let mut config: StreamfishConfig = toml::from_str(&toml_str).map_err(|err| StreamfishConfigError::TomlConfigParse(err))?;
 
         let (unblock_all_client, unblock_all_server, unblock_all_basecaller, unblock_all_mapper) = match config.readuntil.unblock_all {
             true => UnblockAll::from_str(&config.readuntil.unblock_all_mode).get_config(),
@@ -268,6 +340,11 @@ impl StreamfishConfig {
         config.readuntil.unblock_all_server = unblock_all_server;
         config.readuntil.unblock_all_basecaller = unblock_all_basecaller;
         config.readuntil.unblock_all_mapper = unblock_all_mapper;
+
+        // If target list by file:
+        if let Some(path) = config.experiment.target_file.clone() {
+            config.experiment.targets = TargetFile::from(path, "\t")?.targets
+        }
 
         // Configure the experiment and mapping settings
         config.experiment.configure();
@@ -316,7 +393,6 @@ impl StreamfishConfig {
         } else {
             panic!("Classifier configuration not supported")
         }
-
 
 }
 }
@@ -385,7 +461,7 @@ pub enum MappingExperiment {
 }
 impl MappingExperiment {
     // Region of interest for alignment: known host genome [implemented]
-    pub fn host_depletion(targets: Vec<String>, min_match_len: i32) -> Self {
+    pub fn host_depletion(targets: Vec<Target>, min_match_len: i32) -> Self {
         MappingExperiment::HostDepletion(
             MappingConfig::host_depletion(targets, min_match_len)
         )
@@ -396,7 +472,7 @@ impl MappingExperiment {
     //   - Targeted coverage depth: all known genomes within the sample, tracked for coverage depth [not implemented]
     //   - Low abundance enrichment: all genomes within the sample that can be identified as well as those that cannot [not implemented]
     //
-    pub fn targeted_sequencing(targets: Vec<String>, min_match_len: i32) -> Self {
+    pub fn targeted_sequencing(targets: Vec<Target>, min_match_len: i32) -> Self {
         MappingExperiment::TargetedSequencing(
             MappingConfig::targeted_sequencing(targets, min_match_len)
         )
@@ -436,11 +512,12 @@ pub struct DecisionConfig {
     pub flags: Vec<u32>
 }
 
+
 // A mapping configuration for alignment as outlined in Readfish (Tables 1)
 #[derive(Debug, Clone, Deserialize)]
 pub struct MappingConfig {
     // List of target sequence ids
-    pub targets: Vec<String>,
+    pub targets: Vec<Target>,
     // Target all sequences in reference - used when target list is empty
     pub target_all: bool,
     //	Read fragment maps multiple locations including region of interest.
@@ -459,7 +536,7 @@ pub struct MappingConfig {
     pub min_match_len: i32,
 }
 impl MappingConfig {
-    pub fn host_depletion(targets: Vec<String>, min_match_len: i32) -> Self {
+    pub fn host_depletion(targets: Vec<Target>, min_match_len: i32) -> Self {
         Self {
             targets: targets.clone(),
             target_all: targets.is_empty(),
@@ -492,7 +569,7 @@ impl MappingConfig {
 
         }
     }
-    pub fn targeted_sequencing(targets: Vec<String>, min_match_len: i32) -> Self {
+    pub fn targeted_sequencing(targets: Vec<Target>, min_match_len: i32) -> Self {
         Self {
             targets: targets.clone(),
             target_all: targets.is_empty(),
@@ -556,25 +633,23 @@ impl MappingConfig {
             }
         }
     }
-    // Main method for `minimap2-dorado` using a SAM flag to get the configured experiment decision [.contains() does not work with str slices]
+    #[deprecated(since = "0.1.0", note = "Dorado fork with straeming implementation has been removed due to instability and imminent release of server version.")]
     pub fn decision_from_sam(&self, flag: &u32, tid: &str) -> i32 {
 
         let target_mapped = match self.target_all {
             true => true,
-            false => self.targets.iter().any(|x| x == tid)
+            false => self.targets.iter().any(|x| x.name == tid)
         };
 
         if self.multi_on.flags.contains(flag) && target_mapped {
             self.multi_on.decision
-        } else if self.multi_off.flags.contains(flag) && !target_mapped {  // target all sequences active (no sequences in targets) == any sequence mapping off target as targets do not exist
+        } else if self.multi_off.flags.contains(flag) && !target_mapped {  
             self.multi_off.decision
         } else if self.single_on.flags.contains(flag) && target_mapped {
             self.single_on.decision
-        } else if self.single_off.flags.contains(flag) && !target_mapped { // target all sequences active (no sequences in targets) == any sequence mapping off target as targets do not exist
+        } else if self.single_off.flags.contains(flag) && !target_mapped { 
             self.single_off.decision
         } else {
-            // No sequence is not possible, so we otherwise 
-            // return no mapping status decision
             self.no_map.decision
         }
     }
@@ -589,7 +664,6 @@ impl MappingConfig {
                 }).collect()
             }
         };
-        // log::info!("After filter: {:?}", mappings);
 
         if mappings.is_empty() {
             return self.no_map.decision
@@ -600,14 +674,30 @@ impl MappingConfig {
         let target_mapped = match self.target_all {
             true => true,
             false => {
-                let mut mapped = Vec::new();
+                let mut mapped = 0;
                 for mapping in mappings.into_iter() {
                     if let Some(tid) = mapping.target_name {
                         log::debug!("Detected mapping for {}", tid);
-                        mapped.push(tid);
+
+                        // For each mapping test if it matches the aligned 
+                        // sequence identifier and optionally if the alignment
+                        // start falls within the target range
+                        for target in &self.targets {
+                            if target.name == tid {
+                                // If a target range is specified, test if the start of the alignment
+                                // falls within the target range - if so, this counts as a mapped read
+                                if let (Some(start), Some(end)) = (target.start, target.end) {
+                                    if mapping.target_start >= start && mapping.target_start <= end {
+                                        mapped += 1
+                                    }
+                                } else {
+                                    mapped += 1
+                                }
+                            }
+                        }
                     }
                 }
-                self.targets.iter().any(|target| mapped.contains(&target)) 
+                mapped > 0
             }
         };
              
@@ -636,10 +726,10 @@ pub struct SliceDiceConfig {
     pub slice: Vec<SliceConfig>
 }
 impl SliceDiceConfig {
-    pub fn from_toml(file: &PathBuf) -> Result<Self, StreamfishError> {
+    pub fn from_toml(file: &PathBuf) -> Result<Self, StreamfishConfigError> {
 
-        let toml_str = std::fs::read_to_string(file).map_err(|err| StreamfishError::TomlConfigFile(err))?;
-        let config: SliceDiceConfig = toml::from_str(&toml_str).map_err(|err| StreamfishError::TomlConfigParse(err))?;
+        let toml_str = std::fs::read_to_string(file).map_err(|err| StreamfishConfigError::TomlConfigFile(err))?;
+        let config: SliceDiceConfig = toml::from_str(&toml_str).map_err(|err| StreamfishConfigError::TomlConfigParse(err))?;
 
         Ok(config)
     }

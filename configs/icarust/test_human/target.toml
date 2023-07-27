@@ -1,0 +1,26 @@
+pore_type = "R9"
+working_pore_percent = 85
+
+target_yield = 100000000000
+global_mean_read_length = 20000
+
+random_seed = 10
+output_path = "/tmp/"
+
+[parameters]
+
+sample_name = "test"
+experiment_name = "test_human_target"
+experiment_duration_set = 4800
+
+device_id = "Device"
+position = "MS12345"
+flowcell_name = "FAQ12345"
+
+break_read_ms = 400
+
+[[sample]]
+name = "CHM13v2 Chromosome11"
+input_genome = "/tmp/squiggles/chr11.squiggle.npy"
+mean_read_length = 15000
+weight = 1
