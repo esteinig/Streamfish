@@ -8,6 +8,7 @@ use crate::error::StreamfishError;
 use crate::server::dori::DoriServer;
 use crate::config::StreamfishConfig;
 use crate::terminal::{App, Commands};
+use crate::tools::minimap::Minimapper;
 use crate::client::minknow::MinknowClient;
 use crate::client::readuntil::ReadUntilClient;
 use crate::services::minknow_api::manager::SimulatedDeviceType;
@@ -27,11 +28,11 @@ async fn main() -> Result<(), StreamfishError> {
     init_logger();
 
     let terminal = App::parse();
-    let config = StreamfishConfig::from_toml(terminal.global.config)?;
 
     match &terminal.command {
         Commands::ReadUntil ( _  ) => {
 
+            let config = StreamfishConfig::from_toml(terminal.global.config)?;
             let client = ReadUntilClient::new();
             
             match terminal.global.slice_dice {
@@ -54,16 +55,25 @@ async fn main() -> Result<(), StreamfishError> {
         },
         Commands::DoriServer ( _ ) => {
 
+            let config = StreamfishConfig::from_toml(terminal.global.config)?;
             DoriServer::run(config).await?;
         },
         Commands::AddDevice ( args  ) => {
+            let config = StreamfishConfig::from_toml(terminal.global.config)?;
+
             let mut minknow_client = MinknowClient::connect(&config.minknow, &config.icarust).await?;
             minknow_client.clients.manager.add_simulated_device(&args.name, SimulatedDeviceType::from_cli(&args.r#type)).await?;
         },
         Commands::RemoveDevice ( args  ) => {
+            let config = StreamfishConfig::from_toml(terminal.global.config)?;
+
             let mut minknow_client = MinknowClient::connect(&config.minknow, &config.icarust).await?;
             minknow_client.clients.manager.remove_simulated_device(&args.name).await?;
-        }
+        },
+        Commands::MinimapRs ( args ) => {
+            let mm = Minimapper::new(args.index.clone());
+            mm.map(args.fastx.clone(), args.threads);
+        },
     }
 
     Ok(())
