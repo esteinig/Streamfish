@@ -67,7 +67,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
     // Adaptive sampling with Dorado basecalling and request/read cache implementation - single channel data transmission
     async fn cache(&self, request: Request<tonic::Streaming<StreamfishRequest>>) -> Result<Response<Self::CacheStream>, Status> {
 
-        log::info!("Initiated Dori::AdaptiveSamplingService::DoradoCacheChannel RPC");
+        log::info!("- [{}] - Initiated Dori::AdaptiveSamplingService::DoradoCacheChannel RPC", self.config.meta.server_name);
 
         // Used in generators, needs distinct clones
         let run_config_1 = self.config.clone();
@@ -77,7 +77,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let experiment = self.config.experiment.experiment.clone();
 
         let mapping_config = experiment.get_mapping_config();
-        log::info!("Mapping configuration: {:#?}", mapping_config);
+
+        log::info!("- [{}] - Loaded mapping configuration", self.config.meta.server_name);
 
         // Define the decisions as <i32> - repeated into() calls in the stream processing
         // loops introduce a tiny bit of latency! Make sure calls like this are minimized.

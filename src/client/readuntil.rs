@@ -402,7 +402,7 @@ impl ReadUntilClient {
         // ===========================================
 
 
-        log::info!("Initiated data streams with Dori ({}s before starting loops)", &run_config.init_delay);
+        log::info!("Initiated data streams with Dori ({}s delay)", &run_config.init_delay);
         tokio::time::sleep(tokio::time::Duration::new(run_config.init_delay, 0)).await;
 
         let start = clock.now();
@@ -510,7 +510,7 @@ impl ReadUntilClient {
                     })?;
 
                 } else {
-
+                    // Sends a none action - may not be needed, could use `continue`
                     throttle_tx.send(
                         Action {
                             action_id: Uuid::new_v4().to_string(),

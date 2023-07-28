@@ -88,4 +88,6 @@ Slice and dice rescues latency (effect somewhat mild, but may be more pronounced
 
 Compare max read chunks (allowign longer unblocks) with the gain in unblocked percent of target and ratio of target/non-target - looks like lower read chunks might be more effective than allowing larger one, despite lower percentage unblocked of target.
 
+Compare unblock all settings on range of test datasets and experiment combinations - small reference (known, e.g. two viruses), large reference (known, human), medium reference but many sequences (known, viral database)
+
 ## Supplementary Data

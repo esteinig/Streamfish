@@ -14,7 +14,7 @@ certificate                             = '/opt/ont/minknow/conf/rpc-certs/ca.cr
 [icarust]       
 enabled                                 = true                                                               # Uses MinKNOW configuration of host, port and certificate
 position_port                           = 10001                                                              # Required position port to connect to device
-sample_rate                             = 4000                                                               # Sample rate is currently not configuratble in Icarust, included for later modifications
+sample_rate                             = 4000                                                               # Sample rate is currently not configurable in Icarust, included for later modifications
 
 [dori] 
 uds_path                                = '/tmp/.dori/socket'                                                # Unix domain socket path on 'localhost', parent directory is created if not exists - SSD/NVME drives recommended, can be mounted in multiple containers for connections
@@ -79,4 +79,4 @@ mode                                    = 'mapping'
 type                                    = 'targeted_sequencing'
 reference                               = '/tmp/chm13v2_chr11.mmi'
 min_match_len                           = 0                                                           # minimum matched mapping length
-targets                                 = ["chr11::9365480::9400673"]                                 # leave empty to target all sequences "NC_063383.1" - TMEM41B "chr11::9365480::9400673"
+targets                                 = ["chr11::9365480::9400673"]                                 # leave empty to target all sequences  - speciffy target position range, 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)

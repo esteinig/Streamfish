@@ -163,19 +163,21 @@ where P: AsRef<std::path::Path>, {
 /// Add negative checks due to i32 `minimap2-rs` types
 #[derive(Debug, Clone)]
 pub struct Target {
-    name: String,
+    reference: String,
     start: Option<i32>,  
-    end: Option<i32>,  
+    end: Option<i32>, 
+    name: Option<String> 
 }
 impl Target {
     pub fn from(s: String, delimiter: &str) -> Result<Self, StreamfishConfigError> {
         let components = s.split(&delimiter).into_iter().collect::<Vec<&str>>();
         match components.len() {
-            1 => Ok(Target { name: components[0].to_string(), start: None, end: None }),
-            3 => Ok(Target { 
-                name: components[0].to_string(), 
+            1 => Ok(Target { reference: components[0].to_string(), start: None, end: None, name: None }),
+            4 => Ok(Target { 
+                reference: components[0].to_string(), 
                 start: Some(components[1].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone()))?), 
-                end: Some(components[2].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone()))?) 
+                end: Some(components[2].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone()))?),
+                name: Some(components[3].to_string())
             }),
             _ => Err(StreamfishConfigError::TargetFormat(s))    
         }
@@ -209,11 +211,12 @@ impl<'de> Deserialize<'de> for Target {
         let s = String::deserialize(deserializer)?;
         let components = s.split("::").into_iter().collect::<Vec<&str>>();
         match components.len() {
-            1 => Ok(Target { name: components[0].to_string(), start: None, end: None }),
-            3 => Ok(Target { 
-                name: components[0].to_string(), 
+            1 => Ok(Target { reference: components[0].to_string(), start: None, end: None, name: None}),
+            4 => Ok(Target { 
+                reference: components[0].to_string(), 
                 start: Some(components[1].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone())).map_err(D::Error::custom)?), 
-                end: Some(components[2].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone())).map_err(D::Error::custom)?) 
+                end: Some(components[2].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone())).map_err(D::Error::custom)?),
+                name: Some(components[3].to_string()) 
             }),
             _ => Err(StreamfishConfigError::TargetFormat(s)).map_err(D::Error::custom)
         }
@@ -638,7 +641,7 @@ impl MappingConfig {
 
         let target_mapped = match self.target_all {
             true => true,
-            false => self.targets.iter().any(|x| x.name == tid)
+            false => self.targets.iter().any(|x| x.reference == tid)
         };
 
         if self.multi_on.flags.contains(flag) && target_mapped {
@@ -678,16 +681,19 @@ impl MappingConfig {
                 for mapping in mappings.into_iter() {
                     if let Some(tid) = mapping.target_name {
                         log::debug!("Detected mapping for {}", tid);
-
                         // For each mapping test if it matches the aligned 
                         // sequence identifier and optionally if the alignment
                         // start falls within the target range
                         for target in &self.targets {
-                            if target.name == tid {
-                                // If a target range is specified, test if the start of the alignment
+                            if target.reference == tid {
+                                // If a target range is specified, test if the start OR end of the alignment
                                 // falls within the target range - if so, this counts as a mapped read
                                 if let (Some(start), Some(end)) = (target.start, target.end) {
-                                    if mapping.target_start >= start && mapping.target_start <= end {
+                                    //  OR mapping end falls within range OR mapping spans the range
+                                    if (mapping.target_start >= start && mapping.target_start <= end) ||  // alignment start falls within target range
+                                       (mapping.target_end >= start && mapping.target_end <= end)     ||  // alignment end falls within target range
+                                       (mapping.target_start <= start && mapping.target_end >= end)       // alignment spands the target range 
+                                    {   
                                         mapped += 1
                                     }
                                 } else {

@@ -52,7 +52,7 @@ markdown_extensions:
   - pymdownx.superfences
 
 nav:
-  - 'Introduction': 'introduction.md'
+  - 'Introduction': 'index.md'
   - 'Installation': 'installation.md'
   - 'Configuration': 'configuration.md'
   - 'Experiments': 'experiments.md'

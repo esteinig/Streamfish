@@ -16,9 +16,11 @@ import pandas
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+from pafpy import PafFile, PafRecord
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
 from pprint import pprint
+from collections import Counter
 
 from pathlib import Path
 from ont_fast5_api.fast5_interface import get_fast5_file
@@ -51,17 +53,20 @@ YESTERDAY_MEDIUM = [
 LAPUTA_MEDIUM.reverse()
 YESTERDAY_MEDIUM.reverse()
 
-# Summary 
 @dataclass
-class MappingSummary:
+class ReferenceData:
 
     reference: str
+    start: int
+    end: int
+    name: str
 
-    read_lengths_pass: List[int]
-    mapping_qualities_pass: List[int]
-
+    read_lengths_pass: List[int] 
     read_lengths_unblocked: List[int]
-    mapping_qualities_unblocked: List[int]
+    
+    reads_pass_records: List[PafRecord] = None
+    mapping_qualities_pass: List[int] = None
+    mapping_qualities_unblocked: List[int] = None
 
     reads_pass: int = 0
     bases_pass: int = 0
@@ -96,7 +101,7 @@ class ReferenceSummary:
     unblocked_percent: float = 0.
 
 
-    def from_mapping_summary(self, data: MappingSummary, control: bool = False):
+    def from_mapping_summary(self, data: ReferenceData, control: bool = False):
 
         self.reference=data.reference
         self.control=control
@@ -114,19 +119,19 @@ class ReferenceSummary:
         except ZeroDivisionError:
             self.unblocked_percent = 0
 
-        self.mean_mapq_pass = statistics.mean(data.mapping_qualities_pass) if len(data.mapping_qualities_pass) > 1 else 0
-        self.mean_length_pass = statistics.mean(data.read_lengths_pass) if len(data.read_lengths_pass) > 1 else 0
-        self.median_length_pass = int(statistics.median(data.read_lengths_pass)) if len(data.read_lengths_pass) > 1 else 0
-        self.n50_length_pass = compute_n50(data.read_lengths_pass) if len(data.read_lengths_pass) > 1 else 0
+        self.mean_mapq_pass = statistics.mean(data.mapping_qualities_pass) if data.mapping_qualities_pass and len(data.mapping_qualities_pass) > 1 else 0 
+        self.mean_length_pass = statistics.mean(data.read_lengths_pass) if data.read_lengths_pass and len(data.read_lengths_pass) > 1 else 0
+        self.median_length_pass = int(statistics.median(data.read_lengths_pass)) if data.read_lengths_pass and len(data.read_lengths_pass) > 1 else 0
+        self.n50_length_pass = compute_n50(data.read_lengths_pass) if data.read_lengths_pass and len(data.read_lengths_pass) > 1 else 0
 
-        self.mean_mapq_unblocked = statistics.mean(data.mapping_qualities_unblocked) if len(data.mapping_qualities_unblocked) > 1 else 0
-        self.mean_length_unblocked = statistics.mean(data.read_lengths_unblocked)  if len(data.read_lengths_unblocked) > 1 else 0
-        self.median_length_unblocked = int(statistics.median(data.read_lengths_unblocked)) if len(data.read_lengths_unblocked) > 1 else 0
-        self.n50_length_unblocked = compute_n50(data.read_lengths_unblocked)  if len(data.read_lengths_unblocked) > 1 else 0
+        self.mean_mapq_unblocked = statistics.mean(data.mapping_qualities_unblocked) if data.mapping_qualities_unblocked and len(data.mapping_qualities_unblocked) > 1 else 0
+        self.mean_length_unblocked = statistics.mean(data.read_lengths_unblocked)  if data.read_lengths_unblocked and len(data.read_lengths_unblocked) > 1 else 0
+        self.median_length_unblocked = int(statistics.median(data.read_lengths_unblocked)) if data.read_lengths_unblocked and len(data.read_lengths_unblocked) > 1 else 0
+        self.n50_length_unblocked = compute_n50(data.read_lengths_unblocked) if data.read_lengths_unblocked and  len(data.read_lengths_unblocked) > 1 else 0
 
         return self
     
-    def from_mapping_summaries(self, summaries: List[MappingSummary]):
+    def from_mapping_summaries(self, summaries: List[ReferenceData]):
 
         self.reference=""
         self.control=False
@@ -148,10 +153,17 @@ class ReferenceSummary:
             self.bases_unblocked += data.bases_unblocked
 
             
-            all_lengths_unblocked += data.read_lengths_unblocked
-            all_lengths_pass += data.read_lengths_pass
-            all_mapq_unblocked += data.mapping_qualities_unblocked
-            all_mapq_pass += data.mapping_qualities_pass
+            if data.read_lengths_unblocked:
+                all_lengths_unblocked += data.read_lengths_unblocked
+
+            if data.read_lengths_pass:
+                all_lengths_pass += data.read_lengths_pass
+
+            if data.mapping_qualities_unblocked:
+                all_mapq_unblocked += data.mapping_qualities_unblocked
+
+            if data.mapping_qualities_pass:
+                all_mapq_pass += data.mapping_qualities_pass
 
         try:
             self.unblocked_percent = (self.reads_unblocked/(self.reads_pass+self.reads_unblocked))*100
@@ -201,7 +213,7 @@ def compute_n50(read_lengths):
 #  PLOTTING FUNCTIONS  #
 ########################
 
-def read_length_density_all(data: Dict[str, MappingSummary], output_file: str, min_length: int =50, max_length: int =4000, colors: List[str] = LAPUTA_MEDIUM):
+def read_length_density_all(data: Dict[str, ReferenceData], output_file: str, min_length: int =50, max_length: int =4000, colors: List[str] = LAPUTA_MEDIUM):
 
     sns.set_style('whitegrid')
     sns.set(style='ticks', font_scale=0.6)
@@ -230,7 +242,7 @@ def read_length_density_all(data: Dict[str, MappingSummary], output_file: str, m
     plt.close()
 
 
-def read_length_histogram_all(data: Dict[str, MappingSummary], output_file: str, min_length: int =50, max_length: int =4000, colors: List[str] = LAPUTA_MEDIUM):
+def read_length_histogram_all(data: Dict[str, ReferenceData], output_file: str, min_length: int =50, max_length: int =4000, colors: List[str] = LAPUTA_MEDIUM):
 
     sns.set_style('whitegrid')
     sns.set(style='ticks', font_scale=0.6)
@@ -264,7 +276,7 @@ def read_length_histogram_all(data: Dict[str, MappingSummary], output_file: str,
     plt.close()
 
 
-def read_length_histogram_distinct(data: Dict[str, MappingSummary], output_file: str, min_length: int =50, max_lengths: List[int] = [4000], colors: List[str] = LAPUTA_MEDIUM):
+def read_length_histogram_distinct(data: Dict[str, ReferenceData], output_file: str, min_length: int =50, max_lengths: List[int] = [4000], colors: List[str] = LAPUTA_MEDIUM):
 
     sns.set_style('whitegrid')
     sns.set(style='ticks', font_scale=0.4)
@@ -276,7 +288,10 @@ def read_length_histogram_distinct(data: Dict[str, MappingSummary], output_file:
     fig, axes = plt.subplots(nrows=1, ncols=len(data))
     
     for i, (ref, summary) in enumerate(data.items()): 
-        ax = axes[i]
+        if len(data) > 1:
+            ax = axes[i]
+        else:
+            ax = axes
 
         try:
             max_length = max_lengths[i]
@@ -305,12 +320,12 @@ def read_length_histogram_distinct(data: Dict[str, MappingSummary], output_file:
 # SUMMARY FUNCTIONS #
 #####################
 
-def get_summary(ends: Path, sam: Path, output: Path = None) -> Dict[str, MappingSummary]:
+def get_endreasons(file: Path) -> Dict[str, int]:
 
-    print(f"Parsing end-reasons: {ends}")
+    print(f"Parsing end-reasons: {file}")
     endreasons = dict()
     # Parse end reasons into dictionary with identifier keys
-    with ends.open("r") as end_file:
+    with file.open("r") as end_file:
         for i, line in enumerate(end_file):
             if i > 0:
                 content = line.strip().split(",")
@@ -319,64 +334,18 @@ def get_summary(ends: Path, sam: Path, output: Path = None) -> Dict[str, Mapping
                 reason = int(content[3])
 
                 endreasons[read] = reason
+    return endreasons
 
-
-    print(f"Summarizing mappings: {sam}")
-    print(f"Writing summary data to: {output}")
-
-    if output is not None:
-        out_handle = output.open("w")
-        out_handle.write("id,ref,mapq,bp\n")
-
-    summary: Dict[str, MappingSummary] = dict()
-    with sam.open("r") as sam_file:
-        for line in sam_file:
-            if line.startswith("@"):
-                continue
-
-            content = line.strip().split("\t")
-            
-            read  = str(content[0])
-            ref   = str(content[2])
-            mapq  = int(content[4])
-            bases = len(content[9])
-
-            if output is not None:
-                out_handle.write(f"{read},{ref},{mapq},{bases}\n")
-
-            if ref not in summary.keys():
-                summary[ref] = MappingSummary(
-                    reference=ref, read_lengths_pass=[], mapping_qualities_pass=[],
-                    read_lengths_unblocked=[], mapping_qualities_unblocked=[]
-                )
-            else:
-
-                if endreasons[read] == 4:
-                    summary[ref].reads_unblocked += 1
-                    summary[ref].bases_unblocked += bases
-                    summary[ref].read_lengths_unblocked.append(bases)
-                    summary[ref].mapping_qualities_unblocked.append(mapq)
-                else:
-                    summary[ref].reads_pass += 1
-                    summary[ref].bases_pass += bases
-                    summary[ref].read_lengths_pass.append(bases)
-                    summary[ref].mapping_qualities_pass.append(mapq)
-
-
-    if output is not None:
-        out_handle.close()
-        
-    return summary
 
 def create_reference_summary_dataframe(
-    active_summary: Dict[str, MappingSummary], 
-    control_summary: Dict[str, MappingSummary] = None, 
+    active_summary: Dict[str, ReferenceData], 
+    control_summary: Dict[str, ReferenceData] = None, 
     output: Path = None
 ) -> Tuple[pandas.DataFrame, pandas.DataFrame]:
 
     # Create the reference summaries for each experiment arm summary
 
-    summary_list: List[MappingSummary] = [data for _, data in active_summary.items()]
+    summary_list: List[ReferenceData] = [data for _, data in active_summary.items()]
     summaries: List[ReferenceSummary] = [ReferenceSummary().from_mapping_summary(data, control=False) for _, data in active_summary.items()]
     
     if control_summary:
@@ -394,6 +363,186 @@ def create_reference_summary_dataframe(
         df.to_csv(output, index=False, sep=",", header=True)
 
     return df, df_combined
+
+def get_region_data_paf(ends: Path, alignment: Path, targets: Path) -> Dict[str, ReferenceData]:
+
+    # Get endreasons and target regions
+    endreasons = get_endreasons(file=ends)
+    target_regions = pandas.read_csv(targets, sep="\t", header=None, names=["ref", "start", "end", "name"])
+
+    # Setup target region data summaries
+    target_region_data: Dict[str, ReferenceData] = {f"{row['ref']}::{row['start']}::{row['end']}::{row['name']}": ReferenceData(
+        reference=row["ref"], start=row["start"], end=row["end"], name=row["name"], read_lengths_pass=[], read_lengths_unblocked=[], reads_pass_records=[]
+        ) for _, row in target_regions.iterrows()}
+
+    # Add off-target data summary for each reference
+    for _, row in target_regions.iterrows():
+        outside = f"{row['ref']}::0::0::off-target"
+        if outside not in target_region_data.keys():
+            target_region_data[outside] =  ReferenceData(
+                reference=row['ref'], start=0, end=0, name="off-target", read_lengths_pass=[], read_lengths_unblocked=[], reads_pass_records=[]
+            ) 
+        
+    # In the unblock decision any alignment (primary or secondary)
+    # is considered to match the reference or target region. To be 
+    # consistent, we add read data to unblocked statistics if any of the 
+    # alignments (primary/secondary) for this read matches within a region
+
+    # We therefore have to iterate over the PAF output twice - the first time
+    # to identify reads with secondary alignments, and the second time to 
+    # extract the correct data for those reads with secondary alignments -
+    # if they are prmary only we just go ahead with the standard conditions
+    
+    reads_with_secondary_alignments = get_reads_with_secondary_alignments(alignment=alignment)
+
+    read_records_secondary = dict()
+    with PafFile(alignment) as paf:
+
+        for record in paf:
+            if record.qname in reads_with_secondary_alignments:
+                # If this read has secondary alignments, do not process it,
+                # we evaluate it seperately after doing the primary alignments
+                if record.qname not in read_records_secondary:
+                    read_records_secondary[record.qname] = [record]
+                else:
+                    read_records_secondary[record.qname].append(record)
+
+                continue 
+            
+            evaluate_target_regions_for_reads_with_primary_alignment_only(record=record, target_region_data=target_region_data, endreasons=endreasons)
+    
+    for _, records in read_records_secondary.items():
+        evaluate_target_regions_for_reads_with_secondary_alignments(records=records, target_region_data=target_region_data, endreasons=endreasons)
+
+    print_target_summary(target_region_data=target_region_data)
+
+    return target_region_data
+
+def get_reads_with_secondary_alignments(alignment: Path) -> List[str]:
+
+    read_align_counter = Counter()
+    with PafFile(alignment) as paf:
+        for record in paf:
+            read_align_counter.update([record.qname])
+    
+    return [read_id for read_id, count in read_align_counter.items() if count > 1]
+
+
+def print_target_summary(target_region_data: Dict[str, ReferenceData]):
+
+    # Print on-target / off-target summary of read alignments
+    for ref, region_data in target_region_data.items():
+        print(region_data.reference, region_data.start, region_data.end, region_data.name, region_data.reads_pass, region_data.reads_unblocked)
+        for record in region_data.reads_pass_records:
+            if "off-target" not in ref:
+                print(f"On-target alignment (pass): {record.tname} {record.tstart} {record.tend} {record.mapq}")
+            else:
+                # print(f"Off-target alignment (pass): {record.tname} {record.tstart} {record.tend} {record.mapq}")
+                pass
+
+def evaluate_target_regions_for_reads_with_secondary_alignments(records: List[PafRecord], target_region_data: Dict[str, ReferenceData], endreasons: Dict[str, int]):
+
+    # Only adds a data to the statistics after evaluating primary and secondary alignments for this read
+
+    if not records:
+        raise ValueError("Paf record input must have at least one record")
+
+    mapped = False
+    for record in records:
+        for _, region_data in target_region_data.items():
+            if region_data.name == "off-target":
+                continue
+            # Same condition as in mapping configuration of Streamfish
+            if record.tname == region_data.reference and (
+                (region_data.start == 0 and region_data.end == 0) or
+                ((record.tstart >= region_data.start and record.tstart <= region_data.end) or (record.tend >= region_data.start and record.tend <= region_data.end) or (record.tstart <= region_data.start and record.tend >= region_data.end))
+            ):
+                mapped = True
+                break
+
+        if mapped:
+            # If a target alignment is found add statistics for this read
+            if endreasons[record.qname] == 4:
+                region_data.reads_unblocked += 1
+                region_data.bases_unblocked += record.qlen
+                region_data.read_lengths_unblocked.append(record.qlen)
+            else:
+                region_data.reads_pass += 1
+                region_data.bases_pass += record.qlen
+                region_data.read_lengths_pass.append(record.qlen)
+                # Records of passing on-target reads 
+                region_data.reads_pass_records.append(record)
+
+            # Stop evaluating alignment records as we found one
+            break
+    
+    # Last record data is used but does not matter since all records have been
+    # grouped by read identifier - this uses the primary (first) alignment to 
+    # assign to the off-target reference, query name and length (sequence length)
+    # are the same for all alignment records
+    if not mapped:
+        region_data = target_region_data[f"{records[0].tname}::0::0::off-target"]
+        if endreasons[records[0].qname] == 4:
+            region_data.reads_unblocked += 1
+            region_data.bases_unblocked += records[0].qlen
+            region_data.read_lengths_unblocked.append(records[0].qlen)
+        else:
+            region_data.reads_pass += 1
+            region_data.bases_pass += records[0].qlen
+            region_data.read_lengths_pass.append(records[0].qlen)
+
+
+def evaluate_target_regions_for_reads_with_primary_alignment_only(record: PafRecord, target_region_data: Dict[str, ReferenceData], endreasons: Dict[str, int]):
+    
+    mapped = False
+    for _, region_data in target_region_data.items():
+        if region_data.name == "off-target":
+            continue
+
+        # Same condition as in mapping configuration of Streamfish - one case is specified in file where start=0 and end=0 => without region specifications e.g. in broad targeted experiment
+        if record.tname == region_data.reference and (
+            (region_data.start == 0 and region_data.end == 0) or
+            ((record.tstart >= region_data.start and record.tstart <= region_data.end) or (record.tend >= region_data.start and record.tend <= region_data.end) or (record.tstart <= region_data.start and record.tend >= region_data.end))
+        ):
+            if endreasons[record.qname] == 4:
+                region_data.reads_unblocked += 1
+                region_data.bases_unblocked += record.qlen
+                region_data.read_lengths_unblocked.append(record.qlen)
+            else:
+                region_data.reads_pass += 1
+                region_data.bases_pass += record.qlen
+                region_data.read_lengths_pass.append(record.qlen)
+                # Records of passing on-target reads 
+                region_data.reads_pass_records.append(record)
+
+            # We break here as a read should only map into one region -
+            # in the block unblock decision as we any region mapping and
+            # make a decision - done here this way so we don't overcount
+            mapped = True
+            break
+    
+    # If it falls outside any target region:
+    if not mapped:
+        region_data = target_region_data[f"{record.tname}::0::0::off-target"]
+        if endreasons[record.qname] == 4:
+            region_data.reads_unblocked += 1
+            region_data.bases_unblocked += record.qlen
+            region_data.read_lengths_unblocked.append(record.qlen)
+        else:
+            region_data.reads_pass += 1
+            region_data.bases_pass += record.qlen
+            region_data.read_lengths_pass.append(record.qlen)
+
+def plot_target_coverage_panel(target_regions: pandas.DataFrame):
+
+    n_regions = len(target_regions)
+
+    # Create a figure and axes
+    fig, axes = plt.subplots(nrows=n_regions//3, ncols=3)
+
+    for (i, row) in target_regions.iterrows():
+        pass
+
 
 ########################
 # TERMINAL APPLICATION #
@@ -414,6 +563,8 @@ def endreason(
     """
     Get a table of read identifiers and end reasons from Fast5 (Icarust v0.3.0)
     """
+
+    # TODO: multi-thread this - too slow on large datasets
 
     out_handle = output.open("w")
     out_handle.write("id,channel,number,endreason\n")
@@ -440,37 +591,34 @@ def evaluation(
     summary_table: Path = typer.Option(
         ..., help="Summary metrics table for reference alignments"
     ),
-    active_sam: Path = typer.Option(
-        ..., help="SAM file from basecalling and alignment with Dorado"
-    ),
     active_ends: Path = typer.Option(
         ..., help="CSV file with endreasons from `--endreason-fast5`"
+    ),
+    active_paf:  Path = typer.Option(
+        ..., help="PAF file from alignment with minimap2"
+    ),
+    target_regions: Path = typer.Option(
+        ..., help="Target regions file for the experiment"
     ),
     outdir_plots: Path = typer.Option(
         ..., help="Output directory for figures"
     ),
-    active_output: Path = typer.Option(
-        None, help="Output table of summary values per read in CSV"
-    ),
-    control_sam: Path = typer.Option(
+    control_paf: Path = typer.Option(
         None, help="CONTROL SAM file from basecalling and alignment with Dorado"
     ),
     control_ends: Path = typer.Option(
         None, help="CONTROL CSV file with endreasonsfrom `--endreason-fast5`"
     ),
-    control_output: Path = typer.Option(
-        None, help="Output table of summary values per read in CSV"
-    )
 ):
     """
     Get a table of read identifiers and end reasons from Fast5 (Icarust v0.3.0)
     """
-
-    active_summary = get_summary(ends=active_ends, sam=active_sam, output=active_output)
+       
+    active_summary = get_region_data_paf(ends=active_ends, alignment=active_paf, targets=target_regions)
 
     control_summary = None
-    if control_sam and control_ends:
-        control_summary = get_summary(ends=control_ends, sam=control_sam, output=control_output)
+    if control_paf and control_ends:
+        control_summary =  get_region_data_paf(ends=control_ends, alignment=control_paf, targets=target_regions)
     
     df, df_combined = create_reference_summary_dataframe(active_summary=active_summary, control_summary=control_summary, output=summary_table)
 
@@ -486,6 +634,7 @@ def evaluation(
     read_length_density_all(active_summary, outdir_plots / f"read_lengths_density_all.png", min_length=50, max_length=40000, colors=LAPUTA_MEDIUM)
     read_length_histogram_all(active_summary, outdir_plots / f"read_lengths_histogram_all.png", min_length=50, max_length=40000, colors=LAPUTA_MEDIUM)
     read_length_histogram_distinct(active_summary, outdir_plots / f"read_lengths_histogram_distinct.png", min_length=50, max_lengths=[1000, 40000], colors=LAPUTA_MEDIUM)
+
 
 
 app()

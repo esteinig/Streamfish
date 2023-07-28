@@ -5,6 +5,7 @@ channels:
   - defaults
 dependencies:
   - python =3.10
+  - minimap2
   - pip
   - pip:
     - matplotlib
@@ -12,3 +13,4 @@ dependencies:
     - seaborn
     - typer
     - pandas
+    - pafpy
