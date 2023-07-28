@@ -333,7 +333,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                             continue;
                         }
 
-                        let mappings = aligner.map(line.as_bytes(), false, false, None, None).expect("Failed to map read");
+                        let mappings = aligner.map(line.as_bytes(), false, false, None, None).expect("Failed to map read");  // TODO: should we more accurately map with CIGAR
                         
                         // log::info!("{:?}", mappings);
 

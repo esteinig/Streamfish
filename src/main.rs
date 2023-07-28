@@ -19,6 +19,7 @@ mod client;
 mod config;
 mod utils;
 mod error;
+mod tools;
 
 #[tokio::main]
 async fn main() -> Result<(), StreamfishError> {
