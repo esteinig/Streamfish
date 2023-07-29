@@ -169,16 +169,31 @@ pub struct Target {
     name: Option<String> 
 }
 impl Target {
-    pub fn from(s: String, delimiter: &str) -> Result<Self, StreamfishConfigError> {
-        let components = s.split(&delimiter).into_iter().collect::<Vec<&str>>();
+    pub fn from(s: String) -> Result<Self, StreamfishConfigError> {
+        let components = s.split_whitespace().into_iter().collect::<Vec<&str>>();
         match components.len() {
             1 => Ok(Target { reference: components[0].to_string(), start: None, end: None, name: None }),
-            4 => Ok(Target { 
-                reference: components[0].to_string(), 
-                start: Some(components[1].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone()))?), 
-                end: Some(components[2].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone()))?),
-                name: Some(components[3].to_string())
-            }),
+            4 => {
+                    let start = components[1].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone()))?;
+                    let end = components[2].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone()))?;
+
+                    // O-range triggers full reference target
+                    if let (0, 0) = (start, end) {
+                        Ok(Target { 
+                            reference: components[0].to_string(), 
+                            start: None, 
+                            end: None,
+                            name: Some(components[3].to_string())
+                        })
+                    } else {
+                        Ok(Target { 
+                            reference: components[0].to_string(), 
+                            start: Some(start), 
+                            end: Some(end),
+                            name: Some(components[3].to_string())
+                        })
+                    }
+            },
             _ => Err(StreamfishConfigError::TargetFormat(s))    
         }
     }
@@ -188,12 +203,12 @@ pub struct TargetFile {
     targets: Vec<Target>
 }
 impl TargetFile {
-    pub fn from(path: PathBuf, delimiter: &str) -> Result<Self, StreamfishConfigError> {
+    pub fn from(path: PathBuf) -> Result<Self, StreamfishConfigError> {
         let mut targets = Vec::new();
         if let Ok(lines) = read_lines(&path) {
             for line in lines {
                 if let Ok(s) = line {
-                    targets.push(Target::from(s, delimiter)?)
+                    targets.push(Target::from(s)?)
                 }
             }
         }
@@ -346,7 +361,13 @@ impl StreamfishConfig {
 
         // If target list by file:
         if let Some(path) = config.experiment.target_file.clone() {
-            config.experiment.targets = TargetFile::from(path, "\t")?.targets
+            
+            if !path.exists() {
+                return Err(StreamfishConfigError::TargetFileNotFound(path.display().to_string()))
+            }
+
+            config.experiment.targets = TargetFile::from(path)?.targets;
+            log::info!("Loaded targets from file: {:#?}", config.experiment.targets);
         }
 
         // Configure the experiment and mapping settings

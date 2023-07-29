@@ -23,9 +23,6 @@ pub enum Commands {
     AddDevice(AddDeviceArgs),
     /// Remove a simulated device from MinKnow
     RemoveDevice(RemoveDeviceArgs),
-    /// Run multi-threaded `minimap2`
-    MinimapRs(MinimapRsArgs),
-
 }
 
 #[derive(Debug, Args)]
@@ -33,22 +30,6 @@ pub struct DoriServerArgs { }
 
 #[derive(Debug, Args)]
 pub struct TestReadUntilArgs { }
-
-
-#[derive(Debug, Args)]
-pub struct MinimapRsArgs {
-
-    /// Fastx input file
-    #[clap(long, short)]
-    pub fastx: PathBuf,
-    /// Minimap2 index file
-    #[clap(long, short)]
-    pub index: PathBuf,
-    /// Alignment threads
-    #[clap(long, short)]
-    pub threads: u32,
-
-}
 
 #[derive(Debug, Args)]
 pub struct AddDeviceArgs {

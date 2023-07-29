@@ -30,4 +30,8 @@ pub enum StreamfishConfigError {
     /// Represents a failure to parse a target string from the configuration
     #[error("Failed to parse target due to incorrect format: {0}")]
     TargetFormat(String),
+
+    /// Represents a failure to parse a target string from the configuration
+    #[error("Failed to find target file: {0}")]
+    TargetFileNotFound(String),
 }

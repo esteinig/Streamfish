@@ -65,6 +65,7 @@ class ReferenceData:
     read_lengths_unblocked: List[int]
     
     reads_pass_records: List[PafRecord] = None
+    
     mapping_qualities_pass: List[int] = None
     mapping_qualities_unblocked: List[int] = None
 
@@ -78,7 +79,12 @@ class ReferenceData:
 # used in alignment
 @dataclass
 class ReferenceSummary:
+
     reference: str = ""
+    target: str = ""
+    start: int = 0
+    end: int = 0
+
     control: bool = False
 
     reads_total: int = 0
@@ -103,8 +109,12 @@ class ReferenceSummary:
 
     def from_mapping_summary(self, data: ReferenceData, control: bool = False):
 
-        self.reference=data.reference
-        self.control=control
+        self.reference = f"{data.reference}"
+        self.target = data.name
+        self.start = data.start 
+        self.end = data.end
+
+        self.control = control
 
         self.reads_total = data.reads_pass+data.reads_unblocked
         self.bases_total = data.bases_pass+data.bases_unblocked
@@ -260,7 +270,7 @@ def read_length_histogram_all(data: Dict[str, ReferenceData], output_file: str, 
         length_data['target'] += [ref for _ in lengths]
 
     df = pandas.DataFrame.from_dict(length_data)
-    print(df)
+
     sns.histplot(data=df, x="read_length", hue="target", kde=False, ax=ax, bins='auto', fill=True, alpha=0.8)
 
     # Set the plot labels and title
@@ -352,11 +362,10 @@ def create_reference_summary_dataframe(
         summaries += [ReferenceSummary().from_mapping_summary(data, control=True) for _, data in control_summary.items()]
         summary_list += [data for _, data in control_summary.items()]
 
-    combined = ReferenceSummary().from_mapping_summaries(summaries=summary_list)
+    combined = ReferenceSummary(reference="total").from_mapping_summaries(summaries=summary_list)
 
     df = pandas.DataFrame([o.__dict__ for o in summaries])
     df = df.sort_values(by="reference")
-
     df_combined = pandas.DataFrame([combined.__dict__])
     
     if output:
@@ -375,13 +384,22 @@ def get_region_data_paf(ends: Path, alignment: Path, targets: Path) -> Dict[str,
         reference=row["ref"], start=row["start"], end=row["end"], name=row["name"], read_lengths_pass=[], read_lengths_unblocked=[], reads_pass_records=[]
         ) for _, row in target_regions.iterrows()}
 
-    # Add off-target data summary for each reference
+    # Add off_target data summary for each reference
     for _, row in target_regions.iterrows():
-        outside = f"{row['ref']}::0::0::off-target"
+        outside = f"{row['ref']}::0::0::off_target"
         if outside not in target_region_data.keys():
             target_region_data[outside] =  ReferenceData(
-                reference=row['ref'], start=0, end=0, name="off-target", read_lengths_pass=[], read_lengths_unblocked=[], reads_pass_records=[]
+                reference=row['ref'], start=0, end=0, name="off_target", read_lengths_pass=[], read_lengths_unblocked=[], reads_pass_records=[]
             ) 
+    
+    # Add other off targets that are not specified in the target file
+    # but are aligned against - this only considers any off targets
+    # that have alignments and may not represent the full simulated
+    # input (if no alignments present) - check if it matters [TODO]
+    
+    add_off_targets_from_alignments(alignment=alignment, target_region_data=target_region_data)
+
+    print(target_region_data)
         
     # In the unblock decision any alignment (primary or secondary)
     # is considered to match the reference or target region. To be 
@@ -397,7 +415,6 @@ def get_region_data_paf(ends: Path, alignment: Path, targets: Path) -> Dict[str,
 
     read_records_secondary = dict()
     with PafFile(alignment) as paf:
-
         for record in paf:
             if record.qname in reads_with_secondary_alignments:
                 # If this read has secondary alignments, do not process it,
@@ -418,6 +435,32 @@ def get_region_data_paf(ends: Path, alignment: Path, targets: Path) -> Dict[str,
 
     return target_region_data
 
+def add_off_targets_from_alignments(alignment: Path, target_region_data: Dict[str, ReferenceData]):
+
+    refs_unique = []
+    with PafFile(alignment) as paf:
+        for record in paf:
+            if record.tname not in refs_unique:
+                refs_unique.append(record.tname)
+
+    refs_included = [d.reference for d in target_region_data.values()]
+    for ref in refs_unique:
+        if ref not in refs_included:
+            target_region_data[f"{ref}::0::0::off_target"] = ReferenceData(
+                reference=ref, start=0, end=0, name="off_target", read_lengths_pass=[], read_lengths_unblocked=[], reads_pass_records=[]
+            ) 
+
+
+def calculate_average_coverage(paf_records: List[PafRecord], start: int, end: int):
+    coverage = {}
+    for record in paf_records:
+        ref_name = record.tname
+        start_pos = record.tstart
+        end_pos = record.tend
+        for pos in range(max(start, start_pos), min(end, end_pos) + 1):
+            coverage[(ref_name, pos)] = coverage.get((ref_name, pos), 0) + 1
+    return sum(coverage.values()) / len(coverage)
+
 def get_reads_with_secondary_alignments(alignment: Path) -> List[str]:
 
     read_align_counter = Counter()
@@ -430,14 +473,14 @@ def get_reads_with_secondary_alignments(alignment: Path) -> List[str]:
 
 def print_target_summary(target_region_data: Dict[str, ReferenceData]):
 
-    # Print on-target / off-target summary of read alignments
+    # Print on-target / off_target summary of read alignments
     for ref, region_data in target_region_data.items():
         print(region_data.reference, region_data.start, region_data.end, region_data.name, region_data.reads_pass, region_data.reads_unblocked)
         for record in region_data.reads_pass_records:
-            if "off-target" not in ref:
+            if "off_target" not in ref:
                 print(f"On-target alignment (pass): {record.tname} {record.tstart} {record.tend} {record.mapq}")
             else:
-                # print(f"Off-target alignment (pass): {record.tname} {record.tstart} {record.tend} {record.mapq}")
+                # print(f"off_target alignment (pass): {record.tname} {record.tstart} {record.tend} {record.mapq}")
                 pass
 
 def evaluate_target_regions_for_reads_with_secondary_alignments(records: List[PafRecord], target_region_data: Dict[str, ReferenceData], endreasons: Dict[str, int]):
@@ -450,7 +493,7 @@ def evaluate_target_regions_for_reads_with_secondary_alignments(records: List[Pa
     mapped = False
     for record in records:
         for _, region_data in target_region_data.items():
-            if region_data.name == "off-target":
+            if region_data.name == "off_target":
                 continue
             # Same condition as in mapping configuration of Streamfish
             if record.tname == region_data.reference and (
@@ -478,10 +521,10 @@ def evaluate_target_regions_for_reads_with_secondary_alignments(records: List[Pa
     
     # Last record data is used but does not matter since all records have been
     # grouped by read identifier - this uses the primary (first) alignment to 
-    # assign to the off-target reference, query name and length (sequence length)
+    # assign to the off_target reference, query name and length (sequence length)
     # are the same for all alignment records
     if not mapped:
-        region_data = target_region_data[f"{records[0].tname}::0::0::off-target"]
+        region_data = target_region_data[f"{records[0].tname}::0::0::off_target"]
         if endreasons[records[0].qname] == 4:
             region_data.reads_unblocked += 1
             region_data.bases_unblocked += records[0].qlen
@@ -496,7 +539,7 @@ def evaluate_target_regions_for_reads_with_primary_alignment_only(record: PafRec
     
     mapped = False
     for _, region_data in target_region_data.items():
-        if region_data.name == "off-target":
+        if region_data.name == "off_target":
             continue
 
         # Same condition as in mapping configuration of Streamfish - one case is specified in file where start=0 and end=0 => without region specifications e.g. in broad targeted experiment
@@ -523,7 +566,7 @@ def evaluate_target_regions_for_reads_with_primary_alignment_only(record: PafRec
     
     # If it falls outside any target region:
     if not mapped:
-        region_data = target_region_data[f"{record.tname}::0::0::off-target"]
+        region_data = target_region_data[f"{record.tname}::0::0::off_target"]
         if endreasons[record.qname] == 4:
             region_data.reads_unblocked += 1
             region_data.bases_unblocked += record.qlen
@@ -628,7 +671,7 @@ def evaluation(
         'display.precision', 2
     ):
         print(df)
-        print(df_combined)
+        # print(df_combined)
     
     
     read_length_density_all(active_summary, outdir_plots / f"read_lengths_density_all.png", min_length=50, max_length=40000, colors=LAPUTA_MEDIUM)

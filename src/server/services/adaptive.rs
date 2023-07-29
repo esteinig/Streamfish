@@ -39,8 +39,8 @@ impl AdaptiveSamplingService {
             log::warn!("Unblocking reads after basecalling and mapping on Dori!");
         }
         
-        log::info!("Basecall client: {} Path: {:?} Args: {:?}", config.dori.basecaller.as_str(), config.guppy.client.path.display(), config.guppy.client.args.join(" "));
-        log::info!("Basecall server: {} Path: {:?} Args: {:?}", config.dori.basecaller.as_str(), config.guppy.server.path.display(), config.guppy.server.args.join(" "));
+        log::debug!("Basecall client: {} Path: {:?} Args: {:?}", config.dori.basecaller.as_str(), config.guppy.client.path.display(), config.guppy.client.args.join(" "));
+        log::debug!("Basecall server: {} Path: {:?} Args: {:?}", config.dori.basecaller.as_str(), config.guppy.server.path.display(), config.guppy.server.args.join(" "));
 
         Self { config: config.clone() }
     }
@@ -67,7 +67,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
     // Adaptive sampling with Dorado basecalling and request/read cache implementation - single channel data transmission
     async fn cache(&self, request: Request<tonic::Streaming<StreamfishRequest>>) -> Result<Response<Self::CacheStream>, Status> {
 
-        log::info!("- [{}] - Initiated Dori::AdaptiveSamplingService::DoradoCacheChannel RPC", self.config.meta.server_name);
+        log::info!("Dori::AdaptiveSamplingService::Cache RPC");
 
         // Used in generators, needs distinct clones
         let run_config_1 = self.config.clone();
@@ -78,7 +78,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
         let mapping_config = experiment.get_mapping_config();
 
-        log::info!("- [{}] - Loaded mapping configuration", self.config.meta.server_name);
+        log::info!("Loaded mapping configuration");
 
         // Define the decisions as <i32> - repeated into() calls in the stream processing
         // loops introduce a tiny bit of latency! Make sure calls like this are minimized.
@@ -91,9 +91,12 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let init_request: i32 = RequestType::Init.into();
 
         // Connection to MinKNOW to obtain device calibration data
-        let minknow_client = MinknowClient::connect(
+        let minknow_client = match MinknowClient::connect(
             &self.config.minknow, &self.config.icarust
-        ).await.expect("Failed to connect to control server");
+        ).await {
+            Ok(client) => client,
+            Err(_) => return Err(Status::internal("Failed to connect to control server"))
+        };
 
 
         // There may be a weird race condition with Icarust when 
@@ -109,15 +112,18 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         // for the calibration (instead of the start - end)
         // so this check won't be necessary, might be better
 
-        let (sample_rate, calibration) = minknow_client.get_device_data(
+        let (sample_rate, calibration) = match minknow_client.get_device_data(
             &self.config.readuntil.device_name, &1, &self.config.readuntil.channels
-        ).await.expect("Failed to get device calibration from MinKNOW");
+        ).await {
+            Ok(data) => data,
+            Err(_) => return Err(Status::internal("Failed to get calibration data from control server"))
+        };
 
         // ======================
         // Pipeline process setup
         // ======================
 
-        let (mut pipeline_stdin, mut pipeline_stdout) = init_pipeline(&self.config);
+        let (mut pipeline_stdin, mut pipeline_stdout) = init_pipeline(&self.config)?;
 
         // ======================================
         // Dynamic loop for mapping config update
@@ -152,16 +158,26 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
         let (cache_queue_tx, mut cache_queue_rx) = tokio::sync::mpsc::channel(1024); // handles cache removal instructions
         let (decision_tx, mut decision_rx) = tokio::sync::mpsc::channel(1024); // drains into output stream
-        let (basecall_tx, mut basecall_rx): (Sender<(String, u32, u32, Vec<Vec<u8>>)>, Receiver<(String, u32, u32, Vec<Vec<u8>>)>) = tokio::sync::mpsc::channel(1024); // basecaller stdin
+        let (basecall_tx, mut basecall_rx): (Sender<(String, u32, u32, Vec<Vec<u8>>)>, Receiver<(String, u32, u32, Vec<Vec<u8>>)>) = tokio::sync::mpsc::channel(1024); // basecaller stdin submission
+        let (alignment_tx, mut alignment_rx) = tokio::sync::mpsc::channel(1024); // receives from basecaller output processing
 
-        let uncache_tx = cache_queue_tx.clone();
+        let uncache_basecaller_tx = cache_queue_tx.clone();
+        let uncache_aligner_tx = cache_queue_tx.clone();
+        let uncache_cache_tx = cache_queue_tx.clone();
+
+        let decision_basecaller_tx = decision_tx.clone();
+        let decision_aligner_tx = decision_tx.clone();
         let decision_cache_tx = decision_tx.clone();
         
         // Read cache with standard HashMap
         let read_cache: Arc<Mutex<HashMap<String, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
         let read_cache_clone = Arc::clone(&read_cache);
             
-        // Uncache thread
+        
+        // ============
+        // Uncache task
+        // ============
+
         tokio::spawn(async move {
             
             while let Some(read_id) = cache_queue_rx.recv().await {
@@ -169,8 +185,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                 
                 // This log is useful to ensure cache is cleared continuously -
                 // seems to be a decent indicator of things going wrong in general
-                log::info!("Reads cached: {} ", read_cache.len());
-
+                log::info!("Reads cached: {}", read_cache.len());
+                
                 read_cache.remove(&read_id);
 
             }
@@ -179,7 +195,10 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
         let channel_start = self.config.readuntil.channel_start.clone();
 
-        // Basecaller thread
+        // ============================
+        // Basecaller client submission
+        // ============================
+
         tokio::spawn(async move {
             
             while let Some((read_id, channel, number, cached)) = basecall_rx.recv().await {
@@ -200,16 +219,31 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                     sample_rate
                 );
                 
-                pipeline_stdin.write_all(data.as_bytes()).await.expect("Failed to write to pipeline standard input");
+                if let Err(_) = pipeline_stdin.write_all(data.as_bytes()).await{
+                    log::warn!("Failed to submit data to basecaller");
+                };
             }
+
+            Ok::<(), Status>(())
         
         });
 
-        // Cache thread
+
+        // ========================
+        // Input stream and caching
+        // ========================
+
         tokio::spawn(async move {
 
             while let Some(dorado_request) = request_stream.next().await {
-                let dorado_request = dorado_request.unwrap();
+
+                let dorado_request = match dorado_request {
+                    Ok(request) => request,
+                    Err(_) => {
+                        log::warn!("Failed to parse request from incoming stream, continue stream...");
+                        continue
+                    }
+                };
                 
                 if dorado_request.request == init_request {
                     // No action, continue and wait for data stream
@@ -226,157 +260,233 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                 cache.entry(dorado_request.id).or_insert(Vec::new()).push(dorado_request.data);
 
                 // Get the updated read and the number of chunks in the cache
-                let cached = cache.get(&read_id).expect("Failed to get data from read cache");
+                let cached = match cache.get(&read_id) {
+                    Some(data) => data,
+                    None => {
+                        log::warn!("Failed to obtain read from cache, continue stream...");
+                        continue
+                    }
+                };
+
                 let num_chunks = cached.len();
 
                 if num_chunks < run_config_1.readuntil.read_cache_min_chunks {
                     continue;
                 } else if num_chunks > run_config_1.readuntil.read_cache_max_chunks {
 
-                    decision_cache_tx.send(StreamfishResponse { 
+                    if let Err(_) = decision_cache_tx.send(StreamfishResponse { 
                         channel: dorado_request.channel, 
                         number: dorado_request.number, 
                         decision: stop_decision
-                    }).await.expect("Failed to send stop further data into decision response queue");
+                    }).await {
+                        log::warn!("Failed to send stop further data decision to response stream")
+                    }
 
-                    cache_queue_tx.send(read_id).await.expect("Failed to send instruction to uncache thread");
+                    if let Err(_) = uncache_cache_tx.send(read_id).await {
+                        log::warn!("Failed to send uncache message into uncache queue")
+                    }
 
                 } else {
                     
+                    // Unblock all before submission to basecaller
                     if run_config_1.readuntil.unblock_all_server {
                         
-                        decision_cache_tx.send(StreamfishResponse { 
+                        if let Err(_) = decision_cache_tx.send(StreamfishResponse { 
                             channel: dorado_request.channel, 
                             number: dorado_request.number, 
                             decision: unblock_decision
-                        }).await.expect("Failed to send stop further data into decision response queue");
+                        }).await {
+                            log::warn!("Failed to send unblock decision to response stream")
+                        }
 
-                        cache_queue_tx.send(read_id).await.expect("Failed to send instruction to uncache thread");
+                        if let Err(_) = uncache_cache_tx.send(read_id).await {
+                            log::warn!("Failed to send uncache message into uncache queue")
+                        }
 
                     } else {
-                                                
-                        basecall_tx.send((read_id, dorado_request.channel, dorado_request.number, cached.to_owned())).await.expect("Failed to send data to basecaller input thread");
-
+                        if let Err(_) = basecall_tx.send((read_id, dorado_request.channel, dorado_request.number, cached.to_owned())).await {
+                            log::warn!("Failed to send basecaller data message into submission queue")
+                        }
                     }
                 }
             }
+
+            Ok::<(), Status>(())
         });
 
-        // =========================
-        // Process stream processing
-        // =========================
+        // ============================
+        // Basecaller output processing
+        // ============================
         
         tokio::spawn(async move {
 
-            // Build the mm2 aligner for testing
-
-            let aligner = Aligner::builder()
-            .map_ont()
-            .with_index(run_config_2.experiment.reference.clone(), None)
-            .expect("Unable to build index");
-            log::info!("Built the minimap2-rs aligner in stream thread");
-
-            // Initiate variables for line parsing (FASTQ)
+            // Initiate variables for line parsing of fastq record
             let mut line_counter = 0;
-
+            
+            // We process the stream as the fastest way is dealing with each distinct line iteration
             let mut current_id: String = String::new();
             let mut current_channel: u32 = 0;
             let mut current_number: u32 = 0;
             
             while let Some(line) = pipeline_stdout.next().await {
 
-                let line = line.unwrap();
+                let line = match line {
+                    Ok(line) => line,
+                    Err(_) => {
+                        // This needs to be more robust and allow for continuation [TODO]
+                        return Err(Status::internal("Failed to parse basecaller output line"))
+                    }
+                };
 
-                // log::info!("{}", line);
+                if line_counter == 3 {
+                    // Reset line counter at end of record
+                    line_counter = 0;
+                } else if line_counter == 2 {
+                    // Skip this line of record
+                    line_counter += 1;
+                } else if line_counter == 1 {
+                    
+                    // Unblock all after basecaller and before alignment
+                    if run_config_2.readuntil.unblock_all_basecaller {
+                                                
+                        if let Err(_) = decision_basecaller_tx.send(StreamfishResponse { 
+                            channel: current_channel, 
+                            number: current_number, 
+                            decision: unblock_decision
+                        }).await {
+                            log::warn!("Failed to send unblock decision to response stream")
+                        }
 
+                        if let Err(_) = uncache_basecaller_tx.send(current_id.clone()).await {
+                            log::warn!("Failed to send uncache message to uncache queue")
+                        }
+
+                        line_counter += 1;
+                        continue;
+                    }
+
+                    if let Err(_) = alignment_tx.send(
+                        FastxRecord {
+                            channel: current_channel,
+                            number: current_number,
+                            seq: line,
+                            id: current_id.clone()
+                        }
+                    ).await {
+                        log::warn!("Failed to send sequence record to alignment queue")
+                    }
+
+                    line_counter += 1;
+
+                } else if line_counter == 0 {
+
+                    // Parse record header to identifiers
+                    let identifiers: Vec<&str> = line.split("::").collect();
+                    current_id = identifiers[0].trim_start_matches("@").to_string();
+
+                    // If we fail to parse accurate information from the identifier
+                    // something has gone wrong on the basecaller output end and we
+                    // terminate the client 
+                    current_channel = match identifiers[1].parse::<u32>() {
+                        Ok(channel) => channel,
+                        Err(_) => {
+                            return Err(Status::internal("Failed to parse channel from basecaller output header"))
+                        }
+                    };
+                    current_number = match identifiers[2].parse::<u32>() {
+                        Ok(number) => number,
+                        Err(_) => {
+                            return Err(Status::internal("Failed to parse number from basecaller output header"))
+                        }
+                    };
+
+                    line_counter += 1;
+                } else {
+                    return Err(Status::internal("Something weird happened with the line counter..."))
+                }
+            }
+
+            Ok::<(), Status>(())
+        });
+
+
+        // =========================
+        // Alignment processing task
+        // =========================
+        
+        tokio::spawn(async move {
+
+            let aligner = match Aligner::builder().map_ont().with_index(run_config_2.experiment.reference.clone(), None) {
+                Ok(aligner) => {
+                    log::info!("Built the aligner for: {:?}", run_config_2.experiment.reference.display());
+                    aligner
+                },
+                Err(_) => return Err(Status::internal(format!("Failed to build aligner from reference: {}", run_config_2.experiment.reference.display())))
+            };
+
+            // Alignment queue
+            while let Some(record_data) = alignment_rx.recv().await {
+
+                let mappings = match aligner.map(record_data.seq.as_bytes(), false, false, None, None) {
+                    Ok(mappings) => mappings,
+                    Err(_) => {
+                        log::warn!("Failed to map read, continue with next alignment");
+                        continue
+                    }
+                };  
+                
+                // Unblock all after alignment
+                if run_config_2.readuntil.unblock_all_mapper {
+        
+                    if let Err(_) = decision_aligner_tx.send(StreamfishResponse { 
+                        channel: record_data.channel, 
+                        number: record_data.number, 
+                        decision: unblock_decision
+                    }).await {
+                        log::warn!("Failed to send unblock decision to response stream")
+                    }
+
+                    if let Err(_) = uncache_aligner_tx.send(record_data.id).await {
+                        log::warn!("Failed to send uncache message to uncache queue")
+                    }
+
+                    continue
+                }
+
+                // DO NOT LOG THE MAPPINGS OR USE BORROWS ON THEM - FOR SOME ULTRA ARCANE REASON THIS BRAKES EVERYTHING
+                // MAYBE THIS IS MUSL BUILD RELATED? I THINK IT IS - NORMAL X86_64 BUILDS DO NOT RUN WILD EXCEPT FOR MISCONFIGURED EXPERIMENTS
+                
                 // Dynamic mapping updates require Arc<Mutex<MappingConfig>> locks within the
                 // decision/evaluation stream- this does introduce some latency but is
                 // not as much as anticipated.
 
                 // let dynamic_mapping_config = dynamic_mapping_config_stream.lock().await; 
 
-                if line_counter == 0 {
+                let decision = mapping_config.decision_from_mapping(mappings);
 
-                    // Parse
-                    let identifiers: Vec<&str> = line.split("::").collect();
-
-                    current_id = identifiers[0].trim_start_matches("@").to_string();
-                    current_channel = identifiers[1].parse::<u32>().unwrap();
-                    current_number = identifiers[2].parse::<u32>().unwrap();
-
-                    line_counter += 1;
-
-                } else {
-                    if line_counter == 3 {
-                        // Reset line counter of FASTQ
-                        line_counter = 0;
-                    } else if line_counter == 1 {
-                        
-                        // Get the sequence and align it in async thread
-
-                        // let response_tx = decision_tx.clone();
-                        // let aligner_clone = aligner.clone();
-                        // let c = current_channel.clone();
-                        // let n = current_number.clone();
-                        
-                        if run_config_2.readuntil.unblock_all_basecaller {
-                            
-                            log::info!("Unblocking reads from basecaller: {} {}", &current_channel, &current_number);
-                            decision_tx.send(StreamfishResponse { 
-                                channel: current_channel, 
-                                number: current_number, 
-                                decision: unblock_decision
-                            }).await.expect("Failed to send decision response to queue");
-                            uncache_tx.send(current_id.clone()).await.expect("Failed to send uncache identifier to queue");
-
-                            line_counter += 1;
-                            continue;
-                        }
-
-                        let mappings = aligner.map(line.as_bytes(), false, false, None, None).expect("Failed to map read");  // TODO: should we more accurately map with CIGAR
-                        
-                        // log::info!("{:?}", mappings);
-
-                        if run_config_2.readuntil.unblock_all_mapper {
-                            
-                            decision_tx.send(StreamfishResponse { 
-                                channel: current_channel, 
-                                number: current_number, 
-                                decision: unblock_decision
-                            }).await.expect("Failed to send decision response to queue");
-
-                            uncache_tx.send(current_id.clone()).await.expect("Failed to send uncache identifier to queue");
-
-                            line_counter += 1;
-                            continue;
-                        }
-
-                        // log::info!("{:?}", line);
-
-                        // DO NOT LOG THE MAPPINGS OR USE BORROWS ON THEM - FOR SOME ULTRA ARCANE REASON THIS BRAKES EVERYTHING
-
-                        // MAYBE THIS IS MUSL BUILD RELATED? I THINK IT IS - NORMAL X86_64 BUILDS DO NOT RUN WILD EXCEPT FOR MISCONFIGURED EXPERIMENTS
-                        
-                        let decision = mapping_config.decision_from_mapping(mappings);
-
-                        if decision == stop_decision || decision == unblock_decision {
-                            uncache_tx.send(current_id.clone()).await.expect("Failed to send uncache identifier to queue");
-                        }
-                        
-                        decision_tx.send(StreamfishResponse { 
-                            channel: current_channel, 
-                            number: current_number, 
-                            decision: decision
-                        }).await.expect("Failed to send decision response to queue");
-
-                        line_counter += 1;
-
-                    } else {
-                        line_counter += 1;
+                if decision == stop_decision || decision == unblock_decision {
+                    if let Err(_) = uncache_aligner_tx.send(record_data.id).await {
+                        log::warn!("Failed to send uncache message to uncache queue")
                     }
                 }
+                
+                if let Err(_) = decision_aligner_tx.send(StreamfishResponse { 
+                    channel: record_data.channel, 
+                    number: record_data.number, 
+                    decision: decision
+                }).await {
+                    log::warn!("Failed to send decision to response stream")
+                }
             }
+
+            Ok::<(), Status>(())
+
         });
+
+
+        // ==========================
+        // Response stream from queue
+        // ==========================
 
         let pipeline_response_stream = async_stream::try_stream! {
             while let Some(response) = decision_rx.recv().await {
@@ -384,52 +494,59 @@ impl AdaptiveSampling for AdaptiveSamplingService {
             }
         };
 
-
-        // =========================
-        // Response stream merge
-        // =========================
-
-        // let response_stream = futures::stream::select(
-        //     request_response_stream,
-        //     pipeline_response_stream, 
-        // );
-
         Ok(Response::new(Box::pin(pipeline_response_stream) as Self::CacheStream))
 
     }
 }
 
 // Initiates the process pipeline from configuration
-fn init_pipeline(config: &StreamfishConfig) -> (ChildStdin, Lines<BufReader<ChildStdout>>) {
+fn init_pipeline(config: &StreamfishConfig) -> Result<(ChildStdin, Lines<BufReader<ChildStdout>>), Status> {
 
-    log::info!("Spawning processes in analysis pipeline...");
+    log::info!("Spawning pipeline process...");
 
-    let process_stderr = Stdio::from(std::fs::File::create(config.dori.stderr_log.clone()).expect(
-        &format!("Failed to create basecaller stderr file: {}", config.dori.stderr_log.display())
-    ));
+    let stderr_file = match std::fs::File::create(config.dori.stderr_log.clone()) {
+        Ok(file) => file,
+        Err(_) => return Err(Status::internal("Failed to create pipeline stderr file"))
+    };
+
+    let process_stderr = Stdio::from(stderr_file);
 
     match config.dori.basecaller {
         Basecaller::Guppy => {
-            let mut pipeline_process = Command::new(config.guppy.client.path.as_os_str())
+            let mut pipeline_process = match Command::new(config.guppy.client.path.as_os_str())
                 .args(config.guppy.client.args.clone())
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(process_stderr)
-                .spawn()
-                .expect("Failed to spawn basecaller process for Guppy client");
+                .spawn() 
+            {
+                    Ok(process) => process,
+                    Err(_) => return Err(Status::internal("Failed to spawn pipeline process"))
+            };
 
-            (
-                pipeline_process.stdin.take().expect("Failed to open basecaller STDIN"),
-                BufReader::new(
-                    pipeline_process.stdout.take().expect("Failed to open basecaller STDOUT")
-                ).lines()
-            )
+            let stdin = match pipeline_process.stdin.take() {
+                Some(stdin) => stdin,
+                None => return Err(Status::internal("Failed to open pipeline process stdin"))
+            };
+            let stdout = match pipeline_process.stdout.take() {
+                Some(stdout) => stdout,
+                None => return Err(Status::internal("Failed to open pipeline process stdout"))
+            };
+            
+            Ok((stdin, BufReader::new(stdout).lines()))
+
         },
         _ => unimplemented!("Dorado is not implemented yet!")
     }
     
 }
 
+pub struct FastxRecord {
+    pub channel: u32,
+    pub number: u32,
+    pub id: String,
+    pub seq: String
+}
 
 
 

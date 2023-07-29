@@ -590,7 +590,7 @@ impl ReadUntilClient {
                 })?;
 
                 while let Some(log) = log_rx.recv().await {
-                    log::info!("{:<15} {:<5} {:<7}", log.stage.as_str_name(), log.channel, log.number);
+                    log::debug!("{:<15} {:<5} {:<7}", log.stage.as_str_name(), log.channel, log.number);
 
                     log_file.write_all(log.entry(start).as_bytes()).await.map_err(|_| {
                         send_termination_signal(&log_error_tx, ClientError::LogFileWrite)
@@ -600,7 +600,7 @@ impl ReadUntilClient {
             } else {
                 // Otherwise log to console
                 while let Some(log) = log_rx.recv().await {
-                    log::info!("{:<15} {:<5} {:<7}", log.stage.as_str_name(), log.channel, log.number);
+                    log::debug!("{:<15} {:<5} {:<7}", log.stage.as_str_name(), log.channel, log.number);
                 }
             }
 
