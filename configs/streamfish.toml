@@ -53,16 +53,16 @@ stderr_log                              = "/tmp/guppy.stderr"
 
 [readuntil]
 device_name                             = "MS12345"
-channels                                = 512
+channels                                = 1024
 channel_start                           = 1
-channel_end                             = 512
+channel_end                             = 1024
 init_delay                              = 10
 dori_tcp_host                           = 'dori-dev'                                                         # 'dori-dev' when running client inside container to connect to networked 'dori-dev' container, otherwise 'localhost' (port forwarded from inside container)
 dori_tcp_port                           = 10002                                                              # '10002' when running client inside container, otherwise '10002' (port forwarded from inside container) - no changes necessary, should match `dori.tcp_port`
 read_cache                              = true
 read_cache_batch_rpc                    = false
 read_cache_min_chunks                   = 1
-read_cache_max_chunks                   = 3                                                   
+read_cache_max_chunks                   = 12                                                   
 latency_log                             = "/tmp/latency.log"
 action_throttle                         = 0                                                                  # Streaming actions (= 0) or batched actions (> 0) - in milliseconds
 unblock_duration                        = 0.1
@@ -77,7 +77,7 @@ launch_basecall_server                  = true
 control                                 = false
 mode                                    = 'mapping'
 type                                    = 'targeted_sequencing'
-reference                               = '/tmp/viruses.mmi'
+reference                               = '/tmp/chm13v2_chr11.mmi'
 min_match_len                           = 0                                                                        # minimum matched mapping length
 targets                                 = []                                                                       # leave empty to target all sequences  - target position range, 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
-target_file                             = "/data/dev/meta-gp/reefsquid/configs/icarust/test_virus/target.tsv"      # overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed
+target_file                             = "/data/dev/meta-gp/reefsquid/configs/icarust/test_human/target.tsv"      # overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed

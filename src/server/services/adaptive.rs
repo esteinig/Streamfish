@@ -19,6 +19,7 @@ use async_process::{Command, Stdio, ChildStdout, ChildStdin};
 use crate::services::dori_api::adaptive::adaptive_sampling_server::AdaptiveSampling;
 use crate::services::dori_api::adaptive::{StreamfishRequest, StreamfishResponse, Decision, RequestType};
 
+use moka::future::Cache;
 
 pub struct AdaptiveSamplingService {
     config: StreamfishConfig
@@ -170,10 +171,23 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let decision_cache_tx = decision_tx.clone();
         
         // Read cache with standard HashMap
-        let read_cache: Arc<Mutex<HashMap<String, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
-        let read_cache_clone = Arc::clone(&read_cache);
-            
+        // let read_cache: Arc<Mutex<HashMap<String, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        // let read_cache_clone = Arc::clone(&read_cache);
         
+
+        let cache: Cache<String, Vec<Vec<u8>>> = Cache::builder()
+            // Max 10,000 entries
+            .max_capacity(10_000)
+            // Time to live (TTL): 5 minutes
+            .time_to_live(std::time::Duration::from_secs(5*60))
+            // Time to idle (TTI): 3 minutes
+            .time_to_idle(std::time::Duration::from_secs(3*60))
+            // Create the cache.
+            .build();
+        
+        let cache_1 = cache.clone();
+        let cache_2 = cache.clone();
+
         // ============
         // Uncache task
         // ============
@@ -181,19 +195,17 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         tokio::spawn(async move {
             
             while let Some(read_id) = cache_queue_rx.recv().await {
-                let mut read_cache  = read_cache_clone.lock().await;
+                // let mut read_cache  = read_cache_clone.lock().await;
                 
                 // This log is useful to ensure cache is cleared continuously -
                 // seems to be a decent indicator of things going wrong in general
-                log::info!("Reads cached: {}", read_cache.len());
-                
-                read_cache.remove(&read_id);
+                // log::info!("Reads cached 1: {}", cache_1.entry_count());
+
+                cache_1.remove(&read_id).await;
 
             }
         
         });
-
-        let channel_start = self.config.readuntil.channel_start.clone();
 
         // ============================
         // Basecaller client submission
@@ -204,9 +216,6 @@ impl AdaptiveSampling for AdaptiveSamplingService {
             while let Some((read_id, channel, number, cached)) = basecall_rx.recv().await {
                                 
                 let channel_index = (channel - 1) as usize;
-                
-                log::debug!("Channel {} index {} start {}", channel, channel_index, channel_start);
-
                 let data = get_dorado_input_string(
                     read_id,
                     cached.concat(),
@@ -251,23 +260,22 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                     tokio::time::sleep(tokio::time::Duration::new(run_config_1.readuntil.init_delay, 0)).await;
                     continue;
                 }
-
-                let read_id = dorado_request.id.clone();
                 
-                let mut cache = read_cache.lock().await;
-
-                // Find cached read or insert new one, update the cache with the current read
-                cache.entry(dorado_request.id).or_insert(Vec::new()).push(dorado_request.data);
-
-                // Get the updated read and the number of chunks in the cache
-                let cached = match cache.get(&read_id) {
-                    Some(data) => data,
-                    None => {
-                        log::warn!("Failed to obtain read from cache, continue stream...");
-                        continue
-                    }
+                // // Get the updated read and the number of chunks in the cache
+                // let mut cached = cache_2.entry(dorado_request.id.clone()).or_insert(Vec::new()).await.into_value();
+                
+                let cached = match cache_2.get(&dorado_request.id) {
+                    Some(mut chunks) => {
+                        chunks.push(dorado_request.data);
+                        chunks
+                    },
+                    None => vec![dorado_request.data]
                 };
 
+                // Update cached chunks
+                cache_2.insert(dorado_request.id.clone(), cached.clone()).await;
+
+                let read_id = dorado_request.id.clone();
                 let num_chunks = cached.len();
 
                 if num_chunks < run_config_1.readuntil.read_cache_min_chunks {
@@ -304,7 +312,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                         }
 
                     } else {
-                        if let Err(_) = basecall_tx.send((read_id, dorado_request.channel, dorado_request.number, cached.to_owned())).await {
+                        if let Err(_) = basecall_tx.send((read_id, dorado_request.channel, dorado_request.number, cached)).await {
                             log::warn!("Failed to send basecaller data message into submission queue")
                         }
                     }

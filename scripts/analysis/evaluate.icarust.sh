@@ -23,7 +23,7 @@ ANALYSIS_ID="test"
 ANALYSIS_DIR="/tmp/streamfish_analysis_${ANALYSIS_ID}"
 TARGET_REGIONS="/tmp/target.tsv"
 
-MAPPING_REFERENCE='/tmp/viruses.mmi'
+MAPPING_REFERENCE='/tmp/chm13v2_chr11.mmi'
 DORADO_FST_MODEL='/tmp/models/dna_r9.4.1_e8_fast@v3.4'
 
 # FAST5_CONTROL_DIR="/tmp/test_bacteria/test/20230711_0611_XIII_FAQ12345_5ef1fa3b9/fast5_pass/"
