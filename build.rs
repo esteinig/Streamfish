@@ -7,6 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile(
             &[
                 "proto/dori_api/adaptive.proto",
+                "proto/dori_api/dynamic.proto",
                 
                 "proto/minknow_api/minion_device.proto",
                 "proto/minknow_api/data.proto",

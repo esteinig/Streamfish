@@ -50,4 +50,7 @@ pub mod dori_api {
     pub(crate) mod adaptive {
         tonic::include_proto!("dori_api.adaptive");
     }
+    pub(crate) mod dynamic {
+        tonic::include_proto!("dori_api.dynamic");
+    }
 }

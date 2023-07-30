@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::io::BufRead;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
+use crate::services::dori_api::dynamic::Target as DynamicTarget;
 use crate::{services::{minknow_api::data::get_live_reads_request::RawDataType, dori_api::adaptive::Decision}, error::StreamfishConfigError};
 
 fn get_env_var(var: &str) -> Option<String> {
@@ -20,6 +21,7 @@ pub struct StreamfishConfig  {
     pub icarust: IcarustConfig,
     pub guppy: GuppyConfig,
     pub dori: DoriConfig,
+    pub dynamic: DynamicConfig,
     pub readuntil: ReadUntilConfig,
     pub experiment: ExperimentConfig
 }
@@ -50,18 +52,63 @@ pub struct IcarustConfig {
 }
 
 
+pub enum ServerType {
+    Adaptive,
+    Dynamic
+}
+impl ServerType {
+    pub fn from(s: &str) -> Self {
+        match s {
+            "adaptive" => Self::Adaptive,
+            "dynamic" => Self::Dynamic,
+            _ => unimplemented!("Server type not implemented: {s}")
+        }
+    }
+}
+
+// Distinct RPC servers are launched for the adaptive
+// sampling and the dynamic feedback services - this is
+// because the dynamic feedback service is not sensitive
+// to latency like the adaptive sampling service, but may 
+// require more resources (memory, processors, GPU) for slow
+// real-time analysis of the generated data and may therefore
+// be run on different hardware on the network that syncs the
+// POD5/FASTQ output from the run.
+
 #[derive(Debug, Clone, Deserialize)]
-pub struct DoriConfig {    
-    pub minknow_host: String,
-    pub minknow_port: u32,
-    pub classifier: Classifier,
-    pub basecaller: Basecaller,
+pub struct DoriConfig {
+    pub adaptive: DoriAdaptiveConfig,
+    pub dynamic: DoriDynamicConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DoriAdaptiveConfig {
     pub tcp_enabled: bool,
     pub tcp_port: u32,
     pub tcp_host: String,           // inside docker to expose must be 0.0.0.0
     pub uds_path: PathBuf,
     pub uds_override: bool,
+    pub minknow_host: String,
+    pub minknow_port: u32,
+    pub classifier: Classifier,
+    pub basecaller: Basecaller,
     pub stderr_log: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DoriDynamicConfig {
+    pub tcp_enabled: bool,
+    pub tcp_port: u32,
+    pub tcp_host: String,           // inside docker to expose must be 0.0.0.0
+    pub uds_path: PathBuf,
+    pub uds_override: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DynamicConfig {
+    pub enabled: bool,
+    pub launch_server: bool,
+    pub test_targets: Vec<Target>
 }
 
 
@@ -197,6 +244,40 @@ impl Target {
             _ => Err(StreamfishConfigError::TargetFormat(s))    
         }
     }
+    pub fn to_dynamic_target(&self) -> DynamicTarget {
+        DynamicTarget {
+            reference: self.reference.clone(),
+            start: self.start, 
+            end: self.end,
+            name: self.name.clone()
+        }
+    } 
+    pub fn from_dynamic_target(dynamic_target: &DynamicTarget) -> Self {
+        Self {
+            reference: dynamic_target.reference.clone(),
+            start: dynamic_target.start, 
+            end: dynamic_target.end,
+            name: dynamic_target.name.clone()
+        }
+    } 
+}
+impl<'de> Deserialize<'de> for Target {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where D: Deserializer<'de>
+    {
+        let s = String::deserialize(deserializer)?;
+        let components = s.split("::").into_iter().collect::<Vec<&str>>();
+        match components.len() {
+            1 => Ok(Target { reference: components[0].to_string(), start: None, end: None, name: None}),
+            4 => Ok(Target { 
+                reference: components[0].to_string(), 
+                start: Some(components[1].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone())).map_err(D::Error::custom)?), 
+                end: Some(components[2].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone())).map_err(D::Error::custom)?),
+                name: Some(components[3].to_string()) 
+            }),
+            _ => Err(StreamfishConfigError::TargetFormat(s)).map_err(D::Error::custom)
+        }
+    }
 }
 
 pub struct TargetFile {
@@ -216,27 +297,6 @@ impl TargetFile {
     }
 }
 
-
-
-
-impl<'de> Deserialize<'de> for Target {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where D: Deserializer<'de>
-    {
-        let s = String::deserialize(deserializer)?;
-        let components = s.split("::").into_iter().collect::<Vec<&str>>();
-        match components.len() {
-            1 => Ok(Target { reference: components[0].to_string(), start: None, end: None, name: None}),
-            4 => Ok(Target { 
-                reference: components[0].to_string(), 
-                start: Some(components[1].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone())).map_err(D::Error::custom)?), 
-                end: Some(components[2].parse::<i32>().map_err(|_| StreamfishConfigError::TargetBounds(s.clone())).map_err(D::Error::custom)?),
-                name: Some(components[3].to_string()) 
-            }),
-            _ => Err(StreamfishConfigError::TargetFormat(s)).map_err(D::Error::custom)
-        }
-    }
-}
 
 /// Unblock all circuits for testing
 #[derive(Debug, Clone, PartialEq)]
@@ -382,15 +442,15 @@ impl StreamfishConfig {
 }
 
 impl StreamfishConfig {
-    // Configure internal fields for basecaller and classifer arguments
+    // Configure internal fields for basecaller and classifer arguments on the adaptive server
     pub fn configure(&mut self) {
             
         // Some checks and argument construction for basecaller configurations
-        if self.dori.classifier == Classifier::Minimap2Rust && self.experiment.reference.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
+        if self.dori.adaptive.classifier == Classifier::Minimap2Rust && self.experiment.reference.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
             panic!("Classifier reference must be an index file (.mmi)")
         }
 
-        if self.dori.basecaller == Basecaller::Guppy && (self.dori.classifier == Classifier::Minimap2Rust  || self.dori.classifier == Classifier::Kraken2) {
+        if self.dori.adaptive.basecaller == Basecaller::Guppy && (self.dori.adaptive.classifier == Classifier::Minimap2Rust  || self.dori.adaptive.classifier == Classifier::Kraken2) {
             
             self.guppy.client.args = format!(
                 "{} --address {} --config {} --throttle {} --max-reads-queued {} --threads {}",
@@ -775,7 +835,7 @@ impl SliceDiceConfig {
             slice_config.readuntil.channels = self.channels;
             slice_config.readuntil.channel_start = slice.channel_start;
             slice_config.readuntil.channel_end = slice.channel_end;
-            slice_config.dori.uds_path = slice.dori_uds_path.clone();
+            slice_config.dori.adaptive.uds_path = slice.dori_adaptive_uds_path.clone();
             slice_config.guppy.server.port = slice.guppy_server_port.clone();
             slice_config.guppy.client.address = slice.guppy_client_address.clone();
 
@@ -799,7 +859,7 @@ pub struct SliceConfig {
     pub client_name: String,
     pub channel_start: u32,
     pub channel_end: u32,
-    pub dori_uds_path: PathBuf,
+    pub dori_adaptive_uds_path: PathBuf,
     pub guppy_server_port: String,
     pub guppy_client_address: String,
 }
@@ -807,6 +867,6 @@ pub struct SliceConfig {
 
 impl std::fmt::Display for SliceConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}: start={} end={} dori={} guppy={}", self.client_name, self.channel_start, self.channel_end, self.dori_uds_path.display(), self.guppy_client_address)
+        write!(f, "{}: start={} end={} dori={} guppy={}", self.client_name, self.channel_start, self.channel_end, self.dori_adaptive_uds_path.display(), self.guppy_client_address)
     }
 }

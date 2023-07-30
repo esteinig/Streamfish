@@ -4,18 +4,26 @@ package dori_api.adaptive;
 
 import "minknow_api/data.proto";
 
-// Basecall reads streamed from the Streamfish::ReadUntilClient
+// Adaptive sampling routines for raw signal data chunks from the Streamfish::ReadUntilClient
+//
+// Service implements bi-directional streaming endpoints that accept individual signal chunks
+// from the client (which obtains data from a stream with the control server) which are then
+// processed (for example basecalled and aligned) to arrive at actionable decisions that are 
+// sent back to the  client (which then sends unblock/stop further data/none actions to the 
+// control server)
 //
 // Since 1.0
 service AdaptiveSampling {
-  
+
+  // Default version of 
   rpc Cache(stream StreamfishRequest) returns (stream StreamfishResponse) { }
 
-  // A version of the Dorado pipeline that implements single chunk stream logic which is
+  // A version of the adaptive sampling routine that implements single chunk stream logic which is
   // leaner and has less latency than the cached version, but may require improvements
   // in processing basecalled sequences for decision making due to smaller alignments
-  // - this is mainly for comparison to the cached version and running experiments
-  // leading up to the signal classification implementation 
+  // 
+  // This endpoint is mainly for comparison to the cached version and testing performance
+  // that will lead up to the signal classification implementation on this endpoint.
   rpc Stream(stream StreamfishRequest) returns (stream StreamfishResponse) { }
 
 }

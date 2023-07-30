@@ -1,12 +1,13 @@
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
+#![allow(unreachable_code)]
 
 use clap::Parser;
 use config::SliceDiceConfig;
 use crate::utils::init_logger;
 use crate::error::StreamfishError;
 use crate::server::dori::DoriServer;
-use crate::config::StreamfishConfig;
+use crate::config::{StreamfishConfig, ServerType};
 use crate::terminal::{App, Commands};
 use crate::client::minknow::MinknowClient;
 use crate::client::readuntil::ReadUntilClient;
@@ -49,9 +50,9 @@ async fn main() -> Result<(), StreamfishError> {
                 }
             }
         },
-        Commands::DoriServer ( _ ) => {
+        Commands::DoriServer ( args ) => {
 
-            DoriServer::run(config).await?;
+            DoriServer::run(config, ServerType::from(&args.server_type)).await?;
         },
         Commands::AddDevice ( args  ) => {
 

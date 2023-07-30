@@ -1,25 +1,25 @@
 
 use minimap2::*;
 use std::pin::Pin;
-use std::sync::Arc;
 use itertools::join;
-use tokio::sync::Mutex;
+use moka::future::Cache;
 use futures_core::Stream;
 use futures_util::StreamExt;
-use std::collections::HashMap;
 use futures_util::AsyncWriteExt;
 use futures_util::io::AsyncBufReadExt;
 use tonic::{Request, Response, Status};
 use byteorder::{LittleEndian, ByteOrder};
 use futures_util::io::{BufReader, Lines};
 use tokio::sync::mpsc::{Sender, Receiver};
+use crate::client::dori::DynamicFeedbackClient;
 use crate::client::minknow::MinknowClient;
+use crate::config::Target;
 use crate::config::{StreamfishConfig, Basecaller};
+use crate::services::dori_api::dynamic::TestRequest;
 use async_process::{Command, Stdio, ChildStdout, ChildStdin};
 use crate::services::dori_api::adaptive::adaptive_sampling_server::AdaptiveSampling;
 use crate::services::dori_api::adaptive::{StreamfishRequest, StreamfishResponse, Decision, RequestType};
-
-use moka::future::Cache;
+use crate::services::dori_api::dynamic::Target as DynamicTarget;
 
 pub struct AdaptiveSamplingService {
     config: StreamfishConfig
@@ -40,8 +40,8 @@ impl AdaptiveSamplingService {
             log::warn!("Unblocking reads after basecalling and mapping on Dori!");
         }
         
-        log::debug!("Basecall client: {} Path: {:?} Args: {:?}", config.dori.basecaller.as_str(), config.guppy.client.path.display(), config.guppy.client.args.join(" "));
-        log::debug!("Basecall server: {} Path: {:?} Args: {:?}", config.dori.basecaller.as_str(), config.guppy.server.path.display(), config.guppy.server.args.join(" "));
+        log::debug!("Basecall client: {} Path: {:?} Args: {:?}", config.dori.adaptive.basecaller.as_str(), config.guppy.client.path.display(), config.guppy.client.args.join(" "));
+        log::debug!("Basecall server: {} Path: {:?} Args: {:?}", config.dori.adaptive.basecaller.as_str(), config.guppy.server.path.display(), config.guppy.server.args.join(" "));
 
         Self { config: config.clone() }
     }
@@ -130,24 +130,49 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         // Dynamic loop for mapping config update
         // ======================================
 
-        // let dynamic_mapping_config_main = std::sync::Arc::new(tokio::sync::Mutex::new(mapping_config));
-        // let dynamic_mapping_config_thread = std::sync::Arc::clone(&dynamic_mapping_config_main);
-        // let dynamic_mapping_config_stream = std::sync::Arc::clone(&dynamic_mapping_config_main);
-        
-        // tokio::spawn(async move {
-        //     loop {
-        //         tokio::time::sleep(tokio::time::Duration::new(5, 0)).await;
 
-        //         let mut dynamic_mapping_config_lock = dynamic_mapping_config_thread.lock().await;
+        let dynamic_mapping_config_main = std::sync::Arc::new(tokio::sync::Mutex::new(mapping_config.clone()));
+        let dynamic_mapping_config_thread = std::sync::Arc::clone(&dynamic_mapping_config_main);
+        let dynamic_mapping_config_stream = std::sync::Arc::clone(&dynamic_mapping_config_main);
+
+        if self.config.dynamic.enabled {
+
+            let config = self.config.clone();
+            tokio::spawn(async move {
                 
-        //         // Switches between chr1 and chr3 and chr9 and chr11 every few seconds for testing
-        //         if dynamic_mapping_config_lock.targets.contains(&String::from("chr1")) {
-        //             dynamic_mapping_config_lock.targets = Vec::from([String::from("chr9"), String::from("chr11")]);
-        //         } else {
-        //             dynamic_mapping_config_lock.targets = Vec::from([String::from("chr1"), String::from("chr3")]);
-        //         }
-        //     }           
-        // });
+                let mut dori_rpc = match DynamicFeedbackClient::connect(&config).await {
+                    Ok(client) => client,
+                    Err(_) => return Err(Status::internal("Failed to connect to dynamic feedback service on Dori"))
+                };
+
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+    
+                    let mut dynamic_mapping_config = dynamic_mapping_config_thread.lock().await;
+
+                    let dynamic_targets: Vec<DynamicTarget> = dynamic_mapping_config.targets.iter().map(|t| t.to_dynamic_target()).collect();
+                    let response = dori_rpc.client.test(Request::new(TestRequest { targets: dynamic_targets })).await;
+
+                    let res = match response {
+                        Ok(response) => response,
+                        Err(_) => return Err(Status::internal("Failed to obtain test response for dynamic targets from dynamic feedback service on Dori"))
+                    };
+                    
+                    let dynamic_targets = res.into_inner().targets.iter().map(Target::from_dynamic_target).collect();
+                    log::warn!("Response targets: {:?}", dynamic_targets);
+                    
+                    // Create the config targets from the updated dynamic target response and update mapping config
+                    dynamic_mapping_config.targets = dynamic_targets;
+
+                    log::warn!("Switched to targets: {:?}", dynamic_mapping_config.targets);
+                }
+
+                Ok::<(), Status>(())  // we need this type annotation but have an infinite loop
+            });
+
+        }
+
+        
 
         // =========================
         // Request stream processing
@@ -160,7 +185,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let (cache_queue_tx, mut cache_queue_rx) = tokio::sync::mpsc::channel(1024); // handles cache removal instructions
         let (decision_tx, mut decision_rx) = tokio::sync::mpsc::channel(1024); // drains into output stream
         let (basecall_tx, mut basecall_rx): (Sender<(String, u32, u32, Vec<Vec<u8>>)>, Receiver<(String, u32, u32, Vec<Vec<u8>>)>) = tokio::sync::mpsc::channel(1024); // basecaller stdin submission
-        let (alignment_tx, mut alignment_rx) = tokio::sync::mpsc::channel(1024); // receives from basecaller output processing
+        let (alignment_tx, mut alignment_rx) = tokio::sync::mpsc::channel(1024); // basecaller fastx processing
 
         let uncache_basecaller_tx = cache_queue_tx.clone();
         let uncache_aligner_tx = cache_queue_tx.clone();
@@ -199,7 +224,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                 
                 // This log is useful to ensure cache is cleared continuously -
                 // seems to be a decent indicator of things going wrong in general
-                // log::info!("Reads cached 1: {}", cache_1.entry_count());
+                log::info!("Reads cached 1: {}", cache_1.entry_count());
 
                 cache_1.remove(&read_id).await;
 
@@ -261,9 +286,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                     continue;
                 }
                 
-                // // Get the updated read and the number of chunks in the cache
-                // let mut cached = cache_2.entry(dorado_request.id.clone()).or_insert(Vec::new()).await.into_value();
-                
+                // Get the updated read and the number of chunks in the cache
+                // Note: entry is significantly slower
                 let cached = match cache_2.get(&dorado_request.id) {
                     Some(mut chunks) => {
                         chunks.push(dorado_request.data);
@@ -272,7 +296,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                     None => vec![dorado_request.data]
                 };
 
-                // Update cached chunks
+                // Update cached chunks by reinserting
                 cache_2.insert(dorado_request.id.clone(), cached.clone()).await;
 
                 let read_id = dorado_request.id.clone();
@@ -462,15 +486,15 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                 }
 
                 // DO NOT LOG THE MAPPINGS OR USE BORROWS ON THEM - FOR SOME ULTRA ARCANE REASON THIS BRAKES EVERYTHING
-                // MAYBE THIS IS MUSL BUILD RELATED? I THINK IT IS - NORMAL X86_64 BUILDS DO NOT RUN WILD EXCEPT FOR MISCONFIGURED EXPERIMENTS
+                // I THINK IT IS MUSL BUILD RELATED - NORMAL X86_64 BUILDS DO NOT RUN WILD EXCEPT FOR MISCONFIGURED EXPERIMENTS
                 
                 // Dynamic mapping updates require Arc<Mutex<MappingConfig>> locks within the
                 // decision/evaluation stream- this does introduce some latency but is
                 // not as much as anticipated.
 
-                // let dynamic_mapping_config = dynamic_mapping_config_stream.lock().await; 
+                let dynamic_mapping_config = dynamic_mapping_config_stream.lock().await; 
 
-                let decision = mapping_config.decision_from_mapping(mappings);
+                let decision = dynamic_mapping_config.decision_from_mapping(mappings);
 
                 if decision == stop_decision || decision == unblock_decision {
                     if let Err(_) = uncache_aligner_tx.send(record_data.id).await {
@@ -512,14 +536,14 @@ fn init_pipeline(config: &StreamfishConfig) -> Result<(ChildStdin, Lines<BufRead
 
     log::info!("Spawning pipeline process...");
 
-    let stderr_file = match std::fs::File::create(config.dori.stderr_log.clone()) {
+    let stderr_file = match std::fs::File::create(config.dori.adaptive.stderr_log.clone()) {
         Ok(file) => file,
         Err(_) => return Err(Status::internal("Failed to create pipeline stderr file"))
     };
 
     let process_stderr = Stdio::from(stderr_file);
 
-    match config.dori.basecaller {
+    match config.dori.adaptive.basecaller {
         Basecaller::Guppy => {
             let mut pipeline_process = match Command::new(config.guppy.client.path.as_os_str())
                 .args(config.guppy.client.args.clone())

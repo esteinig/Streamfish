@@ -16,8 +16,9 @@ enabled                                 = true                                  
 position_port                           = 10001                                                              # Required position port to connect to device
 sample_rate                             = 4000                                                               # Sample rate is currently not configurable in Icarust, included for later modifications
 
-[dori] 
-uds_path                                = '/tmp/.dori/socket'                                                # Unix domain socket path on 'localhost', parent directory is created if not exists - SSD/NVME drives recommended, can be mounted in multiple containers for connections
+# Dori server - adaptive sampling routine
+[dori.adaptive] 
+uds_path                                = '/tmp/.dori.adaptive/socket'                                       # Unix domain socket path on 'localhost', parent directory is created if not exists - SSD/NVME drives recommended, can be mounted in multiple containers for connections
 uds_override                            = true                                                               # Allows overwriting an existing socket path
 tcp_enabled                             = false                                                              # TCP connection to Dori processing server - not preferred
 tcp_host                                = '0.0.0.0'                                                          # TCP server host - `0.0.0.0` inside container to make available on forwarded ports
@@ -25,8 +26,8 @@ tcp_port                                = 10002                                 
 minknow_host                            = "127.0.0.1"                                                        # Host port of control server (MinKNOW or Icarust) for access from Dori - if forwarded to container the value is `minknow_host` (docker/docker-compose.dev.yml)
 minknow_port                            = 10000                                                              # Manager service port on `minknow_host` - this matches the `minknow.port` above but can be alternatively configured inside container
 classifier                              = "minimap2-rs"                                                      # Classifier for adaptive sampling algorithm running on Dori [`minimap2-rs`]
-basecaller                              = "guppy"                                                            # Basecaller fpr adapaitve sampling algorithm running through Dori [`guppy`]
-stderr_log                              = "/tmp/dori.stderr"                                                 # Basecaller/classifier error output log as process is launched on Dori for now
+basecaller                              = "guppy"                                                            # Basecaller fpr adapitve sampling algorithm running through Dori [`guppy`]
+stderr_log                              = "/tmp/dori.adaptive.stderr"                                        # Basecaller/classifier error output log as process is launched on Dori for now
 
 [guppy.client]
 path                                    = "/data/opt/conda/envs/guppy/bin/python"                            # "/home/esteinig/micromamba/envs/guppy/bin/python"
@@ -34,7 +35,7 @@ script                                  = "/data/dev/meta-gp/reefsquid/scripts/g
 address                                 = "ipc:///tmp/.guppy_local/5556"
 config                                  = "dna_r9.4.1_450bps_fast"
 throttle                                = 0.01                                                               # Receiver throttle for requests for completed reads
-threads                                 = 4
+threads                                 = 8
 max_reads_queued                        = 256
 
 [guppy.server]
@@ -43,24 +44,21 @@ port                                    = "/tmp/.guppy_local/5556"
 config                                  = "dna_r9.4.1_450bps_fast.cfg"
 callers                                 = 4
 chunks                                  = 160
-threads                                 = 4
+threads                                 = 8
 runners                                 = 8
 device                                  = "cuda:all"
 log_path                                = "/tmp/guppy.log"
 stderr_log                              = "/tmp/guppy.stderr"
 
-[minimap]
-
 [readuntil]
 device_name                             = "MS12345"
-channels                                = 1024
+channels                                = 512
 channel_start                           = 1
-channel_end                             = 1024
+channel_end                             = 512
 init_delay                              = 10
 dori_tcp_host                           = 'dori-dev'                                                         # 'dori-dev' when running client inside container to connect to networked 'dori-dev' container, otherwise 'localhost' (port forwarded from inside container)
 dori_tcp_port                           = 10002                                                              # '10002' when running client inside container, otherwise '10002' (port forwarded from inside container) - no changes necessary, should match `dori.tcp_port`
 read_cache                              = true
-read_cache_batch_rpc                    = false
 read_cache_min_chunks                   = 1
 read_cache_max_chunks                   = 12                                                   
 latency_log                             = "/tmp/latency.log"
@@ -77,7 +75,23 @@ launch_basecall_server                  = true
 control                                 = false
 mode                                    = 'mapping'
 type                                    = 'targeted_sequencing'
-reference                               = '/tmp/chm13v2_chr11.mmi'
+reference                               = '/tmp/chm13v2_chr1_chr2.mmi'
 min_match_len                           = 0                                                                        # minimum matched mapping length
-targets                                 = []                                                                       # leave empty to target all sequences  - target position range, 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
-target_file                             = "/data/dev/meta-gp/reefsquid/configs/icarust/test_human/target.tsv"      # overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed
+targets                                 = ["chr1"]                                                                 # empty to target all sequences  - target position range, 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
+
+# target_file                           = "/data/dev/meta-gp/reefsquid/configs/icarust/test_human/target.tsv"      # optional - overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed
+
+
+# Dori server - dynamic feedback server for dynamic adaptive sampling configuratons
+[dori.dynamic] 
+uds_path                                = '/tmp/.dori.dynamic/socket'                                        # Unix domain socket path on 'localhost', parent directory is created if not exists - SSD/NVME drives recommended, can be mounted in multiple containers for connections
+uds_override                            = true                                                               # Allows overwriting an existing socket path
+tcp_enabled                             = false                                                              # TCP connection to Dori processing server - not preferred
+tcp_host                                = '0.0.0.0'                                                          # TCP server host - `0.0.0.0` inside container to make available on forwarded ports
+tcp_port                                = 10002                                                              # TCP server port - can be mapped from container to host
+stderr_log                              = "/tmp/dori.dynamic.stderr"                                         # Basecaller/classifier error output log as process is launched on Dori for now
+
+[dynamic]
+enabled                                 = true
+launch_server                           = true
+test_targets                            = ["chr1", "chr2"]

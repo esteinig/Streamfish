@@ -26,7 +26,13 @@ pub enum Commands {
 }
 
 #[derive(Debug, Args)]
-pub struct DoriServerArgs { }
+pub struct DoriServerArgs {
+
+    /// Server type - adaptive or dynamic
+    #[clap(long, short, default_value="adaptive", value_parser=clap::builder::PossibleValuesParser::new(["adaptive", "dynamic"]))]
+    pub server_type: String,
+    
+ }
 
 #[derive(Debug, Args)]
 pub struct TestReadUntilArgs { }

@@ -4,8 +4,9 @@ use tokio::signal;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use quanta::{Clock, Instant};
+use crate::config::ServerType;
 use crate::server::dori::DoriServer;
-use crate::client::dori::DoriClient;
+use crate::client::dori::AdaptiveSamplingClient;
 use crate::client::error::ClientError;
 use crate::client::minknow::MinknowClient;
 use crate::client::services::data::DataClient;
@@ -76,9 +77,6 @@ fn send_termination_signal(sender: &UnboundedSender<ClientErrorSignal>, error: C
 #[derive(Debug)]
 pub struct ClientErrorSignal { }
 
-
-    
-
 #[derive(Debug, Clone)]
 pub struct ReadUntilClient { }
 
@@ -103,7 +101,7 @@ impl ReadUntilClient {
         let mut task_handles = Vec::new();
         for (i, slice_cfg) in slice_configs.into_iter().enumerate() {
             
-            let client = self.clone();  // clone the clien
+            let client = self.clone();  // clone the client
 
             log::info!("Launching slice runner with configuration:");
             log::info!("{}", &slice_dice.slice[i]);
@@ -172,35 +170,63 @@ impl ReadUntilClient {
         // Launch Dori and basecall servers if configured
         // ==============================================
 
+        let dori_dynamic_task_handle = match (config.dynamic.enabled, config.dynamic.launch_server) {
+            (true, true) => {
+                let dori_config = config.clone();
 
-        let dori_task_handle = match config.readuntil.launch_dori_server {
-            false => {
-                log::warn!("Dori server will not be launched - manual setup required");
-                None
-            },
-            true => {
-                let dori_config =  config.clone();
-
-                log::info!("Launching Dori in async task...");
+                log::info!("Launching Dori DynamicFeedback server in async task...");
                 let dori_thread_handle = tokio::spawn(async move {
-                    DoriServer::run(dori_config).await.map_err(|_| ClientError::DoriServerLaunch)?;
+                    DoriServer::run(dori_config, ServerType::Dynamic).await.map_err(|_| ClientError::DoriServerLaunch)?;
                     Ok::<(), ClientError>(())
                 });
 
-                if config.dori.tcp_enabled {
-                    log::info!("Dori launched, available on TCP (http://{}:{})",  config.dori.tcp_host,  config.dori.tcp_port)
+                if config.dori.dynamic.tcp_enabled {
+                    log::info!("Dori DynamicFeedback server launched, available on TCP (http://{}:{})",  config.dori.dynamic.tcp_host,  config.dori.dynamic.tcp_port)
                 } else {
-                    log::info!("Dori launched, available on UDS ({})",  config.dori.uds_path.display())
+                    log::info!("Dori DynamicFeedback server launched, available on UDS ({})", config.dori.dynamic.uds_path.display())
                 }
 
-                // Wait a little - race condition in async slice-and-dice
+                // Race condition in async slice-and-dice when launching multiple servers - wait a second
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+                Some(dori_thread_handle)
+            },
+            (true, false) => {
+                log::warn!("Dori DynamicFeedback server will not be launched - manual setup required");
+                None
+            },
+            _ => None
+        };
+
+
+        let dori_adaptive_task_handle = match config.readuntil.launch_dori_server {
+            false => {
+                log::warn!("Dori AdaptiveSampling server will not be launched - manual setup required");
+                None
+            },
+            true => {
+                let dori_config = config.clone();
+
+                log::info!("Launching Dori AdaptiveSampling serverin async task...");
+                let dori_thread_handle = tokio::spawn(async move {
+                    DoriServer::run(dori_config, ServerType::Adaptive).await.map_err(|_| ClientError::DoriServerLaunch)?;
+                    Ok::<(), ClientError>(())
+                });
+
+                if config.dori.adaptive.tcp_enabled {
+                    log::info!("Dori AdaptiveSampling server launched, available on TCP (http://{}:{})",  config.dori.adaptive.tcp_host,  config.dori.adaptive.tcp_port)
+                } else {
+                    log::info!("Dori AdaptiveSampling server launched, available on UDS ({})",  config.dori.adaptive.uds_path.display())
+                }
+
+                // Race condition in async slice-and-dice when launching multiple servers - wait a second
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
                 Some(dori_thread_handle)
             },
         };
 
-        let basecaller_process_handle = match (config.readuntil.launch_basecall_server, config.dori.basecaller.clone() ) {
+        let basecaller_process_handle = match (config.readuntil.launch_basecall_server, config.dori.adaptive.basecaller.clone() ) {
             (false, _) => {
                 log::warn!("Basecall server will not be launched - manual setup required");
                 None
@@ -267,8 +293,6 @@ impl ReadUntilClient {
 
         let client_name = config.meta.client_name.clone();
         tokio::spawn(async move {
-
-            log::info!("Spawned task for graceful shutdowns...");
             
             tokio::select! {
                 _ = signal::ctrl_c() => log::warn!("{}: received manual shutdown signal", client_name),
@@ -281,8 +305,14 @@ impl ReadUntilClient {
                 basecaller_thread.kill().map_err(|err| err).expect("Failed to kill basecaller thread - you may need to do this manually");
             }
 
-            if let Some(dori_task) = dori_task_handle {
-                log::warn!("{}: shutting down processing server task...", client_name);
+            if let Some(dori_task) = dori_adaptive_task_handle {
+                log::warn!("{}: shutting down processing adaptive sampling server...", client_name);
+                dori_task.abort();
+            }
+
+
+            if let Some(dori_task) = dori_dynamic_task_handle {
+                log::warn!("{}: shutting down processing dynamic feedback server...", client_name);
                 dori_task.abort();
             }
 
@@ -300,7 +330,7 @@ impl ReadUntilClient {
         // Client connections
         // ===================
 
-        let mut dori_rpc = DoriClient::connect(&config).await.map_err(|_| {
+        let mut dori_rpc = AdaptiveSamplingClient::connect(&config).await.map_err(|_| {
             send_termination_signal(&shutdown_tx, ClientError::DoriServerConnectionInitiation)
         })?;
 

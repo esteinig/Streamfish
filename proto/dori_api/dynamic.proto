@@ -1,0 +1,57 @@
+syntax="proto3";
+
+package dori_api.dynamic;
+
+// Dynamic feedback analysis routines interacting with the AdaptiveSamplingService server implemented in `Streamfish::DoriServer`
+//
+// Service implements endpoints that run "slow real-time" analysis pipelines whose results inform changes to the
+// experiment configuration, for example changing the targets of an adaptive sampling routine
+//
+// This service provides the "dynamic adaptive sampling" logic for the adaptive sampling routine as described in Readfish
+//
+// Since 1.0
+service DynamicFeedback {
+
+    // Tests dynamic adaptive sampling by changing the mapping target of the 
+    // current experimental configuration - the request can be sent 
+    // periodically from the adaptive sampling routine, change values
+    // are configured in `Streamfish::StreamfishConfig``
+    rpc Test(TestRequest) returns (TestResponse) { }
+  
+}
+  
+
+// =============
+// Test Messages
+// =============
+
+message TestRequest {
+
+    // Array of targets from current experimental configuration
+    repeated Target targets = 1;
+   
+}
+
+message TestResponse { 
+
+    // Array of updated targets for experimental configuration change
+    repeated Target targets = 1;
+
+}
+
+// Mirrors the `Target` struct in `streamfish::config`
+message Target {
+
+    // Name of target sequence in alignment index
+    string reference = 1;
+
+    // Optional start of target region (1-based, closed)
+    optional int32 start = 2;
+
+    // Optional end of target region (1-based, closed)
+    optional int32 end = 3;
+
+    // Optional name of the target (currently not used)
+    optional string name = 4;
+
+}

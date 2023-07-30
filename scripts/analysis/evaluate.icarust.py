@@ -380,16 +380,20 @@ def get_region_data_paf(ends: Path, alignment: Path, targets: Path) -> Dict[str,
     target_regions = pandas.read_csv(targets, sep="\t", header=None, names=["ref", "start", "end", "name"])
 
     # Setup target region data summaries
-    target_region_data: Dict[str, ReferenceData] = {f"{row['ref']}::{row['start']}::{row['end']}::{row['name']}": ReferenceData(
-        reference=row["ref"], start=row["start"], end=row["end"], name=row["name"], read_lengths_pass=[], read_lengths_unblocked=[], reads_pass_records=[]
-        ) for _, row in target_regions.iterrows()}
+    target_region_data: Dict[str, ReferenceData] = {
+        f"{row['ref']}::{row['start']}::{row['end']}::{row['name']}": ReferenceData(
+            reference=row["ref"], start=row["start"], end=row["end"], name=row["name"], 
+            read_lengths_pass=[], read_lengths_unblocked=[], reads_pass_records=[]
+        ) for _, row in target_regions.iterrows()
+    }
 
     # Add off_target data summary for each reference
     for _, row in target_regions.iterrows():
         outside = f"{row['ref']}::0::0::off_target"
         if outside not in target_region_data.keys():
-            target_region_data[outside] =  ReferenceData(
-                reference=row['ref'], start=0, end=0, name="off_target", read_lengths_pass=[], read_lengths_unblocked=[], reads_pass_records=[]
+            target_region_data[outside] = ReferenceData(
+                reference=row['ref'], start=0, end=0, name="off_target", 
+                read_lengths_pass=[], read_lengths_unblocked=[], reads_pass_records=[]
             ) 
     
     # Add other off targets that are not specified in the target file

@@ -9,7 +9,7 @@ launch_basecall_server                  = true  # recommended, otherwise manual 
 client_name                             = "StreamfishClient 1"
 channel_start                           = 1
 channel_end                             = 512
-dori_uds_path                           = '/tmp/.dori1/socket'
+dori_adaptive_uds_path                  = '/tmp/.dori.adaptive/socket1'
 guppy_server_port                       = '/tmp/.guppy_local/5556' 
 guppy_client_address                    = 'ipc:///tmp/.guppy_local/5556'
 
@@ -17,7 +17,7 @@ guppy_client_address                    = 'ipc:///tmp/.guppy_local/5556'
 client_name                             = "StreamfishClient 2"
 channel_start                           = 513
 channel_end                             = 1024
-dori_uds_path                           = '/tmp/.dori2/socket'
+dori_adaptive_uds_path                  = '/tmp/.dori.adaptive/socket2'
 guppy_server_port                       = '/tmp/.guppy_local/5557' 
 guppy_client_address                    = 'ipc:///tmp/.guppy_local/5557'
 
@@ -25,7 +25,7 @@ guppy_client_address                    = 'ipc:///tmp/.guppy_local/5557'
 client_name                             = "StreamfishClient 3"
 channel_start                           = 1025
 channel_end                             = 1536
-dori_uds_path                           = '/tmp/.dori3/socket'
+dori_adaptive_uds_path                  = '/tmp/.dori.adaptive/socket3'
 guppy_server_port                       = '/tmp/.guppy_local/5558' 
 guppy_client_address                    = 'ipc:///tmp/.guppy_local/5558'
 
@@ -33,7 +33,7 @@ guppy_client_address                    = 'ipc:///tmp/.guppy_local/5558'
 client_name                             = "StreamfishClient 4"
 channel_start                           = 1537
 channel_end                             = 2048
-dori_uds_path                           = '/tmp/.dori4/socket'
+dori_adaptive_uds_path                  = '/tmp/.dori.adaptive/socket4'
 guppy_server_port                       = '/tmp/.guppy_local/5559' 
 guppy_client_address                    = 'ipc:///tmp/.guppy_local/5559'
 
