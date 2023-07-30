@@ -2,7 +2,7 @@ use tonic::{Request, Response, Status};
 
 use crate::config::StreamfishConfig;
 use crate::services::dori_api::dynamic::dynamic_feedback_server::DynamicFeedback;
-use crate::services::dori_api::dynamic::{TestRequest, TestResponse, Target as DynamicTarget};
+use crate::services::dori_api::dynamic::{TestRequest, TestResponse, DynamicTarget};
 
 
 pub struct DynamicFeedbackService {

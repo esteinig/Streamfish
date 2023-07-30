@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::io::BufRead;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
-use crate::services::dori_api::dynamic::Target as DynamicTarget;
+use crate::services::dori_api::dynamic::DynamicTarget;
 use crate::{services::{minknow_api::data::get_live_reads_request::RawDataType, dori_api::adaptive::Decision}, error::StreamfishConfigError};
 
 fn get_env_var(var: &str) -> Option<String> {

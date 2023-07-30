@@ -28,19 +28,19 @@ service DynamicFeedback {
 message TestRequest {
 
     // Array of targets from current experimental configuration
-    repeated Target targets = 1;
+    repeated DynamicTarget targets = 1;
    
 }
 
 message TestResponse { 
 
     // Array of updated targets for experimental configuration change
-    repeated Target targets = 1;
+    repeated DynamicTarget targets = 1;
 
 }
 
 // Mirrors the `Target` struct in `streamfish::config`
-message Target {
+message DynamicTarget {
 
     // Name of target sequence in alignment index
     string reference = 1;

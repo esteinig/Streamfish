@@ -19,7 +19,7 @@ use crate::services::dori_api::dynamic::TestRequest;
 use async_process::{Command, Stdio, ChildStdout, ChildStdin};
 use crate::services::dori_api::adaptive::adaptive_sampling_server::AdaptiveSampling;
 use crate::services::dori_api::adaptive::{StreamfishRequest, StreamfishResponse, Decision, RequestType};
-use crate::services::dori_api::dynamic::Target as DynamicTarget;
+use crate::services::dori_api::dynamic::DynamicTarget;
 
 pub struct AdaptiveSamplingService {
     config: StreamfishConfig
@@ -159,8 +159,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                     };
                     
                     let dynamic_targets = res.into_inner().targets.iter().map(Target::from_dynamic_target).collect();
-                    log::warn!("Response targets: {:?}", dynamic_targets);
-                    
+
                     // Create the config targets from the updated dynamic target response and update mapping config
                     dynamic_mapping_config.targets = dynamic_targets;
 
