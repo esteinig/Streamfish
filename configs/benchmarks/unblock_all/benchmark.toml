@@ -2,7 +2,7 @@
 # Each combination benchmark is configured explicitly
 
 name            = "Unblock-all benchmarks"
-outdir          = "/data/storage/benchmarks/unblock_all"
+outdir          = "/tmp/benchmarks/unblock_all"
 date            = "2023-08-07"
 commit          = ""
 description     = """
@@ -11,8 +11,8 @@ unblock-all modes with variation in models, channels, and references
 """
 
 # Base configurations
-streamfish_config   = ""
-icarust_config      = ""
+streamfish_config   = "/data/dev/meta-gp/reefsquid/configs/streamfish.toml"
+icarust_config      = "/data/dev/meta-gp/reefsquid/configs/icarust/test_human/test.toml"
 
 # Default
 
@@ -20,19 +20,19 @@ icarust_config      = ""
 prefix              = "default_unblock_all"
 description         = "Test benchmark of the baseline Streamfish/Icarust configuration across unblock-all modes"
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "client"
 unblock_all_mode    = "client"
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "server"
 unblock_all_mode    = "server"
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "basecaller"
 unblock_all_mode    = "basecaller"
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "mapper"
 unblock_all_mode    = "mapper"
 
@@ -42,67 +42,69 @@ unblock_all_mode    = "mapper"
 prefix              = "guppy_model_unblock_all"
 description         = "Test benchmark of the baseline Streamfish/Icarust configuration across unblock-all modes and basecaller models"
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "client_fast"
 unblock_all_mode    = "client"
 guppy_model         = "dna_r9.4.1_450bps_fast"
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "server_fast"
 unblock_all_mode    = "server"
 guppy_model         = "dna_r9.4.1_450bps_fast"
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "basecaller_fast"
 unblock_all_mode    = "basecaller"
 guppy_model         = "dna_r9.4.1_450bps_fast"
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "mapper_fast"
 unblock_all_mode    = "mapper"
 guppy_model         = "dna_r9.4.1_450bps_fast"
 
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "client_hac"
 unblock_all_mode    = "client"
 guppy_model         = "dna_r9.4.1_450bps_hac"
 
-[[benchmark]]
+[[group.group.benchmark]]
 prefix              = "server_hac"
 unblock_all_mode    = "server"
 guppy_model         = "dna_r9.4.1_450bps_hac"
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "basecaller_hac"
 unblock_all_mode    = "basecaller"
 guppy_model         = "dna_r9.4.1_450bps_hac"
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "mapper_hac"
 unblock_all_mode    = "mapper"
 guppy_model         = "dna_r9.4.1_450bps_hac"
 
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "client_sup"
 unblock_all_mode    = "client"
 guppy_model         = "dna_r9.4.1_450bps_sup"
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "server_sup"
 unblock_all_mode    = "server"
 guppy_model         = "dna_r9.4.1_450bps_sup"
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "basecaller_sup"
 unblock_all_mode    = "basecaller"
 guppy_model         = "dna_r9.4.1_450bps_sup"
 
-[[benchmark]]
+[[group.benchmark]]
 prefix              = "mapper_sup"
 unblock_all_mode    = "mapper"
 guppy_model         = "dna_r9.4.1_450bps_sup"
+
+
 
 
 

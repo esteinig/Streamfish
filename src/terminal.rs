@@ -16,7 +16,9 @@ pub struct App {
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     /// ReadUntil client
-    ReadUntil(TestReadUntilArgs),
+    ReadUntil(ReadUntilArgs),
+    /// Bencharm client
+    Benchmark(BenchmarkArgs),
     /// Dori server
     DoriServer(DoriServerArgs),
     /// Add a simulated device to MinKnow
@@ -28,6 +30,9 @@ pub enum Commands {
 #[derive(Debug, Args)]
 pub struct DoriServerArgs {
 
+    /// TOML configuration file for Streamfish
+    #[clap(long, short)]
+    pub config: PathBuf,
     /// Server type - adaptive or dynamic
     #[clap(long, short, default_value="adaptive", value_parser=clap::builder::PossibleValuesParser::new(["adaptive", "dynamic"]))]
     pub server_type: String,
@@ -35,10 +40,38 @@ pub struct DoriServerArgs {
  }
 
 #[derive(Debug, Args)]
-pub struct TestReadUntilArgs { }
+pub struct ReadUntilArgs {
+
+    /// TOML configuration file for Streamfish
+    #[clap(long, short)]
+    pub config: PathBuf,
+    /// TOML configuration file for slice-and-dice operation with Streamfish
+    #[clap(long, short)]
+    pub slice_dice: Option<PathBuf>,
+    
+ }
+
+
+#[derive(Debug, Args)]
+pub struct BenchmarkArgs {
+
+    /// TOML configuration file for Streamfish benchmark
+    #[clap(long, short)]
+    pub benchmark_config: PathBuf,
+
+    /// Force overwrite the benchmark directories
+    #[clap(long, short)]
+    pub force: bool,
+    
+}
+
 
 #[derive(Debug, Args)]
 pub struct AddDeviceArgs {
+
+    /// TOML configuration file for Streamfish
+    #[clap(long, short)]
+    pub config: PathBuf,
     /// Name of device to add, restricted by device type
     #[clap(long, short, default_value="MS12345")]
     pub name: String,
@@ -49,6 +82,11 @@ pub struct AddDeviceArgs {
 
 #[derive(Debug, Args)]
 pub struct RemoveDeviceArgs {
+
+
+    /// TOML configuration file for Streamfish.
+    #[clap(long, short)]
+    pub config: PathBuf,
     /// Name of device to remove
     #[clap(long, short, default_value="MS12345")]
     pub name: String,
@@ -59,10 +97,4 @@ pub struct GlobalOptions {
     /// Verbosity level (can be specified multiple times)
     #[clap(long, short, global = true, default_value="0")]
     pub verbose: usize,
-    /// TOML configuration file for Streamfish.
-    #[clap(long, short, global = true, default_value="streamfish.toml")]
-    pub config: PathBuf,
-    /// TOML configuration file for slice-and-dice operation with Streamfish.
-    #[clap(long, short, global = true)]
-    pub slice_dice: Option<PathBuf>,
 }

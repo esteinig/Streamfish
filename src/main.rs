@@ -3,6 +3,7 @@
 #![allow(unreachable_code)]
 
 use clap::Parser;
+use client::icarust::StreamfishBenchmark;
 use config::SliceDiceConfig;
 use crate::utils::init_logger;
 use crate::error::StreamfishError;
@@ -27,20 +28,21 @@ async fn main() -> Result<(), StreamfishError> {
     init_logger();
 
     let terminal = App::parse();
-    let config = StreamfishConfig::from_toml(&terminal.global.config)?;
 
     match &terminal.command {
-        Commands::ReadUntil ( _  ) => {
+        Commands::ReadUntil ( args ) => {
 
+            let config = StreamfishConfig::from_toml(&args.config)?;
             let client = ReadUntilClient::new();
             
-            match terminal.global.slice_dice {
+            match &args.slice_dice {
                 Some(slice_config) => {
                     let slice_cfg = SliceDiceConfig::from_toml(&slice_config)?;
                     client.run_slice_dice(&config, &slice_cfg).await?;
                 },
                 None => {
                     if config.readuntil.read_cache {
+                        
                         client.run_cached(config).await?;
                     } else {
                         unimplemented!("Streaming RPC not implemented")
@@ -49,17 +51,27 @@ async fn main() -> Result<(), StreamfishError> {
                 }
             }
         },
+
+        Commands::Benchmark ( args ) => {
+            
+            let benchmark = StreamfishBenchmark::from_toml(&args.benchmark_config);
+            benchmark.configure(args.force);
+
+        },
         Commands::DoriServer ( args ) => {
 
+            let config = StreamfishConfig::from_toml(&args.config)?;
             DoriServer::run(config, ServerType::from(&args.server_type)).await?;
         },
         Commands::AddDevice ( args  ) => {
 
+            let config = StreamfishConfig::from_toml(&args.config)?;
             let mut minknow_client = MinknowClient::connect(&config.minknow, None).await?;
             minknow_client.clients.manager.add_simulated_device(&args.name, SimulatedDeviceType::from_cli(&args.r#type)).await?;
         },
         Commands::RemoveDevice ( args  ) => {
 
+            let config = StreamfishConfig::from_toml(&args.config)?;
             let mut minknow_client = MinknowClient::connect(&config.minknow, None).await?;
             minknow_client.clients.manager.remove_simulated_device(&args.name).await?;
         }

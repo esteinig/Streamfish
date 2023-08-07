@@ -703,7 +703,6 @@ impl ReadUntilClient {
         };
 
         Ok(())
-
     }
 }
 

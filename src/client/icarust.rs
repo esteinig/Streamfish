@@ -53,7 +53,7 @@ pub struct StreamfishBenchmark {
 }
 
 impl StreamfishBenchmark {
-    pub fn from_toml(file: PathBuf) -> Self {
+    pub fn from_toml(file: &PathBuf) -> Self {
         let toml_str = std::fs::read_to_string(file).expect("Failed to open IcarustBenchmark configuration file");
         let config: StreamfishBenchmark = toml::from_str(&toml_str).expect("Failed to parse IcarustBenchmark configuration file");
         config
