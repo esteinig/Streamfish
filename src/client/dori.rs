@@ -1,6 +1,6 @@
 use tower::service_fn;
 use tokio::net::UnixStream;
-use crate::{client::error::ClientError};
+use crate::client::error::ClientError;
 use tonic::transport::{Endpoint, Channel};
 use crate::{services::dori_api::adaptive::adaptive_sampling_client::AdaptiveSamplingClient as AdaptiveSamplingClientRpc, config::StreamfishConfig};
 use crate::services::dori_api::dynamic::dynamic_feedback_client::DynamicFeedbackClient as DynamicFeedbackclientRpc;

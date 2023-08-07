@@ -41,7 +41,7 @@ impl DoriServer {
 
                     if dori_config.uds_path.exists() && dori_config.uds_override {
                         std::fs::remove_file(&dori_config.uds_path).map_err(|_| ServerError::UnixDomainSocketRemove)?;
-                        log::warn!("Dori AdaptiveSampling UDS override configured! Replaced existing socket: {}", dori_config.uds_path.display());
+                        log::warn!("Replaced existing socket: {}", dori_config.uds_path.display());
                     }
             
                     if !uds_path_parent_dir.exists() {
@@ -83,7 +83,7 @@ impl DoriServer {
 
                     if dori_config.uds_path.exists() && dori_config.uds_override {
                         std::fs::remove_file(&dori_config.uds_path).map_err(|_| ServerError::UnixDomainSocketRemove)?;
-                        log::warn!("Dori DynamicFeedback UDS override configured! Replaced existing socket: {}", dori_config.uds_path.display());
+                        log::warn!("Replaced existing socket: {}", dori_config.uds_path.display());
                     }
             
                     if !uds_path_parent_dir.exists() {

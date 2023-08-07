@@ -42,11 +42,14 @@ impl DeviceClient {
     }    
     pub async fn from_minknow_client(minknow_client: &MinknowClient, position_name: &str) -> Result<Self, ClientError> {
 
-        let rpc_port = match minknow_client.icarust.enabled {
-            true => minknow_client.icarust.position_port, 
-            false =>  minknow_client.positions.get_secure_port(position_name).map_err(
-            |_| ClientError::PortNotFound(position_name.to_string())
-            )?
+        let rpc_port = match &minknow_client.icarust_config {
+            Some(icarust_config) => {
+                match icarust_config.enabled {
+                    true => icarust_config.position_port, 
+                    false =>  minknow_client.positions.get_secure_port(position_name).map_err(|_| ClientError::PortNotFound(position_name.to_string()))?
+                 }
+            },
+            None =>  minknow_client.positions.get_secure_port(position_name).map_err(|_| ClientError::PortNotFound(position_name.to_string()))?
         };
 
         let channel = Channel::from_shared(

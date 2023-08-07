@@ -47,8 +47,14 @@ pub struct MinknowConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct IcarustConfig {
     pub enabled: bool,
+    pub manager_port: u32,
     pub position_port: u32,
     pub sample_rate: u32,
+    pub config: PathBuf,
+    pub launch: bool,
+    pub delay: u64,
+    pub runtime: u64,
+    pub task_delay: u64,
 }
 
 
@@ -108,6 +114,8 @@ pub struct DoriDynamicConfig {
 pub struct DynamicConfig {
     pub enabled: bool,
     pub launch_server: bool,
+    pub interval_seconds: u64,
+    pub cache_capacity: u64,
     pub test_targets: Vec<Target>
 }
 

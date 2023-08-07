@@ -18,9 +18,9 @@
 
 
 FAST5_ACTIVE_DIR=$1
+ANALYSIS_ID=$2
 
-ANALYSIS_ID="test"
-ANALYSIS_DIR="/tmp/streamfish_analysis_${ANALYSIS_ID}"
+ANALYSIS_DIR="/data/storage/streamfish_benchmarks/${ANALYSIS_ID}"
 TARGET_REGIONS="/tmp/target.tsv"
 
 MAPPING_REFERENCE='/tmp/chm13v2_chr1_chr2.mmi'
@@ -62,8 +62,9 @@ python /usr/src/streamfish/scripts/analysis/evaluate.icarust.py evaluation \
     --summary-table ${ANALYSIS_DIR}/${ANALYSIS_ID}.summary.csv \
     --active-paf ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.fst.paf \
     --active-ends ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.endreasons.csv \
-    --outdir-plots ${ANALYSIS_DIR} \
-    --target-regions ${TARGET_REGIONS} # \
+    --plots-prefix ${ANALYSIS_DIR}/${ANALYSIS_ID} \
+    --target-regions ${TARGET_REGIONS} \
+    --summary-json ${ANALYSIS_DIR}/${ANALYSIS_ID}.summary.json  # \
     # --control-sam ${ANALYSIS_DIR}/${ANALYSIS_ID}.control.fst.sam \
     # --control-ends ${ANALYSIS_DIR}/${ANALYSIS_ID}.control.endreasons.csv \
     # --control-output ${ANALYSIS_DIR}/${ANALYSIS_ID}.control.summary.csv

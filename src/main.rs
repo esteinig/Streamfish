@@ -40,7 +40,6 @@ async fn main() -> Result<(), StreamfishError> {
                     client.run_slice_dice(&config, &slice_cfg).await?;
                 },
                 None => {
-
                     if config.readuntil.read_cache {
                         client.run_cached(config).await?;
                     } else {
@@ -56,12 +55,12 @@ async fn main() -> Result<(), StreamfishError> {
         },
         Commands::AddDevice ( args  ) => {
 
-            let mut minknow_client = MinknowClient::connect(&config.minknow, &config.icarust).await?;
+            let mut minknow_client = MinknowClient::connect(&config.minknow, None).await?;
             minknow_client.clients.manager.add_simulated_device(&args.name, SimulatedDeviceType::from_cli(&args.r#type)).await?;
         },
         Commands::RemoveDevice ( args  ) => {
 
-            let mut minknow_client = MinknowClient::connect(&config.minknow, &config.icarust).await?;
+            let mut minknow_client = MinknowClient::connect(&config.minknow, None).await?;
             minknow_client.clients.manager.remove_simulated_device(&args.name).await?;
         }
     }

@@ -13,26 +13,52 @@ package dori_api.dynamic;
 service DynamicFeedback {
 
     // Tests dynamic adaptive sampling by changing the mapping target of the 
-    // current experimental configuration - the request can be sent 
-    // periodically from the adaptive sampling routine, change values
-    // are configured in `Streamfish::StreamfishConfig``
-    rpc Test(TestRequest) returns (TestResponse) { }
+    // current experimental configuration.
+    rpc Test(stream DynamicFeedbackRequest) returns (stream DynamicFeedbackResponse) { }
+
+    // // Dynamic assembly of sequences - this endpoint takes the array of read
+    // // identifiers and continuously assembles the provided reads from the 
+    // // completed read outputs of the control server. It then assesses whether
+    // // an assembly can be 
+    // rpc Assembly(stream DynamicFeedbackRequest) returns (stream DynamicFeedbackResponse) { }
+  
   
 }
   
 
-// =============
-// Test Messages
-// =============
+// ========
+// Messages
+// ========
 
-message TestRequest {
+
+// We want to maintain consistency between all RPC endpoints to send the 
+// same request Request and Responses - that way we can switch more easily 
+// between different dynamic analysis pipelines.
+//
+// We are not limited by performance or latency this time, so the 
+// size of messages and data types are not a primary consideration
+
+enum RequestType {
+    INIT = 0;
+    DATA = 1;
+}
+
+message DynamicFeedbackRequest {
+
+    // Request type
+    RequestType request = 1;
 
     // Array of targets from current experimental configuration
-    repeated DynamicTarget targets = 1;
+    repeated DynamicTarget targets = 2;
+
+    // Array of read identifiers for one or more configured decisions
+    // to be included in pipelines, for example to focus assembly on 
+    // all non-unblocked reads
+    repeated string reads = 3;
    
 }
 
-message TestResponse { 
+message DynamicFeedbackResponse { 
 
     // Array of updated targets for experimental configuration change
     repeated DynamicTarget targets = 1;

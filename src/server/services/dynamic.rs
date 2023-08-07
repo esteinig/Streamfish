@@ -1,14 +1,19 @@
 use tonic::{Request, Response, Status};
 
+use std::pin::Pin;
+use futures_core::Stream;
+use futures_util::StreamExt;
+
 use crate::config::StreamfishConfig;
 use crate::services::dori_api::dynamic::dynamic_feedback_server::DynamicFeedback;
-use crate::services::dori_api::dynamic::{TestRequest, TestResponse, DynamicTarget};
+use crate::services::dori_api::dynamic::{DynamicFeedbackRequest, DynamicFeedbackResponse, DynamicTarget, RequestType};
 
 
 pub struct DynamicFeedbackService {
     config: StreamfishConfig
 }
 impl DynamicFeedbackService {
+
     pub fn new(config: &StreamfishConfig) -> Self {
         Self { config: config.clone() }
     }
@@ -17,15 +22,55 @@ impl DynamicFeedbackService {
 #[tonic::async_trait]
 impl DynamicFeedback for DynamicFeedbackService {
 
-    async fn test(&self, request: Request<TestRequest>) -> Result<Response<TestResponse>, Status> {
-        
-        let test_targets: Vec<DynamicTarget> = self.config.dynamic.test_targets.iter().map(|t| t.to_dynamic_target()).collect();
-        let test_request = request.into_inner();
+    type TestStream = Pin<Box<dyn Stream<Item = Result<DynamicFeedbackResponse, Status>> + Send  + 'static>>;
 
-        let response = TestResponse {
-            targets: test_targets.into_iter().filter(|t| !test_request.targets.contains(t)).collect()
+    async fn test(&self, request: Request<tonic::Streaming<DynamicFeedbackRequest>>) -> Result<Response<Self::TestStream>, Status> {
+        
+        let init_dynamic_request: i32 = RequestType::Init.into();
+
+        let (response_tx, mut response_rx) = tokio::sync::mpsc::channel(1024); // drains into output stream
+
+        let mut request_stream = request.into_inner();
+
+
+        let config = self.config.clone();
+
+        tokio::spawn(async move {        
+            log::info!("Starting dynamic request stream handler");
+            while let Some(dynamic_request) = request_stream.next().await {
+                
+                let dynamic_request = match dynamic_request {
+                    Ok(request) => request,
+                    Err(_) => {
+                        log::warn!("Failed to parse request from incoming stream, continue stream...");
+                        continue
+                    }
+                };
+
+                if dynamic_request.request == init_dynamic_request {
+                    log::info!("Received initiation request on dynamic test endpoint");
+                    // No action, continue and wait for data stream
+                    continue;
+                }
+
+                let test_targets: Vec<DynamicTarget> = config.dynamic.test_targets.iter().map(|t| t.to_dynamic_target()).collect();
+
+                response_tx.send(DynamicFeedbackResponse {
+                    targets: test_targets.into_iter().filter(|t| !dynamic_request.targets.contains(t)).collect()
+                }).await.expect("Failed to send response into output stream");
+
+            }
+        });
+
+        let pipeline_response_stream = async_stream::try_stream! {
+            while let Some(response) = response_rx.recv().await {
+                yield response
+            }
         };
 
-        Ok(Response::new(response))
+        Ok(Response::new(Box::pin(pipeline_response_stream) as Self::TestStream))
     }
+
+
+
 }

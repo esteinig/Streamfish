@@ -24,9 +24,9 @@ You may need to install some system-wide dependencies to get started. I will out
 
 ### Anaconda
 
-Easiest setup is through the [`CondaForge`]() and [`BioConda`]() distribution systems. I am using [`mamba`]() from the `mambaforge` installation but any other client should work. 
+Easiest setup is through the [`CondaForge`]() and [`BioConda`]() distribution systems.
 
-We are setting up the environment manually and compiling `Streamfish`. This will eventually be replaced with a `Streamfish` package on `BioConda`.
+The environment is setup manually to compile `Streamfish`. This will eventually be replaced with a package on `BioConda`.
 
 ```bash
 # Set to a directory in your $PATH

@@ -15,10 +15,10 @@ use crate::client::dori::DynamicFeedbackClient;
 use crate::client::minknow::MinknowClient;
 use crate::config::Target;
 use crate::config::{StreamfishConfig, Basecaller};
-use crate::services::dori_api::dynamic::TestRequest;
+use crate::services::dori_api::dynamic::{DynamicFeedbackRequest, RequestType as DynamicRequestType};
 use async_process::{Command, Stdio, ChildStdout, ChildStdin};
 use crate::services::dori_api::adaptive::adaptive_sampling_server::AdaptiveSampling;
-use crate::services::dori_api::adaptive::{StreamfishRequest, StreamfishResponse, Decision, RequestType};
+use crate::services::dori_api::adaptive::{StreamfishRequest, StreamfishResponse, Decision, RequestType as AdaptiveRequestType};
 use crate::services::dori_api::dynamic::DynamicTarget;
 
 pub struct AdaptiveSamplingService {
@@ -89,11 +89,11 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let unblock_decision: i32 = Decision::Unblock.into();
 
         // Request types
-        let init_request: i32 = RequestType::Init.into();
+        let init_request: i32 = AdaptiveRequestType::Init.into();
 
         // Connection to MinKNOW to obtain device calibration data
         let minknow_client = match MinknowClient::connect(
-            &self.config.minknow, &self.config.icarust
+            &self.config.minknow, Some(self.config.icarust.clone())
         ).await {
             Ok(client) => client,
             Err(_) => return Err(Status::internal("Failed to connect to control server"))
@@ -132,42 +132,105 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
 
         let dynamic_mapping_config_main = std::sync::Arc::new(tokio::sync::Mutex::new(mapping_config.clone()));
-        let dynamic_mapping_config_thread = std::sync::Arc::clone(&dynamic_mapping_config_main);
+        let dynamic_mapping_request_stream_thread = std::sync::Arc::clone(&dynamic_mapping_config_main);
+        let dynamic_mapping_response_stream_thread = std::sync::Arc::clone(&dynamic_mapping_config_main);
+
+        // Main thread for decisions below
         let dynamic_mapping_config_stream = std::sync::Arc::clone(&dynamic_mapping_config_main);
+        
+        // Dynamic configuration cache that stores read identifiers from decisions
+        let dynamic_cache: Cache<String, String> = Cache::builder()
+            .max_capacity(self.config.dynamic.cache_capacity)
+            .build();
+
+        let dynamic_task_cache_request_stream = dynamic_cache.clone();
+        let dynamic_task_cache_decision = dynamic_cache.clone();
+        let dynamic_task_cache_chunks = dynamic_cache.clone();
+
+
+        // ===================================
+        // Dynamic client stream to server RPC
+        // ===================================
 
         if self.config.dynamic.enabled {
 
             let config = self.config.clone();
+
+            log::info!("Connecting to dynamic feedback service...");
+            let mut dori_rpc = match DynamicFeedbackClient::connect(&config).await {
+                Ok(client) => client,
+                Err(_) => return Err(Status::internal("Failed to connect to dynamic feedback service on Dori"))
+            };
+            log::info!("Connected to dynamic feedback service");
+
+            let (request_queue_tx, mut request_queue_rx) = tokio::sync::mpsc::channel(1024); // handles request stream to dynamic feedback server
+
+            // Setup the action request stream from this client - this stream reveives 
+            // messages from the action queue (`GetLiveReadsRequests`)
+            let dynamic_request_stream = async_stream::stream! {
+                while let Some(request) = request_queue_rx.recv().await {
+                    yield request;
+                }
+            };
+            log::info!("Sending initiation request to dynamic stream");
+            // Initiation request to stream, otherwise blocks flow:
+            request_queue_tx.send(DynamicFeedbackRequest { request: DynamicRequestType::Init.into(), targets: Vec::new(), reads: Vec::new() }).await.expect("Failed to send request into dynamic feedback stream");
+
+            
+            log::info!("Establishing dynamic feedback stream");
+            let mut response_stream = dori_rpc.client.test(Request::new(dynamic_request_stream)).await?.into_inner();
+            log::info!("Dynamic feedback stream established");
+            
+
+            // Stream input task
             tokio::spawn(async move {
                 
-                let mut dori_rpc = match DynamicFeedbackClient::connect(&config).await {
-                    Ok(client) => client,
-                    Err(_) => return Err(Status::internal("Failed to connect to dynamic feedback service on Dori"))
-                };
-
+                // Interval loop - only send a request every so often...
                 loop {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-    
-                    let mut dynamic_mapping_config = dynamic_mapping_config_thread.lock().await;
-
-                    let dynamic_targets: Vec<DynamicTarget> = dynamic_mapping_config.targets.iter().map(|t| t.to_dynamic_target()).collect();
-                    let response = dori_rpc.client.test(Request::new(TestRequest { targets: dynamic_targets })).await;
-
-                    let res = match response {
-                        Ok(response) => response,
-                        Err(_) => return Err(Status::internal("Failed to obtain test response for dynamic targets from dynamic feedback service on Dori"))
-                    };
+                    tokio::time::sleep(tokio::time::Duration::from_secs(config.dynamic.interval_seconds)).await;
                     
-                    let dynamic_targets = res.into_inner().targets.iter().map(Target::from_dynamic_target).collect();
+                    // Get all read identifiers from cache and clear it
+                    //
+                    // We are not performance bound in this thread since this is the "slow real-time" analysis loop
+                    // for the iteration see the Guarantees section for Moka: 
+                    //
+                    // https://docs.rs/moka/latest/moka/future/struct.Cache.html#method.iter
+
+                    let read_ids: Vec<String> = dynamic_task_cache_request_stream.iter().map(|(_, v)| v).collect();
+
+                    // Clear the cache in a background task - we should check if reads are lost [TODO]
+                    dynamic_task_cache_request_stream.invalidate_all();
+
+                    // Unlock the mapping config and get current dynamic targets for the request
+                    let dynamic_mapping_config = dynamic_mapping_request_stream_thread.lock().await;
+                    let dynamic_targets: Vec<DynamicTarget> = dynamic_mapping_config.targets.iter().map(|t| t.to_dynamic_target()).collect();
+
+                    request_queue_tx.send(DynamicFeedbackRequest { request: DynamicRequestType::Data.into(), targets: dynamic_targets, reads: read_ids }).await.expect("Failed to send request into dynamic feedback stream");
+                }
+
+                Ok::<(), Status>(())  // we need this type annotation but have an infinite loop
+            });
+
+
+            // Stream ouput task
+            tokio::spawn(async move {
+                
+                while let Some(response) = response_stream.message().await? {
+
+                    let mut dynamic_mapping_config = dynamic_mapping_response_stream_thread.lock().await;
+                    let dynamic_targets = response.targets.iter().map(Target::from_dynamic_target).collect();
 
                     // Create the config targets from the updated dynamic target response and update mapping config
                     dynamic_mapping_config.targets = dynamic_targets;
 
                     log::warn!("Switched to targets: {:?}", dynamic_mapping_config.targets);
-                }
 
-                Ok::<(), Status>(())  // we need this type annotation but have an infinite loop
-            });
+                }
+                
+
+            Ok::<(), Status>(()) 
+        });
+
 
         }
 
@@ -186,6 +249,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let (basecall_tx, mut basecall_rx): (Sender<(String, u32, u32, Vec<Vec<u8>>)>, Receiver<(String, u32, u32, Vec<Vec<u8>>)>) = tokio::sync::mpsc::channel(1024); // basecaller stdin submission
         let (alignment_tx, mut alignment_rx) = tokio::sync::mpsc::channel(1024); // basecaller fastx processing
 
+
         let uncache_basecaller_tx = cache_queue_tx.clone();
         let uncache_aligner_tx = cache_queue_tx.clone();
         let uncache_cache_tx = cache_queue_tx.clone();
@@ -194,10 +258,11 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         let decision_aligner_tx = decision_tx.clone();
         let decision_cache_tx = decision_tx.clone();
         
-        // Read cache with standard HashMap
+        // Read chunk cache for storing consecutive chunks of raw signal for re-evaluation
+
+        // Previous implementation with ArcMutex HashMap:
         // let read_cache: Arc<Mutex<HashMap<String, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
         // let read_cache_clone = Arc::clone(&read_cache);
-        
 
         let cache: Cache<String, Vec<Vec<u8>>> = Cache::builder()
             // Max 10,000 entries
@@ -209,8 +274,9 @@ impl AdaptiveSampling for AdaptiveSamplingService {
             // Create the cache.
             .build();
         
-        let cache_1 = cache.clone();
-        let cache_2 = cache.clone();
+        let cache_clearance = cache.clone();
+        let cache_deposit = cache.clone();
+
 
         // ============
         // Uncache task
@@ -223,9 +289,9 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                 
                 // This log is useful to ensure cache is cleared continuously -
                 // seems to be a decent indicator of things going wrong in general
-                log::info!("Reads cached 1: {}", cache_1.entry_count());
+                log::info!("Reads cached: {}", cache_clearance.entry_count());
 
-                cache_1.remove(&read_id).await;
+                cache_clearance.remove(&read_id).await;
 
             }
         
@@ -268,9 +334,9 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
         tokio::spawn(async move {
 
-            while let Some(dorado_request) = request_stream.next().await {
+            while let Some(chunk_request) = request_stream.next().await {
 
-                let dorado_request = match dorado_request {
+                let chunk_request = match chunk_request {
                     Ok(request) => request,
                     Err(_) => {
                         log::warn!("Failed to parse request from incoming stream, continue stream...");
@@ -278,7 +344,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                     }
                 };
                 
-                if dorado_request.request == init_request {
+                if chunk_request.request == init_request {
                     // No action, continue and wait for data stream
                     log::info!("Waiting {} seconds for pipeline initialisation ...", &run_config_1.readuntil.init_delay);
                     tokio::time::sleep(tokio::time::Duration::new(run_config_1.readuntil.init_delay, 0)).await;
@@ -287,18 +353,18 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                 
                 // Get the updated read and the number of chunks in the cache
                 // Note: entry is significantly slower
-                let cached = match cache_2.get(&dorado_request.id) {
+                let cached = match cache_deposit.get(&chunk_request.id) {
                     Some(mut chunks) => {
-                        chunks.push(dorado_request.data);
+                        chunks.push(chunk_request.data);
                         chunks
                     },
-                    None => vec![dorado_request.data]
+                    None => vec![chunk_request.data]
                 };
 
                 // Update cached chunks by reinserting
-                cache_2.insert(dorado_request.id.clone(), cached.clone()).await;
+                cache_deposit.insert(chunk_request.id.clone(), cached.clone()).await;
 
-                let read_id = dorado_request.id.clone();
+                let read_id = chunk_request.id.clone();
                 let num_chunks = cached.len();
 
                 if num_chunks < run_config_1.readuntil.read_cache_min_chunks {
@@ -306,15 +372,19 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                 } else if num_chunks > run_config_1.readuntil.read_cache_max_chunks {
 
                     if let Err(_) = decision_cache_tx.send(StreamfishResponse { 
-                        channel: dorado_request.channel, 
-                        number: dorado_request.number, 
+                        channel: chunk_request.channel, 
+                        number: chunk_request.number, 
                         decision: stop_decision
                     }).await {
                         log::warn!("Failed to send stop further data decision to response stream")
                     }
 
-                    if let Err(_) = uncache_cache_tx.send(read_id).await {
+                    if let Err(_) = uncache_cache_tx.send(read_id.clone()).await {
                         log::warn!("Failed to send uncache message into uncache queue")
+                    }
+
+                    if run_config_1.dynamic.enabled {
+                        dynamic_task_cache_chunks.insert(read_id.clone(), read_id.clone()).await;
                     }
 
                 } else {
@@ -323,8 +393,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                     if run_config_1.readuntil.unblock_all_server {
                         
                         if let Err(_) = decision_cache_tx.send(StreamfishResponse { 
-                            channel: dorado_request.channel, 
-                            number: dorado_request.number, 
+                            channel: chunk_request.channel, 
+                            number: chunk_request.number, 
                             decision: unblock_decision
                         }).await {
                             log::warn!("Failed to send unblock decision to response stream")
@@ -335,7 +405,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                         }
 
                     } else {
-                        if let Err(_) = basecall_tx.send((read_id, dorado_request.channel, dorado_request.number, cached)).await {
+                        if let Err(_) = basecall_tx.send((read_id, chunk_request.channel, chunk_request.number, cached)).await {
                             log::warn!("Failed to send basecaller data message into submission queue")
                         }
                     }
@@ -447,6 +517,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         
         tokio::spawn(async move {
 
+            // This might silently fail if reference does not exist - run checks on config builder! [TODO]
+
             let aligner = match Aligner::builder().map_ont().with_index(run_config_2.experiment.reference.clone(), None) {
                 Ok(aligner) => {
                     log::info!("Built the aligner for: {:?}", run_config_2.experiment.reference.display());
@@ -466,7 +538,34 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                     }
                 };  
                 
-                // Unblock all after alignment
+                // DO NOT LOG THE MAPPINGS OR USE BORROWS ON THEM - FOR SOME ULTRA ARCANE REASON THIS BRAKES EVERYTHING
+                // I THINK IT IS MUSL BUILD RELATED - NORMAL X86_64 BUILDS DO NOT RUN WILD EXCEPT FOR MISCONFIGURED EXPERIMENTS
+                
+                // Dynamic mapping updates require Arc<Mutex<MappingConfig>> locks within the
+                // decision/evaluation stream- this does introduce some latency but is
+                // not as much as anticipated.
+
+                let dynamic_mapping_config = dynamic_mapping_config_stream.lock().await; 
+
+                let decision = dynamic_mapping_config.decision_from_mapping(mappings);
+
+                if decision == stop_decision || decision == unblock_decision {
+                    if let Err(_) = uncache_aligner_tx.send(record_data.id.clone()).await {
+                        log::warn!("Failed to send uncache message to uncache queue")
+                    }
+                }
+
+                // On stop further data decision, add the read identifier to the 
+                // dynamic mapping config cache - do we need a full cache or just
+                // an ArcMutex vector? Note also this might miss the reads that received
+                // a "Proceed" decision but terminated before another chunk could be sent
+                // and therefore got stuck in the cache
+                if run_config_2.dynamic.enabled && decision == stop_decision {
+                    dynamic_task_cache_decision.insert(record_data.id.clone(), record_data.id.clone()).await;
+                }
+
+
+                // Unblock all after alignment and decision evaluation
                 if run_config_2.readuntil.unblock_all_mapper {
         
                     if let Err(_) = decision_aligner_tx.send(StreamfishResponse { 
@@ -484,23 +583,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                     continue
                 }
 
-                // DO NOT LOG THE MAPPINGS OR USE BORROWS ON THEM - FOR SOME ULTRA ARCANE REASON THIS BRAKES EVERYTHING
-                // I THINK IT IS MUSL BUILD RELATED - NORMAL X86_64 BUILDS DO NOT RUN WILD EXCEPT FOR MISCONFIGURED EXPERIMENTS
-                
-                // Dynamic mapping updates require Arc<Mutex<MappingConfig>> locks within the
-                // decision/evaluation stream- this does introduce some latency but is
-                // not as much as anticipated.
-
-                let dynamic_mapping_config = dynamic_mapping_config_stream.lock().await; 
-
-                let decision = dynamic_mapping_config.decision_from_mapping(mappings);
-
-                if decision == stop_decision || decision == unblock_decision {
-                    if let Err(_) = uncache_aligner_tx.send(record_data.id).await {
-                        log::warn!("Failed to send uncache message to uncache queue")
-                    }
-                }
-                
+                // Otherwise send decision response
                 if let Err(_) = decision_aligner_tx.send(StreamfishResponse { 
                     channel: record_data.channel, 
                     number: record_data.number, 

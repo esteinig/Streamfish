@@ -63,7 +63,7 @@ impl ActivePositions {
 pub struct MinknowClient{
     pub tls: ClientTlsConfig,
     pub config: MinknowConfig,
-    pub icarust: IcarustConfig,
+    pub icarust_config: Option<IcarustConfig>,
     pub clients: ActiveClients,
     pub channels: ActiveChannels,
     pub positions: ActivePositions
@@ -71,7 +71,7 @@ pub struct MinknowClient{
 
 impl MinknowClient {
 
-    pub async fn connect(config: &MinknowConfig, icarust: &IcarustConfig) -> Result<Self, ClientError> {
+    pub async fn connect(config: &MinknowConfig, icarust: Option<IcarustConfig>) -> Result<Self, ClientError> {
 
         // When connecting to MinKnow we require a secure channel (TLS). However, we were getting 
         // an error through the underlying TLS certificate library, solution is documented here.
@@ -92,6 +92,11 @@ impl MinknowClient {
         //
         //      https://github.com/esteinig/tonic @ v0.9.2-r1
 
+        let (port, host) = match &icarust {
+            Some(icarust_config) => (icarust_config.manager_port as i32, String::from("localhost")),  // we are always on localhost for Icarust - not sure if it supports other hosts?
+            None => (config.port, config.host.clone())
+        };
+
         let cert = std::fs::read_to_string(&config.certificate).expect(
             &format!("Failed to read certificate from path: {}", &config.certificate.display()) 
         );
@@ -103,13 +108,13 @@ impl MinknowClient {
         // ManagerClient Initiation 
         // ========================
 
-        log::info!("Connecting to control server on: https://{}:{}", config.host, config.port);
+        log::info!("Connecting to control server on: https://{}:{}", host, port);
 
         // Establish a secure channel to the MinKnow manager service, that will be 
         // available throughout to request data from the manager service
 
         let manager_channel = Channel::from_shared(
-            format!("https://{}:{}", config.host, config.port)
+            format!("https://{}:{}", host, port)
         ).map_err(|_| ClientError::InvalidUri)?
          .tls_config(tls.clone())
          .map_err( |_| ClientError::InvalidTls)?
@@ -119,7 +124,7 @@ impl MinknowClient {
         // Use a simple interceptor for authentication - this might have to be generalised
         // using `tower` middleware - but it's too complex for my simple brain right now.
 
-        log::info!("Channel established on: https://{}:{}", config.host, config.port);
+        log::info!("Channel established on: https://{}:{}", host, port);
         
         let mut manager_client = ManagerClient::new(
             manager_channel.clone(), config.token.clone()
@@ -150,7 +155,7 @@ impl MinknowClient {
         Ok(Self {
             tls: tls.clone(),
             config: config.clone(),
-            icarust: icarust.clone(),
+            icarust_config: icarust,
             clients: ActiveClients { manager: manager_client },
             channels: ActiveChannels { manager: manager_channel },
             positions: ActivePositions { positions: active_positions }
@@ -217,10 +222,16 @@ impl MinknowClient {
         let mut device_client = DeviceClient::from_minknow_client(&self, position_name).await?;
 
         // Need to account for the sample rate not being available for Icarust
-        let sample_rate = match self.icarust.enabled {
-            true => self.icarust.sample_rate,
-            false => device_client.get_sample_rate().await?
+        let sample_rate = match &self.icarust_config {
+            Some(icarust_config) => {
+                match icarust_config.enabled {
+                    true => icarust_config.sample_rate,
+                    false => device_client.get_sample_rate().await?
+                }
+            },
+            None => device_client.get_sample_rate().await?
         };
+        
 
         let calibration = device_client.get_calibration(first_channel, last_channel).await?;
 

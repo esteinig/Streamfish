@@ -133,8 +133,8 @@ services:
         - "USERNAME=${USERNAME:-streamfish}"
     tty: true
     volumes:
-      - "${TEMP_DIR:-/tmp}:/tmp"                                                                          # access to dori uds socket from host streamfish client at minimum use ssd
-
+      - "${TEMP_DIR:-/tmp}:/tmp"                                                                         
+      - "${STORAGE_DIR:-/data}:/data/storage"   
       - "${STREAMFISH_REPO_DIR}:/usr/src/streamfish"                                                      # access to development files and config, working dir inside container
       - "${DORADO_REPO_DIR}:/data/dev/meta-gp/forks/dorado"                                               # access to dorado fork for modification testing
     deploy:
@@ -159,7 +159,7 @@ services:
         - "USERNAME=${USERNAME:-streamfish}"
     tty: true
     volumes:
-      - "${TEMP_DIR:-/tmp}:/tmp"                                                                         # access to dori uds socket from host streamfish client at minimum use ssd
+      - "${TEMP_DIR:-/tmp}:/tmp"                                                                       
       - "${ICARUST_REPO_DIR}:/usr/src/icarust"                                                           # access to development files and config, working dir inside container
       - "${STREAMFISH_REPO_DIR}:/usr/src/streamfish"
       

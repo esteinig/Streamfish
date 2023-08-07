@@ -18,7 +18,8 @@ import matplotlib.pyplot as plt
 
 from pafpy import PafFile, PafRecord
 from dataclasses import dataclass
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
+
 from pprint import pprint
 from collections import Counter
 
@@ -56,6 +57,7 @@ YESTERDAY_MEDIUM.reverse()
 @dataclass
 class ReferenceData:
 
+    run: str
     reference: str
     start: int
     end: int
@@ -80,6 +82,7 @@ class ReferenceData:
 @dataclass
 class ReferenceSummary:
 
+    run: str = ""
     reference: str = ""
     target: str = ""
     start: int = 0
@@ -105,6 +108,11 @@ class ReferenceSummary:
     mean_mapq_unblocked: float = 0.
 
     unblocked_percent: float = 0.
+
+    all_lengths_unblocked: List or None = None
+    all_lengths_pass: List or None = None
+    all_mapq_unblocked : List or None = None
+    all_mapq_pass: List or None = None
 
 
     def from_mapping_summary(self, data: ReferenceData, control: bool = False):
@@ -143,13 +151,15 @@ class ReferenceSummary:
     
     def from_mapping_summaries(self, summaries: List[ReferenceData]):
 
-        self.reference=""
-        self.control=False
+        self.run = summaries[0].run
 
-        all_lengths_unblocked = []
-        all_lengths_pass = []
-        all_mapq_unblocked = []
-        all_mapq_pass = []
+        self.reference = ""
+        self.control = False
+
+        self.all_lengths_unblocked = []
+        self.all_lengths_pass = []
+        self.all_mapq_unblocked = []
+        self.all_mapq_pass = []
 
         for data in summaries:
 
@@ -164,31 +174,31 @@ class ReferenceSummary:
 
             
             if data.read_lengths_unblocked:
-                all_lengths_unblocked += data.read_lengths_unblocked
+                self.all_lengths_unblocked += data.read_lengths_unblocked
 
             if data.read_lengths_pass:
-                all_lengths_pass += data.read_lengths_pass
+                self.all_lengths_pass += data.read_lengths_pass
 
             if data.mapping_qualities_unblocked:
-                all_mapq_unblocked += data.mapping_qualities_unblocked
+                self.all_mapq_unblocked += data.mapping_qualities_unblocked
 
             if data.mapping_qualities_pass:
-                all_mapq_pass += data.mapping_qualities_pass
+                self.all_mapq_pass += data.mapping_qualities_pass
 
         try:
             self.unblocked_percent = (self.reads_unblocked/(self.reads_pass+self.reads_unblocked))*100
         except ZeroDivisionError:
             self.unblocked_percent = 0
             
-        self.mean_mapq_pass = statistics.mean(all_mapq_pass) if len(all_mapq_pass) > 1 else 0
-        self.mean_length_pass = statistics.mean(all_lengths_pass) if len(all_lengths_pass) > 1 else 0
-        self.median_length_pass = int(statistics.median(all_lengths_pass)) if len(all_lengths_pass) > 1 else 0
-        self.n50_length_pass = compute_n50(all_lengths_pass) if len(all_lengths_pass) > 1 else 0
+        self.mean_mapq_pass = statistics.mean(self.all_mapq_pass) if len(self.all_mapq_pass) > 1 else 0
+        self.mean_length_pass = statistics.mean(self.all_lengths_pass) if len(self.all_lengths_pass) > 1 else 0
+        self.median_length_pass = int(statistics.median(self.all_lengths_pass)) if len(self.all_lengths_pass) > 1 else 0
+        self.n50_length_pass = compute_n50(self.all_lengths_pass) if len(self.all_lengths_pass) > 1 else 0
 
-        self.mean_mapq_unblocked = statistics.mean(all_mapq_unblocked) if len(all_mapq_unblocked) > 1 else 0
-        self.mean_length_unblocked = statistics.mean(all_lengths_unblocked)  if len(all_lengths_unblocked) > 1 else 0
-        self.median_length_unblocked = int(statistics.median(all_lengths_unblocked)) if len(all_lengths_unblocked) > 1 else 0
-        self.n50_length_unblocked = compute_n50(all_lengths_unblocked)  if len(all_lengths_unblocked) > 1 else 0
+        self.mean_mapq_unblocked = statistics.mean(self.all_mapq_unblocked) if len(self.all_mapq_unblocked) > 1 else 0
+        self.mean_length_unblocked = statistics.mean(self.all_lengths_unblocked)  if len(self.all_lengths_unblocked) > 1 else 0
+        self.median_length_unblocked = int(statistics.median(self.all_lengths_unblocked)) if len(self.all_lengths_unblocked) > 1 else 0
+        self.n50_length_unblocked = compute_n50(self.all_lengths_unblocked)  if len(self.all_lengths_unblocked) > 1 else 0
 
         return self
 
@@ -351,7 +361,7 @@ def create_reference_summary_dataframe(
     active_summary: Dict[str, ReferenceData], 
     control_summary: Dict[str, ReferenceData] = None, 
     output: Path = None
-) -> Tuple[pandas.DataFrame, pandas.DataFrame]:
+) -> Tuple[pandas.DataFrame, pandas.DataFrame, ReferenceSummary]:
 
     # Create the reference summaries for each experiment arm summary
 
@@ -371,7 +381,7 @@ def create_reference_summary_dataframe(
     if output:
         df.to_csv(output, index=False, sep=",", header=True)
 
-    return df, df_combined
+    return df, df_combined, combined
 
 def get_region_data_paf(ends: Path, alignment: Path, targets: Path) -> Dict[str, ReferenceData]:
 
@@ -379,10 +389,13 @@ def get_region_data_paf(ends: Path, alignment: Path, targets: Path) -> Dict[str,
     endreasons = get_endreasons(file=ends)
     target_regions = pandas.read_csv(targets, sep="\t", header=None, names=["ref", "start", "end", "name"])
 
+    # Run identifier
+    run = alignment.name.split(".")[0]
+
     # Setup target region data summaries
     target_region_data: Dict[str, ReferenceData] = {
         f"{row['ref']}::{row['start']}::{row['end']}::{row['name']}": ReferenceData(
-            reference=row["ref"], start=row["start"], end=row["end"], name=row["name"], 
+            run=run, reference=row["ref"], start=row["start"], end=row["end"], name=row["name"], 
             read_lengths_pass=[], read_lengths_unblocked=[], reads_pass_records=[]
         ) for _, row in target_regions.iterrows()
     }
@@ -392,7 +405,7 @@ def get_region_data_paf(ends: Path, alignment: Path, targets: Path) -> Dict[str,
         outside = f"{row['ref']}::0::0::off_target"
         if outside not in target_region_data.keys():
             target_region_data[outside] = ReferenceData(
-                reference=row['ref'], start=0, end=0, name="off_target", 
+                run=run, reference=row['ref'], start=0, end=0, name="off_target", 
                 read_lengths_pass=[], read_lengths_unblocked=[], reads_pass_records=[]
             ) 
     
@@ -401,9 +414,7 @@ def get_region_data_paf(ends: Path, alignment: Path, targets: Path) -> Dict[str,
     # that have alignments and may not represent the full simulated
     # input (if no alignments present) - check if it matters [TODO]
     
-    add_off_targets_from_alignments(alignment=alignment, target_region_data=target_region_data)
-
-    print(target_region_data)
+    add_off_targets_from_alignments(alignment=alignment, target_region_data=target_region_data, run=run)
         
     # In the unblock decision any alignment (primary or secondary)
     # is considered to match the reference or target region. To be 
@@ -439,7 +450,7 @@ def get_region_data_paf(ends: Path, alignment: Path, targets: Path) -> Dict[str,
 
     return target_region_data
 
-def add_off_targets_from_alignments(alignment: Path, target_region_data: Dict[str, ReferenceData]):
+def add_off_targets_from_alignments(alignment: Path, target_region_data: Dict[str, ReferenceData], run: str):
 
     refs_unique = []
     with PafFile(alignment) as paf:
@@ -451,7 +462,7 @@ def add_off_targets_from_alignments(alignment: Path, target_region_data: Dict[st
     for ref in refs_unique:
         if ref not in refs_included:
             target_region_data[f"{ref}::0::0::off_target"] = ReferenceData(
-                reference=ref, start=0, end=0, name="off_target", read_lengths_pass=[], read_lengths_unblocked=[], reads_pass_records=[]
+                run=run, reference=ref, start=0, end=0, name="off_target", read_lengths_pass=[], read_lengths_unblocked=[], reads_pass_records=[]
             ) 
 
 
@@ -591,9 +602,9 @@ def plot_target_coverage_panel(target_regions: pandas.DataFrame):
         pass
 
 
-########################
-# TERMINAL APPLICATION #
-########################
+###################################
+# ICARUST + STREAMFISH EVALUATION #
+###################################
 
 app = typer.Typer(add_completion=False)
 
@@ -631,12 +642,13 @@ def endreason(
 
     out_handle.close()
 
+import json
 
 
 @app.command()
 def evaluation(
     summary_table: Path = typer.Option(
-        ..., help="Summary metrics table for reference alignments"
+        ..., help="Summary metrics table output for reference alignments"
     ),
     active_ends: Path = typer.Option(
         ..., help="CSV file with endreasons from `--endreason-fast5`"
@@ -647,8 +659,11 @@ def evaluation(
     target_regions: Path = typer.Option(
         ..., help="Target regions file for the experiment"
     ),
-    outdir_plots: Path = typer.Option(
-        ..., help="Output directory for figures"
+    plots_prefix: str = typer.Option(
+        None, help="Prefix for plot names"
+    ),
+    summary_json: Path = typer.Option(
+        None, help="Output data summary with all data as JSON"
     ),
     control_paf: Path = typer.Option(
         None, help="CONTROL SAM file from basecalling and alignment with Dorado"
@@ -662,12 +677,12 @@ def evaluation(
     """
        
     active_summary = get_region_data_paf(ends=active_ends, alignment=active_paf, targets=target_regions)
-
+    
     control_summary = None
     if control_paf and control_ends:
         control_summary =  get_region_data_paf(ends=control_ends, alignment=control_paf, targets=target_regions)
     
-    df, df_combined = create_reference_summary_dataframe(active_summary=active_summary, control_summary=control_summary, output=summary_table)
+    df, _, summary = create_reference_summary_dataframe(active_summary=active_summary, control_summary=control_summary, output=summary_table)
 
     with pandas.option_context(
         'display.max_rows', None,
@@ -676,13 +691,225 @@ def evaluation(
     ):
         print(df)
         # print(df_combined)
+
+    if summary_json:
+        json_object = json.dumps(summary.__dict__, indent=4)
+        with summary_json.open("w") as outfile:
+            outfile.write(json_object)
     
-    
-    read_length_density_all(active_summary, outdir_plots / f"read_lengths_density_all.png", min_length=50, max_length=40000, colors=LAPUTA_MEDIUM)
-    read_length_histogram_all(active_summary, outdir_plots / f"read_lengths_histogram_all.png", min_length=50, max_length=40000, colors=LAPUTA_MEDIUM)
-    read_length_histogram_distinct(active_summary, outdir_plots / f"read_lengths_histogram_distinct.png", min_length=50, max_lengths=[1000, 40000], colors=LAPUTA_MEDIUM)
+    if plots_prefix:
+        read_length_density_all(active_summary, f"{plots_prefix}.read_lengths_density_all.png", min_length=50, max_length=40000, colors=LAPUTA_MEDIUM)
+        read_length_histogram_all(active_summary,f"{plots_prefix}.read_lengths_histogram_all.png", min_length=50, max_length=40000, colors=LAPUTA_MEDIUM)
+        read_length_histogram_distinct(active_summary, f"{plots_prefix}.read_lengths_histogram_distinct.png", min_length=50, max_lengths=[1000, 40000], colors=LAPUTA_MEDIUM)
 
 
+
+###############################
+# MULTI-RUN SUMMARY AND PLOTS #
+###############################
+
+from enum import Enum
+
+class ReadClassification(str, Enum):
+    UNBLOCKED = "unblocked"
+    PASS = "pass"
+    COMBINED = "combined"
+
+
+class ReadLengthPlot(str, Enum):
+    DENSITY = "density"
+    HISTROGRAM = "histogram"
+    VIOLIN = "violin"
+
+def plot_comparison(
+    summaries: List[ReferenceSummary], 
+    output: Path or str, 
+    labels: List[str] or None = None, 
+    read_classification: ReadClassification = ReadClassification.UNBLOCKED, 
+    plot_type: ReadLengthPlot = ReadLengthPlot.HISTROGRAM, 
+    min_read_length: int = None, 
+    max_read_length: int = None, 
+    colors: List[str] = LAPUTA_MEDIUM, 
+    plot_medians: bool = False
+) -> None:
+
+    # Create a figure and axes
+    fig, ax = plt.subplots(nrows=1, ncols=1)
+
+    medians = []
+    if plot_type == ReadLengthPlot.DENSITY:
+        for i, ref_summary in enumerate(summaries): 
+
+            if read_classification == ReadClassification.UNBLOCKED:
+                lengths = ref_summary.all_lengths_unblocked
+            elif read_classification == ReadClassification.PASS:
+                lengths = ref_summary.all_lengths_pass
+            else:
+                lengths = ref_summary.all_lengths_unblocked + ref_summary.all_lengths_pass
+
+            if max_read_length:
+                lengths = [d for d in lengths if d <= max_read_length]
+            if min_read_length:
+                lengths = [d for d in lengths if d >= min_read_length]
+
+            if labels:
+                label = labels[i]
+            else:
+                label = ref_summary.run
+
+            medians.append(statistics.median(lengths))
+        
+            sns.kdeplot(lengths, ax=ax, label=label, color=colors[i], fill=True, alpha=1)
+
+            ax.set_ylabel('Density\n')
+            ax.set_xlim(0, max(lengths) + 100)
+
+            ax.legend()
+            ax.grid(False)
+            sns.despine()
+    elif plot_type == ReadLengthPlot.VIOLIN:
+        length_data = {'read_length': [], 'label': []}
+        for i, ref_summary in enumerate(summaries): 
+
+            if read_classification == ReadClassification.UNBLOCKED:
+                lengths = ref_summary.all_lengths_unblocked
+            elif read_classification == ReadClassification.PASS:
+                lengths = ref_summary.all_lengths_pass
+            else:
+                lengths = ref_summary.all_lengths_unblocked + ref_summary.all_lengths_pass
+
+            if max_read_length:
+                lengths = [d for d in lengths if d <= max_read_length]
+            if min_read_length:
+                lengths = [d for d in lengths if d >= min_read_length]
+
+            if labels:
+                label = labels[i]
+            else:
+                label = ref_summary.run
+
+            medians.append(statistics.median(lengths))
+
+            length_data['read_length'] += lengths
+            length_data['label'] += [label for _ in lengths]
+        
+        df = pandas.DataFrame.from_dict(length_data)
+
+        p = sns.violinplot(data=df, x="read_length", y="label", ax=ax, alpha=0.8, palette=colors, cut=0, scale="count")
+        p = sns.stripplot(data=df, x="read_length", y="label", size=1, ax=ax, alpha=0.2, palette=["lightgray"], legend=False)
+        
+        ax.set_ylabel('Read counts\n')
+        ax.set_xlim(0, max(length_data['read_length']) + 100)
+        sns.despine()
+        ax.grid(False)
+
+    else:
+        length_data = {'read_length': [], 'label': []}
+        for i, ref_summary in enumerate(summaries): 
+
+            if read_classification == ReadClassification.UNBLOCKED:
+                lengths = ref_summary.all_lengths_unblocked
+            elif read_classification == ReadClassification.PASS:
+                lengths = ref_summary.all_lengths_pass
+            else:
+                lengths = ref_summary.all_lengths_unblocked + ref_summary.all_lengths_pass
+
+            if max_read_length:
+                lengths = [d for d in lengths if d <= max_read_length]
+            if min_read_length:
+                lengths = [d for d in lengths if d >= min_read_length]
+
+            if labels:
+                label = labels[i]
+            else:
+                label = ref_summary.run
+
+            medians.append(statistics.median(lengths))
+
+            length_data['read_length'] += lengths
+            length_data['label'] += [label for _ in lengths]
+        
+        df = pandas.DataFrame.from_dict(length_data)
+
+        p = sns.histplot(data=df, x="read_length", hue="label", kde=False, ax=ax, bins='auto', fill=True, alpha=1, palette=colors)
+        
+        p.get_legend().set_title(None)
+        plt.setp(p.get_legend().get_texts(), fontsize='8')
+
+        ax.set_ylabel('Read counts\n')
+        ax.set_xlim(0, max(length_data['read_length']) + 100)
+        sns.despine()
+        ax.grid(False)
+
+    if plot_medians:
+        (y_start, y_end) = plt.ylim()
+        plt.vlines(medians, ymin=y_start, ymax=y_end, colors=colors, linestyles='dotted')
+
+    # plt.title(f"Read lengths [{read_classification}]")
+    plt.xlabel(f"\nbp")
+
+    plt.savefig(output, dpi=300, bbox_inches='tight', transparent=False)
+    plt.close()
+
+def plot_grouped_comparison(
+    summaries: List[ReferenceSummary], 
+    group_file: Path,
+):
+    pass
+
+
+@app.command()
+def plot_summaries(
+    summaries: List[Path] = typer.Argument(
+        ..., help="Summary JSON outputs for each simulation run evaluation"
+    ),
+    label: Optional[List[str]] = typer.Option(
+        None, help="Summary run names for legend, otherwise uses file names"
+    ),
+    plot_type: ReadLengthPlot = typer.Option(
+        "violin", help="Plot type"
+    ),
+    plot_prefix: str = typer.Option(
+        "data", help="Plot prefix for comparison"
+    ),
+    classification: ReadClassification = typer.Option(
+        "unblocked", help="Read classfication for which to plot the summary"
+    ),
+):
+    """
+    Create plots from the summary output of multiple runs (Icarust v0.3.0)
+    """
+
+
+    if label:
+        if len(label) != len(summaries):
+            raise ValueError("You must provide the same number of labels as the number of summaries to compare (in the same order)")
+    
+    ref_summaries: List[ReferenceSummary] = []
+    for file in summaries:
+        with file.open("r") as infile:
+            ref_summaries.append(
+                ReferenceSummary(**json.load(infile))
+            )
+
+    plot_comparison(summaries=ref_summaries, output=f"{plot_prefix}.comparison.png", labels=label, read_classification=classification, plot_type=plot_type)
+    
+    if label:
+        for i, summary in enumerate(ref_summaries):
+            summary.run = label[i]
+
+    df = pandas.DataFrame([o.__dict__ for o in ref_summaries])
+    df = df.sort_values(by="run")
+
+    df = df.drop(["all_lengths_pass", "all_lengths_unblocked", "all_mapq_pass", "all_mapq_unblocked"], axis=1)
+
+
+    with pandas.option_context(
+        'display.max_rows', None,
+        'display.max_columns', None,
+        'display.precision', 2
+    ):    
+        print(df)
 
 app()
 

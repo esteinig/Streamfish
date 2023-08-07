@@ -1,0 +1,37 @@
+name            = "Unblock-all benchmarks"
+outdir          = "/data/storage/benchmarks/unblock_all"
+date            = "2023-08-07"
+description     = """
+Configurations to benchmark component latency across unblock-all modes (groups) with
+variation in models, channels,  
+"""
+
+[[benchmark]]
+prefix              = "default"
+description         = "Default benchmark of the baseline Streamfish/Icarust configuration across unblock-all modes"
+
+unblock_all_mode    = ["client", "server",  "basecaller", "mapper"]
+
+
+[[benchmark]]
+prefix              = "model"
+description         = "Default benchmark of the baseline Streamfish/Icarust configuration across unblock-all modes and basecaller models"
+
+unblock_all_mode    = ["client", "server",  "basecaller", "mapper"]
+guppy_model         = ["dna_r9.4.1_450bps_fast", "dna_r9.4.1_450bps_hac", "dna_r9.4.1_450bps_sup"]
+
+
+[[benchmark]]
+prefix              = "reference"
+description         = "Default benchmark of the baseline Streamfish/Icarust configuration across unblock-all modes and references"
+
+unblock_all_mode    = ["client", "server",  "basecaller", "mapper"]
+reference           = ["/tmp/viruses.mmi", "/tmp/bacteria.mmi", "/tmp/chm13v2_chr1_chr2.mmi", "/tmp/chm13v2_ont.mmi"]
+
+
+[[benchmark]]
+prefix              = "channels"
+description         = "Default benchmark of the baseline Streamfish/Icarust configuration across unblock-all modes and channels"
+
+unblock_all_mode    = ["client", "server",  "basecaller", "mapper"]
+channels            = [512, 1024, 1536, 2048, 2560, 3072]

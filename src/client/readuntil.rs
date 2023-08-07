@@ -19,6 +19,8 @@ use crate::services::minknow_api::acquisition::{MinknowStatus, CurrentStatusRequ
 use crate::services::minknow_api::data::get_live_reads_request::action;
 use crate::services::dori_api::adaptive::{RequestType, StreamfishRequest};
 
+use crate::client::icarust::IcarustRunner;
+
 use crate::services::minknow_api::data::get_live_reads_request::{
     Actions, 
     Action, 
@@ -126,12 +128,52 @@ impl ReadUntilClient {
     }
     pub async fn run_cached(&self, config: StreamfishConfig) -> Result<(), ClientError> {
 
-        // Control server connection - moved into main routine because cloning the client with
-        // the established connections results in PoisonError
-        // 
-        // Update: caused by mismatch in number of channels - Icarust (1024) vs Streamfish (2048) but
-        // keeping this structure as StreamfishConfig has only to be passed once into the run methods
-        let minknow_client = MinknowClient::connect(&config.minknow, &config.icarust).await?;
+        let (shutdown_tx, mut shutdown_rx): (UnboundedSender<ClientErrorSignal>, UnboundedReceiver<ClientErrorSignal>) = tokio::sync::mpsc::unbounded_channel();
+
+        // ============================
+        // Launch Icarust if configured
+        // ============================
+
+
+        let icarust_task_handle = match (config.icarust.enabled, config.icarust.launch) {
+            (true, true) => {
+
+                let icarust_runner = IcarustRunner::new(&config);
+                log::info!("Created IcarustRunner");
+
+                log::info!("Icarust data delay is: {} seconds", &config.icarust.delay);
+                log::info!("Icarust data runtime is: {} seconds", &config.icarust.runtime);
+
+                let icarust_shutdown_tx = shutdown_tx.clone();
+
+                log::info!("Launching Icarust in background task...");
+                let icarust_handle = tokio::spawn(async move {
+                    
+                    icarust_runner.icarust.run(config.icarust.delay, config.icarust.runtime).await.expect("Failed to run Icarust");
+                    
+                    log::info!("Sending termination signal after Icarust completion");
+                    send_termination_signal(&icarust_shutdown_tx, ClientError::ControlServerConnectionTermination);
+
+                    Ok::<(), ClientError>(())
+
+                });
+
+                log::info!("Waiting for Icarust to load signal data...");
+                // We should wait a little while for Icarust to load the signal data 
+                tokio::time::sleep(std::time::Duration::from_secs(config.icarust.task_delay)).await;
+
+                Some(icarust_handle)
+            },
+            (true, false) => {
+                log::warn!("Icarust is enabled but automatic launch is disabled - manual setup required");
+                None
+            },
+            _ => None
+        };
+
+        // Connect to control server
+
+        let minknow_client = MinknowClient::connect(&config.minknow, Some(config.icarust.clone())).await?;
 
         // Wait a little just in case
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -166,6 +208,7 @@ impl ReadUntilClient {
 
         let clock = Clock::new();
 
+
         // ==============================================
         // Launch Dori and basecall servers if configured
         // ==============================================
@@ -174,7 +217,7 @@ impl ReadUntilClient {
             (true, true) => {
                 let dori_config = config.clone();
 
-                log::info!("Launching Dori DynamicFeedback server in async task...");
+                log::info!("Launching Dori DynamicFeedback server in background task...");
                 let dori_thread_handle = tokio::spawn(async move {
                     DoriServer::run(dori_config, ServerType::Dynamic).await.map_err(|_| ClientError::DoriServerLaunch)?;
                     Ok::<(), ClientError>(())
@@ -270,7 +313,6 @@ impl ReadUntilClient {
         let (dori_tx, mut dori_rx) = tokio::sync::mpsc::unbounded_channel();
         let (log_tx, mut log_rx) = tokio::sync::mpsc::unbounded_channel();
         let (throttle_tx, mut throttle_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (shutdown_tx, mut shutdown_rx): (UnboundedSender<ClientErrorSignal>, UnboundedReceiver<ClientErrorSignal>) = tokio::sync::mpsc::unbounded_channel();
 
 
         // Clocks and sender clones
@@ -310,17 +352,22 @@ impl ReadUntilClient {
                 dori_task.abort();
             }
 
-
             if let Some(dori_task) = dori_dynamic_task_handle {
                 log::warn!("{}: shutting down processing dynamic feedback server...", client_name);
                 dori_task.abort();
             }
 
+            if let Some(icarust_task) = icarust_task_handle {
+                log::warn!("{}: shutting down Icarust runner ...", client_name);
+                icarust_task.abort();
+            }
+
+
             log::warn!("{}: shutting down Streamfish client...", client_name);
             log::info!("{}: so long, and thanks for all the fish! 🐟", client_name);
 
             // Give some time for shutdowns
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
             std::process::exit(1)
 
@@ -417,6 +464,8 @@ impl ReadUntilClient {
         let mut minknow_stream = data_rpc.client.get_live_reads(tonic::Request::new(data_request_stream)).await.map_err(|_| {
             send_termination_signal(&shutdown_tx, ClientError::ControlServerStreamInit)
         })?.into_inner();
+
+        log::info!("Initiated data streams with control server");
 
         // Initiate processing server stream - must happpen before the request to the processing server weirdly
         dori_tx.send(StreamfishRequest { channel: 0, number: 0, id: String::new(), data: Vec::new(), request: init_request }).map_err(|_| {

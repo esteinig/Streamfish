@@ -4,3 +4,4 @@ pub mod minknow;
 pub mod error;
 pub mod auth;
 pub mod dori;
+pub mod icarust;

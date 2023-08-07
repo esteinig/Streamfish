@@ -71,4 +71,5 @@ pub enum ClientError {
     // Represents failure to send the initiation request to the processing server
     #[error("Failed to send initiation request to the processing server")]
     DoriServerStreamInitSend,
+
 }

@@ -1,13 +1,17 @@
 pore_type = "R9"
 working_pore_percent = 85
-
 target_yield = 100000000000
 global_mean_read_length = 20000
-
 random_seed = 10
 output_path = "/tmp/"
+vbz_plugin = "/data/dev/meta-gp/forks/icarust/vbz_plugin"
 
 [parameters]
+
+cert_dir = "/opt/ont/minknow/conf/rpc-certs/"
+channels = 512
+manager_port = 10000
+position_port = 10001
 
 sample_name = "test"
 experiment_name = "test_human"
