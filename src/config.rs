@@ -5,7 +5,7 @@ use minimap2::Mapping;
 use std::path::PathBuf;
 use std::io::BufRead;
 use serde::de::Error;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use crate::services::dori_api::dynamic::DynamicTarget;
 use crate::{services::{minknow_api::data::get_live_reads_request::RawDataType, dori_api::adaptive::Decision}, error::StreamfishConfigError};
 
@@ -14,7 +14,7 @@ fn get_env_var(var: &str) -> Option<String> {
 }
 
 // An exposed subset of configurable parameters for the user
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StreamfishConfig  {
     pub meta: MetaConfig,
     pub minknow: MinknowConfig,
@@ -26,7 +26,7 @@ pub struct StreamfishConfig  {
     pub experiment: ExperimentConfig
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MetaConfig {
     pub name: String,
     pub version: String,
@@ -35,7 +35,7 @@ pub struct MetaConfig {
     pub server_name: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MinknowConfig {
     pub port: i32,
     pub host: String,
@@ -44,7 +44,7 @@ pub struct MinknowConfig {
 }
 
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IcarustConfig {
     pub enabled: bool,
     pub manager_port: u32,
@@ -81,13 +81,13 @@ impl ServerType {
 // be run on different hardware on the network that syncs the
 // POD5/FASTQ output from the run.
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DoriConfig {
     pub adaptive: DoriAdaptiveConfig,
     pub dynamic: DoriDynamicConfig,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DoriAdaptiveConfig {
     pub tcp_enabled: bool,
     pub tcp_port: u32,
@@ -101,7 +101,7 @@ pub struct DoriAdaptiveConfig {
     pub stderr_log: PathBuf,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DoriDynamicConfig {
     pub tcp_enabled: bool,
     pub tcp_port: u32,
@@ -110,7 +110,7 @@ pub struct DoriDynamicConfig {
     pub uds_override: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DynamicConfig {
     pub enabled: bool,
     pub launch_server: bool,
@@ -120,7 +120,7 @@ pub struct DynamicConfig {
 }
 
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ReadUntilConfig {
     pub init_delay: u64,
     pub device_name: String,
@@ -150,17 +150,17 @@ pub struct ReadUntilConfig {
     pub unblock_all_basecaller: bool,
     #[serde(skip_deserializing)]
     pub unblock_all_mapper: bool,
-    #[serde(skip_deserializing)]
+    #[serde(skip_deserializing, skip_serializing)]
     pub raw_data_type: RawDataType
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GuppyConfig {
     pub client: GuppyClientConfig,
     pub server: GuppyServerConfig,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GuppyClientConfig {
     pub path: PathBuf,
     pub script: PathBuf,
@@ -174,7 +174,7 @@ pub struct GuppyClientConfig {
     pub args: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GuppyServerConfig {
     pub path: PathBuf,
     pub port: String,
@@ -191,7 +191,7 @@ pub struct GuppyServerConfig {
     pub args: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ExperimentConfig {
     pub control: bool,
     pub mode: String,
@@ -216,7 +216,7 @@ where P: AsRef<std::path::Path>, {
 
 /// A target specification for targeted sequencing experiments
 /// Add negative checks due to i32 `minimap2-rs` types
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Target {
     reference: String,
     start: Option<i32>,  
@@ -307,7 +307,7 @@ impl TargetFile {
 
 
 /// Unblock all circuits for testing
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum UnblockAll {
     Client,
     Server,
@@ -337,7 +337,7 @@ impl UnblockAll {
 }
 
 /// Basecallers
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Basecaller {
     Dorado,
     Guppy
@@ -371,7 +371,7 @@ impl<'de> Deserialize<'de> for Basecaller {
 }
 
 /// Classifiers
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Classifier {
     Minimap2Rust,
     Kraken2
@@ -405,7 +405,7 @@ impl<'de> Deserialize<'de> for Classifier {
 }
 
 impl StreamfishConfig {
-    pub fn from_toml(file: PathBuf) -> Result<Self, StreamfishConfigError> {
+    pub fn from_toml(file: &PathBuf) -> Result<Self, StreamfishConfigError> {
 
         let toml_str = std::fs::read_to_string(file).map_err(|err| StreamfishConfigError::TomlConfigFile(err))?;
         let mut config: StreamfishConfig = toml::from_str(&toml_str).map_err(|err| StreamfishConfigError::TomlConfigParse(err))?;
@@ -486,7 +486,12 @@ impl StreamfishConfig {
             panic!("Classifier configuration not supported")
         }
 
-}
+    }
+    pub fn to_json(&self, file: &PathBuf) {
+        serde_json::to_writer(
+            &std::fs::File::create(&file).expect("Faile to create Streamfish configuration file"), &self
+        ).expect("Failed to write Streamfish configuration to file")
+    }
 }
 
 impl ExperimentConfig {
@@ -521,7 +526,7 @@ impl ExperimentConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Experiment {
     // Alignment based experiment
     MappingExperiment(MappingExperiment)
@@ -545,7 +550,7 @@ impl Default for Experiment {
 // An enumeration of `MappingConfig` variants wrapping configured structs
 // that constitute an experimental setup as in Readfish (Table 2) + 
 // additional presets specific to Streamfish
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum MappingExperiment {
     HostDepletion(MappingConfig),
     TargetedSequencing(MappingConfig),
@@ -578,7 +583,7 @@ impl MappingExperiment {
 }
 
 // A mapping SAM flag configuration for alignment with Dorado (minimap2)
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum MappingFlags {
     Multi,
     Single,
@@ -595,7 +600,7 @@ impl MappingFlags {
 }
 
 // Decision configuration
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DecisionConfig {
     // We use the enum values here during instantiation 
     // because calling .into() methods repeatedly
@@ -606,7 +611,7 @@ pub struct DecisionConfig {
 
 
 // A mapping configuration for alignment as outlined in Readfish (Tables 1)
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MappingConfig {
     // List of target sequence ids
     pub targets: Vec<Target>,
@@ -813,7 +818,7 @@ impl MappingConfig {
 
 
 // Slice-and-dice configuration
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SliceDiceConfig {
     pub channels: u32, 
     pub launch_dori_server: bool,
@@ -862,7 +867,7 @@ impl std::fmt::Display for SliceDiceConfig {
 }
 
 // Slice configuration
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SliceConfig {
     pub client_name: String,
     pub channel_start: u32,

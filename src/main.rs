@@ -27,7 +27,7 @@ async fn main() -> Result<(), StreamfishError> {
     init_logger();
 
     let terminal = App::parse();
-    let config = StreamfishConfig::from_toml(terminal.global.config)?;
+    let config = StreamfishConfig::from_toml(&terminal.global.config)?;
 
     match &terminal.command {
         Commands::ReadUntil ( _  ) => {

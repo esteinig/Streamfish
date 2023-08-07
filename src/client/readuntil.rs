@@ -134,7 +134,6 @@ impl ReadUntilClient {
         // Launch Icarust if configured
         // ============================
 
-
         let icarust_task_handle = match (config.icarust.enabled, config.icarust.launch) {
             (true, true) => {
 
