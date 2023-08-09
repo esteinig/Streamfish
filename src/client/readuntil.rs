@@ -2,24 +2,26 @@
 use uuid::Uuid;
 use tokio::signal;
 use tokio::fs::File;
+use chrono::prelude::*;
 use tokio::io::AsyncWriteExt;
 use quanta::{Clock, Instant};
 use crate::config::ServerType;
 use crate::server::dori::DoriServer;
-use crate::client::dori::AdaptiveSamplingClient;
 use crate::client::error::ClientError;
+use crate::client::icarust::IcarustRunner;
 use crate::client::minknow::MinknowClient;
+use icarust::config::Config as IcarustConfig;
 use crate::client::services::data::DataClient;
+use crate::client::dori::AdaptiveSamplingClient;
 use crate::services::dori_api::adaptive::Decision;
-use crate::config::{StreamfishConfig, Basecaller, SliceDiceConfig};
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use crate::client::services::acquisition::AcquisitionClient;
 use crate::services::minknow_api::data::GetLiveReadsRequest;
-use crate::services::minknow_api::acquisition::{MinknowStatus, CurrentStatusRequest};
+use crate::config::{StreamfishConfig, Basecaller, SliceDiceConfig};
 use crate::services::minknow_api::data::get_live_reads_request::action;
 use crate::services::dori_api::adaptive::{RequestType, StreamfishRequest};
+use crate::services::minknow_api::acquisition::{MinknowStatus, CurrentStatusRequest};
 
-use crate::client::icarust::IcarustRunner;
 
 use crate::services::minknow_api::data::get_live_reads_request::{
     Actions, 
@@ -29,6 +31,8 @@ use crate::services::minknow_api::data::get_live_reads_request::{
     StreamSetup, 
     Request as LiveReadsRequest
 };
+
+use super::icarust::StreamfishBenchmark;
 
 #[derive(Debug)]
 enum PipelineStage {
@@ -76,6 +80,12 @@ fn send_termination_signal(sender: &UnboundedSender<ClientErrorSignal>, error: C
     error
 }
 
+pub enum Termination {
+    ProcessExit,
+    BenchmarkError,
+    SliceError
+}
+
 #[derive(Debug)]
 pub struct ClientErrorSignal { }
 
@@ -109,7 +119,7 @@ impl ReadUntilClient {
             log::info!("{}", &slice_dice.slice[i]);
 
             let handle = tokio::spawn(async move {
-                client.run_cached(slice_cfg).await?;  // run the slice config
+                client.run_cached(slice_cfg, None, None, Termination::SliceError).await?;  // run the slice config
                 Ok::<(), ClientError>(())
             });
             task_handles.push(handle);
@@ -126,7 +136,50 @@ impl ReadUntilClient {
 
         Ok(())
     }
-    pub async fn run_cached(&self, config: StreamfishConfig) -> Result<(), ClientError> {
+    // Run a benchmark configuration
+    pub async fn run_benchmark(self, benchmark: &StreamfishBenchmark, force: bool) -> Result<(), ClientError> {
+
+        let start = Utc::now();
+        log::info!("Benchmark runner started at {}", start);
+        log::info!("Benchmark: {}", benchmark.name);
+        log::info!("Date: {}", benchmark.date);
+        log::info!("Commit: {}", benchmark.commit);
+        log::info!("Description: {}", benchmark.description);
+
+        log::info!("Configuring benchmarks in: {}", benchmark.outdir.display());
+        log::info!("Streamfish configuration base: {}", benchmark.streamfish_config.display());
+        log::info!("Icarust configuration base: {}", benchmark.icarust_config.display());
+
+        let run_configs = benchmark.configure(force)?;
+
+        log::info!("Launching benchmarks...");
+        for (group_config, benchmark_config, streamfish_config, icarust_config) in run_configs {
+            log::info!("Benchmark: group={} prefix={} uuid={}", &group_config.prefix, &benchmark_config.prefix, &benchmark_config.uuid);
+            let result = self.run_cached(streamfish_config, Some(icarust_config), Some(benchmark_config.uuid), Termination::BenchmarkError).await;
+
+            match result {
+                Err(ClientError::BenchmarkTerminationError) => {
+                    log::info!("Completed benchmark, continue with next benchmark");
+                    continue
+                },
+                Err(e) => {
+                    log::error!("Encountered error during benchmark routine: {}", e);
+                    return Err(e)
+                },
+                Ok(_) => {
+                    log::info!("Completed the main routine, this is unusual");
+                    continue
+                }
+            }
+
+        }
+
+        let completed = start - Utc::now();
+        log::info!("Completed benchmark in {:0>2}m {:0>2}s", (completed.num_seconds() / 60) % 60, completed.num_seconds() % 60);
+
+        Ok(())
+    }
+    pub async fn run_cached(&self, config: StreamfishConfig, icarust_config: Option<IcarustConfig>, run_id: Option<String>, termination: Termination) -> Result<(), ClientError> {
 
         let (shutdown_tx, mut shutdown_rx): (UnboundedSender<ClientErrorSignal>, UnboundedReceiver<ClientErrorSignal>) = tokio::sync::mpsc::unbounded_channel();
 
@@ -137,7 +190,7 @@ impl ReadUntilClient {
         let icarust_task_handle = match (config.icarust.enabled, config.icarust.launch) {
             (true, true) => {
 
-                let icarust_runner = IcarustRunner::new(&config);
+                let icarust_runner = IcarustRunner::new(&config, icarust_config, run_id);
                 log::info!("Created IcarustRunner");
 
                 log::info!("Icarust data delay is: {} seconds", &config.icarust.delay);
@@ -278,7 +331,7 @@ impl ReadUntilClient {
                 log::info!("Launching Guppy server in process thread...");
                 
                 let process_stderr = std::process::Stdio::from(std::fs::File::create( config.guppy.server.stderr_log.clone()).expect(
-                    &format!("Failed to create basecall server log file: {}",  config.guppy.server.stderr_log.display())
+                    &format!("Failed to create basecall server log file: {}", config.guppy.server.stderr_log.display())
                 ));
 
                 let process = std::process::Command::new( config.guppy.server.path.as_os_str())
@@ -368,7 +421,11 @@ impl ReadUntilClient {
             // Give some time for shutdowns
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-            std::process::exit(1)
+            match termination {
+                Termination::ProcessExit => std::process::exit(1),
+                Termination::BenchmarkError => return ClientError::BenchmarkTerminationError,
+                Termination::SliceError => return ClientError::SliceTerminationError,
+            }
 
         });
 

@@ -48,6 +48,7 @@ needletail = "0.5.1"
 
 icarust = { git = "https://github.com/esteinig/icarust", rev = "724f050" }
 tonic = { git = "https://github.com/esteinig/tonic", tag = "v0.9.2-r1", features = ["transport", "tls"] }
+chrono = "0.4.26"
 
 [build-dependencies]
 tonic-build = { version = "0.9", features = ["prost"] }

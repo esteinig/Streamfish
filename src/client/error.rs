@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::error::StreamfishConfigError;
+
 #[derive(Error, Debug)]
 pub enum ClientError {
     /// Represents a failure to obtain the port of a position likely due to that the position was not running at 
@@ -71,5 +73,24 @@ pub enum ClientError {
     // Represents failure to send the initiation request to the processing server
     #[error("Failed to send initiation request to the processing server")]
     DoriServerStreamInitSend,
+    // Represents failure to configure Streamfish client
+    #[error("Failed to configure client")]
+    StreamfishConfiguration(#[from] StreamfishConfigError),
+    // Represents failure to delete benchmark directory tree
+    #[error("Failed to delete benchmark directory tree: {0}")]
+    StreamfishBenchmarkDirectoryDelete(String),
+    // Represents failure to create benchmark directory
+    #[error("Failed to create benchmark directory: {0}")]
+    StreamfishBenchmarkDirectory(String),
+    // Represents termination of the main routine when using a sliced configuration
+    // Errors can be caught at termination of routine to not exit process and continue 
+    // with further calls to the main routine (or to raise error)
+    #[error("Encountered slice termination of main routine")]
+    SliceTerminationError,
+    // Represents termination of the main routine when using a benchmark configuration
+    // Errors can be caught at termination of routine to not exit process and continue 
+    // with further calls to the main routine (or to raise error)
+    #[error("Encountered benchmark termination of main routine")]
+    BenchmarkTerminationError,
 
 }

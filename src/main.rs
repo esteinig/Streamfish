@@ -13,7 +13,7 @@ use crate::terminal::{App, Commands};
 use crate::client::minknow::MinknowClient;
 use crate::client::readuntil::ReadUntilClient;
 use crate::services::minknow_api::manager::SimulatedDeviceType;
-
+use crate::client::readuntil::Termination;
 mod terminal;
 mod services;
 mod server;
@@ -42,8 +42,7 @@ async fn main() -> Result<(), StreamfishError> {
                 },
                 None => {
                     if config.readuntil.read_cache {
-                        
-                        client.run_cached(config).await?;
+                        client.run_cached(config, None, None, Termination::ProcessExit).await?;
                     } else {
                         unimplemented!("Streaming RPC not implemented")
                     }
@@ -54,8 +53,10 @@ async fn main() -> Result<(), StreamfishError> {
 
         Commands::Benchmark ( args ) => {
             
-            let benchmark = StreamfishBenchmark::from_toml(&args.benchmark_config);
-            benchmark.configure(args.force);
+            let config = StreamfishBenchmark::from_toml(&args.config)?;
+            let client = ReadUntilClient::new();
+
+            client.run_benchmark(&config, args.force).await?;
 
         },
         Commands::DoriServer ( args ) => {

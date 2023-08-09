@@ -57,7 +57,7 @@ pub struct BenchmarkArgs {
 
     /// TOML configuration file for Streamfish benchmark
     #[clap(long, short)]
-    pub benchmark_config: PathBuf,
+    pub config: PathBuf,
 
     /// Force overwrite the benchmark directories
     #[clap(long, short)]
