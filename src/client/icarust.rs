@@ -2,9 +2,11 @@
 
 use std::path::PathBuf;
 use icarust::icarust::Icarust;
-use icarust::config::load_toml;
-use crate::config::StreamfishConfig;
+use icarust::config::{load_toml, Config as IcarustConfig};
 use serde::{Deserialize, Serialize};
+
+use crate::client::error::ClientError;
+use crate::{config::StreamfishConfig, error::StreamfishConfigError};
 
 // Configure and run Icarust
 pub struct IcarustRunner {
@@ -12,13 +14,23 @@ pub struct IcarustRunner {
     pub config: StreamfishConfig
 }
 impl IcarustRunner {
-    pub fn new(config: &StreamfishConfig) -> Self {
+    pub fn new(config: &StreamfishConfig, icarust_config: Option<IcarustConfig>, run_id: Option<String>) -> Self {
 
         // Streamfish and Icarust are configured in two distinct files
         // we need to do some checks to ensure that settings are
         // matching between the configurations
 
-        let icarust = Icarust::from_toml(&config.icarust.config);
+        let icarust = match icarust_config {
+            Some(config) => Icarust {
+                output_path: config.output_path.clone(), // uses the direct output path configured, rather than the constructed one
+                run_id: match run_id {
+                    Some(id) => id,
+                    None => panic!("Must provide run identifier when providing Icarust configuration without file")
+                },
+                config,
+            },
+            None => Icarust::from_toml(&config.icarust.config)
+        };
 
         if icarust.config.parameters.channels != config.readuntil.channels as usize {
             log::error!("IcarustRunner: channel sizes of Icarust configuration ({}) and Streamfish ReadUntil configuration ({}) do not match", icarust.config.parameters.channels, config.readuntil.channels);
@@ -53,23 +65,37 @@ pub struct StreamfishBenchmark {
 }
 
 impl StreamfishBenchmark {
-    pub fn from_toml(file: &PathBuf) -> Self {
-        let toml_str = std::fs::read_to_string(file).expect("Failed to open IcarustBenchmark configuration file");
-        let config: StreamfishBenchmark = toml::from_str(&toml_str).expect("Failed to parse IcarustBenchmark configuration file");
-        config
+    pub fn from_toml(file: &PathBuf) -> Result<Self, ClientError> {
+        
+        let toml_str = std::fs::read_to_string(file).map_err(|err| ClientError::StreamfishConfiguration(StreamfishConfigError::TomlConfigFile(err)))?;
+        let config: StreamfishBenchmark = toml::from_str(&toml_str).map_err(|err| ClientError::StreamfishConfiguration(StreamfishConfigError::TomlConfigParse(err)))?;
+        Ok(config)
     }
     // Inititate the benchmark by creating directories and configs
-    pub fn configure(&self, force: bool) -> Vec<(BenchmarkGroup, Benchmark, StreamfishConfig)> {
+    pub fn configure(&self, force: bool) -> Result<Vec<(BenchmarkGroup, Benchmark, StreamfishConfig, IcarustConfig)>, ClientError> {
 
-        let streamfish_config = StreamfishConfig::from_toml(&self.streamfish_config).expect("Failed to parse Streamfish configuration for benchmarks");
+        log::info!("Reading base configuration files for Streamfish and Icarust");
+        let streamfish_config = StreamfishConfig::from_toml(&self.streamfish_config).map_err(
+            |err| ClientError::StreamfishConfiguration(err)
+        )?;
         let icarust_config = load_toml(&self.icarust_config);
 
         log::info!("Creating benchmark directory: {}", &self.outdir.display());
         if self.outdir.exists() && !force {
-            log::error!("Benchmark run directory already exists");
+            log::error!("Benchmark run directory exists");
             std::process::exit(1)
+        } else if self.outdir.exists() && force {
+            log::error!("Benchmark run directory exists and force is activated - recreating directory tree!");
+            std::fs::remove_dir_all(self.outdir.clone()).map_err(
+                |_| ClientError::StreamfishBenchmarkDirectoryDelete(self.outdir.display().to_string())
+            )?;
+            std::fs::create_dir_all(self.outdir.clone()).map_err(
+                |_| ClientError::StreamfishBenchmarkDirectory(self.outdir.display().to_string())
+            )?;
         } else {
-            std::fs::create_dir_all(self.outdir.clone()).expect("Failed to create benchmark directory");
+            std::fs::create_dir_all(self.outdir.clone()).map_err(
+                |_| ClientError::StreamfishBenchmarkDirectory(self.outdir.display().to_string())
+            )?;
         }
         
         let groups = self.group.clone();
@@ -86,7 +112,9 @@ impl StreamfishBenchmark {
                 log::error!("Benchmark group directory already exists");
                 std::process::exit(1)
             } else {
-                std::fs::create_dir_all(&group_dir).expect("Failed to create benchmark group directory");
+                std::fs::create_dir_all(&group_dir).map_err(
+                    |_| ClientError::StreamfishBenchmarkDirectory(group_dir.display().to_string())
+                )?;
             }
             group.path = group_dir.clone();
 
@@ -103,13 +131,19 @@ impl StreamfishBenchmark {
                     log::error!("Benchmark directory already exists");
                     std::process::exit(1)
                 } else {
-                    std::fs::create_dir_all(&benchmark_dir).expect("Failed to create benchmark directory");
+                    std::fs::create_dir_all(&benchmark_dir).map_err(
+                        |_| ClientError::StreamfishBenchmarkDirectory(benchmark_dir.display().to_string())
+                    )?;
                 }
                 benchmark.path = benchmark_dir.clone();
 
                 // Create a mutable clone of the Streamfish and Icarust configuratiosn for each benchmark
                 let mut benchmark_streamfish = streamfish_cfg.clone();
                 let mut benchmark_icarust = icarust_config.clone();
+
+
+                // Set the Icarust output path for the Fast5 files
+                benchmark_icarust.output_path = benchmark_dir.join("fast5");
 
                 if let Some(unblock_all_mode) = &benchmark.unblock_all_mode {
                     benchmark_streamfish.readuntil.unblock_all = true;
@@ -140,7 +174,6 @@ impl StreamfishBenchmark {
                     benchmark_streamfish.readuntil.channel_end = channels.to_owned();
                     benchmark_icarust.parameters.channels = channels.to_owned() as usize;
                     log::info!("Configured benchmark [channels={channels}]")
-
                 }                
                 
                 // Adjust the mapper and basecaller commands
@@ -154,16 +187,13 @@ impl StreamfishBenchmark {
                 let icarust_config = benchmark_dir.join(format!("{}.icarust.json", &benchmark.prefix));
                 benchmark_icarust.to_json(&icarust_config);
 
-                // Set the Icarust config path for the benchmark in the StreamfishConfig
-                benchmark_streamfish.icarust.config = icarust_config;
-
                 benchmark_streamfish.to_json(&benchmark_dir.join(format!("{}.streamfish.json", &benchmark.prefix)));
                 benchmark.to_json(&benchmark_dir.join(format!("{}.benchmark.json", &benchmark.prefix)));
 
-                configured_benchmarks.push((grp.clone(), benchmark.clone(), benchmark_streamfish.clone()));
+                configured_benchmarks.push((grp.clone(), benchmark.clone(), benchmark_streamfish.clone(), benchmark_icarust.clone()));
             }
         }
-        configured_benchmarks
+        Ok(configured_benchmarks)
     }
 }
 
@@ -175,7 +205,6 @@ pub struct BenchmarkGroup {
 
     pub prefix: String,
     pub description: Option<String>,
-
     pub benchmark: Vec<Benchmark>
 }
 
@@ -187,16 +216,15 @@ pub struct Benchmark {
     #[serde(skip_deserializing)]
     pub path: PathBuf,
 
-
     pub prefix: String,
     pub description: Option<String>,
     
     // Benchmarkable parameter fields
 
-    pub channels: Option<u32>,                // Benchmark throughput [Streamfish, Icarust]
+    pub channels: Option<u32>,                  // Benchmark throughput [Streamfish, Icarust]
     pub guppy_model: Option<String>,            // Benchmark Guppy models
     pub unblock_all_mode: Option<String>,       // Benchmark unblock all stages
-    pub read_cache_max_chunks: Option<usize>,            // Benchmark maximum chunks in cache
+    pub read_cache_max_chunks: Option<usize>,   // Benchmark maximum chunks in cache
     pub reference: Option<PathBuf>,             // Benchmark experiment references
 }
 impl Benchmark {

@@ -21,6 +21,69 @@ use crate::services::dori_api::adaptive::adaptive_sampling_server::AdaptiveSampl
 use crate::services::dori_api::adaptive::{StreamfishRequest, StreamfishResponse, Decision, RequestType as AdaptiveRequestType};
 use crate::services::dori_api::dynamic::DynamicTarget;
 
+
+pub struct FastxRecord {
+    pub channel: u32,
+    pub number: u32,
+    pub id: String,
+    pub seq: String
+}
+
+// Initiates the process pipeline from configuration
+fn init_pipeline(config: &StreamfishConfig) -> Result<(ChildStdin, Lines<BufReader<ChildStdout>>), Status> {
+
+    log::info!("Spawning pipeline process...");
+
+    let stderr_file = match std::fs::File::create(config.dori.adaptive.stderr_log.clone()) {
+        Ok(file) => file,
+        Err(_) => return Err(Status::internal("Failed to create pipeline stderr file"))
+    };
+
+    let process_stderr = Stdio::from(stderr_file);
+
+    match config.dori.adaptive.basecaller {
+        Basecaller::Guppy => {
+            let mut pipeline_process = match Command::new(config.guppy.client.path.as_os_str())
+                .args(config.guppy.client.args.clone())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(process_stderr)
+                .spawn() 
+            {
+                    Ok(process) => process,
+                    Err(_) => return Err(Status::internal("Failed to spawn pipeline process"))
+            };
+
+            let stdin = match pipeline_process.stdin.take() {
+                Some(stdin) => stdin,
+                None => return Err(Status::internal("Failed to open pipeline process stdin"))
+            };
+            let stdout = match pipeline_process.stdout.take() {
+                Some(stdout) => stdout,
+                None => return Err(Status::internal("Failed to open pipeline process stdout"))
+            };
+            
+            Ok((stdin, BufReader::new(stdout).lines()))
+
+        },
+        _ => unimplemented!("Dorado is not implemented yet!")
+    }
+    
+}
+
+// Get the Dorado input string for the modified STDIN Dorado v0.3.1 fork
+pub fn get_dorado_input_string(id: String, raw_data: Vec<u8>, chunks: usize, channel: u32, number: u32, offset: f32, range: f32, digitisation: u32, sample_rate: u32) -> String {
+
+    // UNCALBIRATED SIGNAL CONVERSON BYTES TO SIGNED INTEGERS
+    let mut signal_data: Vec<i16> = Vec::new();
+    for i in (0..raw_data.len()).step_by(2) {
+        signal_data.push(LittleEndian::read_i16(&raw_data[i..]));
+    }
+
+    format!("{}::{}::{}::{} {} {} {} {:.1} {:.11} {} {}\n", id, channel, number, chunks, channel, number, digitisation, offset, range, sample_rate, join(&signal_data, " ")) 
+}
+
+
 pub struct AdaptiveSamplingService {
     config: StreamfishConfig
 }
@@ -611,66 +674,4 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         Ok(Response::new(Box::pin(pipeline_response_stream) as Self::CacheStream))
 
     }
-}
-
-// Initiates the process pipeline from configuration
-fn init_pipeline(config: &StreamfishConfig) -> Result<(ChildStdin, Lines<BufReader<ChildStdout>>), Status> {
-
-    log::info!("Spawning pipeline process...");
-
-    let stderr_file = match std::fs::File::create(config.dori.adaptive.stderr_log.clone()) {
-        Ok(file) => file,
-        Err(_) => return Err(Status::internal("Failed to create pipeline stderr file"))
-    };
-
-    let process_stderr = Stdio::from(stderr_file);
-
-    match config.dori.adaptive.basecaller {
-        Basecaller::Guppy => {
-            let mut pipeline_process = match Command::new(config.guppy.client.path.as_os_str())
-                .args(config.guppy.client.args.clone())
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(process_stderr)
-                .spawn() 
-            {
-                    Ok(process) => process,
-                    Err(_) => return Err(Status::internal("Failed to spawn pipeline process"))
-            };
-
-            let stdin = match pipeline_process.stdin.take() {
-                Some(stdin) => stdin,
-                None => return Err(Status::internal("Failed to open pipeline process stdin"))
-            };
-            let stdout = match pipeline_process.stdout.take() {
-                Some(stdout) => stdout,
-                None => return Err(Status::internal("Failed to open pipeline process stdout"))
-            };
-            
-            Ok((stdin, BufReader::new(stdout).lines()))
-
-        },
-        _ => unimplemented!("Dorado is not implemented yet!")
-    }
-    
-}
-
-pub struct FastxRecord {
-    pub channel: u32,
-    pub number: u32,
-    pub id: String,
-    pub seq: String
-}
-
-
-
-pub fn get_dorado_input_string(id: String, raw_data: Vec<u8>, chunks: usize, channel: u32, number: u32, offset: f32, range: f32, digitisation: u32, sample_rate: u32) -> String {
-
-    // UNCALBIRATED SIGNAL CONVERSON BYTES TO SIGNED INTEGERS
-    let mut signal_data: Vec<i16> = Vec::new();
-    for i in (0..raw_data.len()).step_by(2) {
-        signal_data.push(LittleEndian::read_i16(&raw_data[i..]));
-    }
-
-    format!("{}::{}::{}::{} {} {} {} {:.1} {:.11} {} {}\n", id, channel, number, chunks, channel, number, digitisation, offset, range, sample_rate, join(&signal_data, " ")) 
 }

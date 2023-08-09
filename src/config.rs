@@ -13,19 +13,6 @@ fn get_env_var(var: &str) -> Option<String> {
     std::env::var(var).ok()
 }
 
-// An exposed subset of configurable parameters for the user
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct StreamfishConfig  {
-    pub meta: MetaConfig,
-    pub minknow: MinknowConfig,
-    pub icarust: IcarustConfig,
-    pub guppy: GuppyConfig,
-    pub dori: DoriConfig,
-    pub dynamic: DynamicConfig,
-    pub readuntil: ReadUntilConfig,
-    pub experiment: ExperimentConfig
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MetaConfig {
     pub name: String,
@@ -447,6 +434,20 @@ impl StreamfishConfig {
         Ok(config)
 
     }
+}
+
+
+// An exposed subset of configurable parameters for the user
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct StreamfishConfig  {
+    pub meta: MetaConfig,
+    pub minknow: MinknowConfig,
+    pub icarust: IcarustConfig,
+    pub guppy: GuppyConfig,
+    pub dori: DoriConfig,
+    pub dynamic: DynamicConfig,
+    pub readuntil: ReadUntilConfig,
+    pub experiment: ExperimentConfig
 }
 
 impl StreamfishConfig {

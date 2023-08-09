@@ -1,4 +1,5 @@
 use thiserror::Error;
+use crate::error::StreamfishConfigError;
 
 #[derive(Error, Debug)]
 pub enum ClientError {
@@ -59,6 +60,12 @@ pub enum ClientError {
     // Represents failure to write to log file
     #[error("Failed to create the log file")]
     LogFileWrite,
+    // Represents failure to create the basecaller logging file
+    #[error("Failed to create the basecaller log file")]
+    BasecallerLogFileCreate,
+    // Represents failure to spawn the basecaller process
+    #[error("Failed to spawn the basecaller")]
+    BasecallerProcessSpawn,
     // Represents failure to initiate the data acquisition stream with the control server
     #[error("Failed to initiate the stream with the control server")]
     ControlServerStreamInit,
@@ -71,5 +78,17 @@ pub enum ClientError {
     // Represents failure to send the initiation request to the processing server
     #[error("Failed to send initiation request to the processing server")]
     DoriServerStreamInitSend,
+    // Represents failure to create benchmark directory
+    #[error("Failed to create directory for benchmark at: {0}")]
+    StreamfishBenchmarkDirectory(String),
+    // Represents failure to create benchmark directory
+    #[error("Failed to delete directory for benchmark at: {0}")]
+    StreamfishBenchmarkDirectoryDelete(String),
+    // Represents failure to configure the client
+    #[error("Failed client configuration")]
+    StreamfishConfiguration(#[from] StreamfishConfigError),
+    // Represents failure to run Icarust simulation
+    #[error("Failed to run Icarust: {0}")]
+    IcarustRunner(String),
 
 }

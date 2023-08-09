@@ -105,6 +105,96 @@ unblock_all_mode    = "mapper"
 guppy_model         = "dna_r9.4.1_450bps_sup"
 
 
+# Reference Model
+
+[[group]]
+prefix              = "reference_unblock_all"
+description         = "Test benchmark of the baseline Streamfish/Icarust configuration across unblock-all modes and references (squiggles not adjusted to reference, baseline is used)"
+
+[[group.benchmark]]
+prefix              = "client_viruses"
+unblock_all_mode    = "client"
+reference           = "/tmp/viruses.mmi"
+
+[[group.benchmark]]
+prefix              = "server_viruses"
+unblock_all_mode    = "server"
+reference           = "/tmp/viruses.mmi"
+
+[[group.benchmark]]
+prefix              = "basecaller_viruses"
+unblock_all_mode    = "basecaller"
+reference           = "/tmp/viruses.mmi"
+
+[[group.benchmark]]
+prefix              = "mapper_viruses"
+unblock_all_mode    = "mapper"
+reference           = "/tmp/viruses.mmi"
+
+
+[[group.benchmark]]
+prefix              = "client_bacteria"
+unblock_all_mode    = "client"
+guppy_model         = "/tmp/bacteria.mmi"
+
+[[group.group.benchmark]]
+prefix              = "server_bacteria"
+unblock_all_mode    = "server"
+guppy_model         = "/tmp/bacteria.mmi"
+
+[[group.benchmark]]
+prefix              = "basecaller_bacteria"
+unblock_all_mode    = "basecaller"
+guppy_model         = "/tmp/bacteria.mmi"
+
+[[group.benchmark]]
+prefix              = "mapper_bacteria"
+unblock_all_mode    = "mapper"
+guppy_model         = "/tmp/bacteria.mmi"
+
+
+[[group.benchmark]]
+prefix              = "client_chr"
+unblock_all_mode    = "client"
+guppy_model         = "/tmp/chm13v2_chr1_chr2.mmi"
+
+[[group.benchmark]]
+prefix              = "server_chr"
+unblock_all_mode    = "server"
+guppy_model         = "/tmp/chm13v2_chr1_chr2.mmi"
+
+[[group.benchmark]]
+prefix              = "basecaller_chr"
+unblock_all_mode    = "basecaller"
+guppy_model         = "/tmp/chm13v2_chr1_chr2.mmi"
+
+[[group.benchmark]]
+prefix              = "mapper_chr"
+unblock_all_mode    = "mapper"
+guppy_model         = "/tmp/chm13v2_chr1_chr2.mmi"
+
+
+
+[[group.benchmark]]
+prefix              = "client_human"
+unblock_all_mode    = "client"
+guppy_model         = "/tmp/chm13v2.mmi"
+
+[[group.benchmark]]
+prefix              = "server_human"
+unblock_all_mode    = "server"
+guppy_model         = "/tmp/chm13v2.mmi"
+
+[[group.benchmark]]
+prefix              = "basecaller_human"
+unblock_all_mode    = "basecaller"
+guppy_model         = "/tmp/chm13v2.mmi"
+
+[[group.benchmark]]
+prefix              = "mapper_human"
+unblock_all_mode    = "mapper"
+guppy_model         = "/tmp/chm13v2.mmi"
+
 
 
 

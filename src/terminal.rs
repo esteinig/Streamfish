@@ -55,9 +55,9 @@ pub struct ReadUntilArgs {
 #[derive(Debug, Args)]
 pub struct BenchmarkArgs {
 
-    /// TOML configuration file for Streamfish benchmark
+    /// TOML configuration file for Benchmark
     #[clap(long, short)]
-    pub benchmark_config: PathBuf,
+    pub config: PathBuf,
 
     /// Force overwrite the benchmark directories
     #[clap(long, short)]
