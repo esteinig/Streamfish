@@ -56,7 +56,7 @@ async fn main() -> Result<(), StreamfishError> {
             let config = StreamfishBenchmark::from_toml(&args.config)?;
             let client = ReadUntilClient::new();
 
-            client.run_benchmark(&config, args.force).await?;
+            client.run_benchmark(&config, args.force, Termination::ProcessExit).await?;
 
         },
         Commands::DoriServer ( args ) => {

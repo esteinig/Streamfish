@@ -6,6 +6,7 @@ use icarust::config::{load_toml, Config as IcarustConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::client::error::ClientError;
+use crate::config::Basecaller;
 use crate::{config::StreamfishConfig, error::StreamfishConfigError};
 
 // Configure and run Icarust
@@ -145,17 +146,26 @@ impl StreamfishBenchmark {
                 // Set the Icarust output path for the Fast5 files
                 benchmark_icarust.output_path = benchmark_dir.join("fast5");
 
+
+                // Configure the benchmark options
                 if let Some(unblock_all_mode) = &benchmark.unblock_all_mode {
                     benchmark_streamfish.readuntil.unblock_all = true;
                     benchmark_streamfish.readuntil.unblock_all_mode = unblock_all_mode.clone();
                     log::info!("Configured benchmark [unblock_all_mode={unblock_all_mode}]")
                 }
 
-                if let Some(guppy_model) = &benchmark.guppy_model {
-                    benchmark_streamfish.guppy.server.config = format!("{guppy_model}.cfg");
-                    benchmark_streamfish.guppy.client.config = guppy_model.clone();
-                    log::info!("Configured benchmark [guppy_model={guppy_model}]")
+                if let Some(model) = &benchmark.basecaller_model {
+                    benchmark_streamfish.basecaller.server.config = format!("{model}.cfg");
+                    benchmark_streamfish.basecaller.client.config = model.clone();
+                    log::info!("Configured benchmark [basecaller_model={model}]")
                 }
+
+
+                if let Some(path) = &benchmark.basecaller_server_path {
+                    benchmark_streamfish.basecaller.server.path = path.clone();
+                    log::info!("Configured benchmark [basecaller_server_path={}]", path.display())
+                }
+
 
                 if let Some(reference) = &benchmark.reference {
                     benchmark_streamfish.experiment.reference = reference.clone();
@@ -179,7 +189,6 @@ impl StreamfishBenchmark {
                 // Adjust the mapper and basecaller commands
                 benchmark_streamfish.experiment.configure();
                 benchmark_streamfish.configure();
-
 
                 // Write to configs into the benchmark directory
                 log::info!("Writing configurations to benchmark directory");
@@ -221,12 +230,14 @@ pub struct Benchmark {
     
     // Benchmarkable parameter fields
 
-    pub channels: Option<u32>,                  // Benchmark throughput [Streamfish, Icarust]
-    pub guppy_model: Option<String>,            // Benchmark Guppy models
-    pub unblock_all_mode: Option<String>,       // Benchmark unblock all stages
-    pub read_cache_max_chunks: Option<usize>,   // Benchmark maximum chunks in cache
-    pub reference: Option<PathBuf>,             // Benchmark experiment references
+    pub channels: Option<u32>,                              // Benchmark throughput [Streamfish, Icarust]
+    pub basecaller_server_path: Option<PathBuf>,            // Benchmark Guppy and Dorado models
+    pub basecaller_model: Option<String>,                   // Benchmark Guppy and Dorado models
+    pub unblock_all_mode: Option<String>,                   // Benchmark unblock all stages
+    pub read_cache_max_chunks: Option<usize>,               // Benchmark maximum chunks in cache
+    pub reference: Option<PathBuf>,                         // Benchmark experiment references
 }
+
 impl Benchmark {
     pub fn to_json(&self, file: &PathBuf) {
         serde_json::to_writer(

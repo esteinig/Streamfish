@@ -1,4 +1,5 @@
 use thiserror::Error;
+use tokio::task::JoinError;
 
 use crate::error::StreamfishConfigError;
 
@@ -92,5 +93,13 @@ pub enum ClientError {
     // with further calls to the main routine (or to raise error)
     #[error("Encountered benchmark termination of main routine")]
     BenchmarkTerminationError,
+    // Represents failure to join threads of the main routine
+    #[error("Failed to join the main routine tasks")]
+    JoinError(#[from] JoinError),
+
+    // Represents failure to run Icarust
+    #[error("Failed to run Icarust")]
+    IcarustRunner,
+
 
 }

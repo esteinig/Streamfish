@@ -40,8 +40,8 @@ impl AdaptiveSamplingService {
             log::warn!("Unblocking reads after basecalling and mapping on Dori!");
         }
         
-        log::debug!("Basecall client: {} Path: {:?} Args: {:?}", config.dori.adaptive.basecaller.as_str(), config.guppy.client.path.display(), config.guppy.client.args.join(" "));
-        log::debug!("Basecall server: {} Path: {:?} Args: {:?}", config.dori.adaptive.basecaller.as_str(), config.guppy.server.path.display(), config.guppy.server.args.join(" "));
+        log::debug!("Basecall client: {} Path: {:?} Args: {:?}", config.dori.adaptive.basecaller.as_str(), config.basecaller.client.path.display(), config.basecaller.client.args.join(" "));
+        log::debug!("Basecall server: {} Path: {:?} Args: {:?}", config.dori.adaptive.basecaller.as_str(), config.basecaller.server.path.display(), config.basecaller.server.args.join(" "));
 
         Self { config: config.clone() }
     }
@@ -627,8 +627,8 @@ fn init_pipeline(config: &StreamfishConfig) -> Result<(ChildStdin, Lines<BufRead
 
     match config.dori.adaptive.basecaller {
         Basecaller::Guppy => {
-            let mut pipeline_process = match Command::new(config.guppy.client.path.as_os_str())
-                .args(config.guppy.client.args.clone())
+            let mut pipeline_process = match Command::new(config.basecaller.client.path.as_os_str())
+                .args(config.basecaller.client.args.clone())
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(process_stderr)

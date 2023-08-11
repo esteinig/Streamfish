@@ -75,15 +75,31 @@ impl ClientLog {
     }
 }
 
-fn send_termination_signal(sender: &UnboundedSender<ClientErrorSignal>, error: ClientError) -> ClientError {
+fn send_termination_signal(sender: &UnboundedSender<ClientErrorSignal>, error: ClientError, delay: u64) -> ClientError {
     sender.send(ClientErrorSignal {  }).map_err(|_| return ClientError::ShutdownQueueSend).unwrap();
+
+    // Termination signal has been sent to the termination thread  give it some time to execute and then terminate 
+    // the function - this will bubble up and error (main errors) or respond with a configured termination response
+    // from the thread joined at the end of the main routine
+
+    log::error!("{}", error.to_string()); 
+
+    // If we bubble up errors from the main routine, we want to give some time for the termination task to complete,
+    // this is done by specifying a delay in seconds for the relevant termination signals
+
+    if delay > 0 {
+        log::info!("Delay error return ({} seconds)", &delay);
+        std::thread::sleep(std::time::Duration::from_secs(delay));  // blocking async main rotune
+    }   
     error
 }
 
 pub enum Termination {
     ProcessExit,
     BenchmarkError,
-    SliceError
+    SliceError,
+    Error,
+    Ok
 }
 
 #[derive(Debug)]
@@ -137,13 +153,12 @@ impl ReadUntilClient {
         Ok(())
     }
     // Run a benchmark configuration
-    pub async fn run_benchmark(self, benchmark: &StreamfishBenchmark, force: bool) -> Result<(), ClientError> {
+    pub async fn run_benchmark(self, benchmark: &StreamfishBenchmark, force: bool, termination: Termination) -> Result<(), ClientError> {
 
         let start = Utc::now();
-        log::info!("Benchmark runner started at {}", start);
-        log::info!("Benchmark: {}", benchmark.name);
-        log::info!("Date: {}", benchmark.date);
-        log::info!("Commit: {}", benchmark.commit);
+        log::info!("Benchmark runner started at: {}", start);
+
+        log::info!("{} ({} :: {})", benchmark.name, benchmark.date, benchmark.commit);
         log::info!("Description: {}", benchmark.description);
 
         log::info!("Configuring benchmarks in: {}", benchmark.outdir.display());
@@ -151,37 +166,47 @@ impl ReadUntilClient {
         log::info!("Icarust configuration base: {}", benchmark.icarust_config.display());
 
         let run_configs = benchmark.configure(force)?;
-
-        log::info!("Launching benchmarks...");
+        
+        log::info!("Launching benchmark loop...");
         for (group_config, benchmark_config, streamfish_config, icarust_config) in run_configs {
             log::info!("Benchmark: group={} prefix={} uuid={}", &group_config.prefix, &benchmark_config.prefix, &benchmark_config.uuid);
-            let result = self.run_cached(streamfish_config, Some(icarust_config), Some(benchmark_config.uuid), Termination::BenchmarkError).await;
 
+            let result = self.run_cached(streamfish_config, Some(icarust_config), Some(benchmark_config.uuid.clone()), Termination::BenchmarkError).await;
             match result {
                 Err(ClientError::BenchmarkTerminationError) => {
-                    log::info!("Completed benchmark, continue with next benchmark");
+                    log::info!("Completed benchmark {}",  benchmark_config.uuid);
                     continue
                 },
                 Err(e) => {
-                    log::error!("Encountered error during benchmark routine: {}", e);
-                    return Err(e)
+                    log::error!("An error occurred in the benchmark loop: {}", e);
+                    match termination {
+                        Termination::BenchmarkError => return Err(e),
+                        _ => std::process::exit(1)
+                    }
                 },
                 Ok(_) => {
-                    log::info!("Completed the main routine, this is unusual");
+                    log::info!("Completed the main routine, this is unusual...");
                     continue
                 }
             }
 
         }
 
-        let completed = start - Utc::now();
-        log::info!("Completed benchmark in {:0>2}m {:0>2}s", (completed.num_seconds() / 60) % 60, completed.num_seconds() % 60);
+        let completed = Utc::now() - start;
+        log::info!("Completed benchmarks in: {:0>2}m {:0>2}s", (completed.num_seconds() / 60) % 60, completed.num_seconds() % 60);
+
+        log::info!("Exiting benchmark process... ");
+        std::process::exit(0);
 
         Ok(())
     }
     pub async fn run_cached(&self, config: StreamfishConfig, icarust_config: Option<IcarustConfig>, run_id: Option<String>, termination: Termination) -> Result<(), ClientError> {
 
         let (shutdown_tx, mut shutdown_rx): (UnboundedSender<ClientErrorSignal>, UnboundedReceiver<ClientErrorSignal>) = tokio::sync::mpsc::unbounded_channel();
+        let (terminate_tx, mut terminate_rx) = tokio::sync::mpsc::unbounded_channel();
+        let terminate_from_join_handle = terminate_tx.clone();
+
+        log::info!("{:#?}", config);
 
         // ============================
         // Launch Icarust if configured
@@ -190,8 +215,8 @@ impl ReadUntilClient {
         let icarust_task_handle = match (config.icarust.enabled, config.icarust.launch) {
             (true, true) => {
 
+                log::info!("Creating IcarustRunner...");
                 let icarust_runner = IcarustRunner::new(&config, icarust_config, run_id);
-                log::info!("Created IcarustRunner");
 
                 log::info!("Icarust data delay is: {} seconds", &config.icarust.delay);
                 log::info!("Icarust data runtime is: {} seconds", &config.icarust.runtime);
@@ -201,10 +226,12 @@ impl ReadUntilClient {
                 log::info!("Launching Icarust in background task...");
                 let icarust_handle = tokio::spawn(async move {
                     
-                    icarust_runner.icarust.run(config.icarust.delay, config.icarust.runtime).await.expect("Failed to run Icarust");
+                    icarust_runner.icarust.run(config.icarust.delay, config.icarust.runtime).await.map_err(|_| {
+                        send_termination_signal(&icarust_shutdown_tx, ClientError::IcarustRunner, 0)
+                    })?;
                     
                     log::info!("Sending termination signal after Icarust completion");
-                    send_termination_signal(&icarust_shutdown_tx, ClientError::ControlServerConnectionTermination);
+                    send_termination_signal(&icarust_shutdown_tx, ClientError::ControlServerConnectionTermination, 0);
 
                     Ok::<(), ClientError>(())
 
@@ -276,7 +303,7 @@ impl ReadUntilClient {
                 });
 
                 if config.dori.dynamic.tcp_enabled {
-                    log::info!("Dori DynamicFeedback server launched, available on TCP (http://{}:{})",  config.dori.dynamic.tcp_host,  config.dori.dynamic.tcp_port)
+                    log::info!("Dori DynamicFeedback server launched, available on TCP (http://{}:{})",  config.dori.dynamic.tcp_host, config.dori.dynamic.tcp_port)
                 } else {
                     log::info!("Dori DynamicFeedback server launched, available on UDS ({})", config.dori.dynamic.uds_path.display())
                 }
@@ -330,18 +357,18 @@ impl ReadUntilClient {
                 
                 log::info!("Launching Guppy server in process thread...");
                 
-                let process_stderr = std::process::Stdio::from(std::fs::File::create( config.guppy.server.stderr_log.clone()).expect(
-                    &format!("Failed to create basecall server log file: {}", config.guppy.server.stderr_log.display())
+                let process_stderr = std::process::Stdio::from(std::fs::File::create( config.basecaller.server.stderr_log.clone()).expect(
+                    &format!("Failed to create basecall server log file: {}", config.basecaller.server.stderr_log.display())
                 ));
 
-                let process = std::process::Command::new( config.guppy.server.path.as_os_str())
-                    .args(config.guppy.server.args.clone())
+                let process = std::process::Command::new( config.basecaller.server.path.as_os_str())
+                    .args(config.basecaller.server.args.clone())
                     .stdout(std::process::Stdio::null())
                     .stderr(process_stderr)
                     .spawn()
                     .expect("Failed to spawn basecall server process for Guppy server");
                 
-                log::info!("Guppy server launched, available on: {}",  config.guppy.client.address);
+                log::info!("Guppy server launched, available on: {}",  config.basecaller.client.address);
 
                 // Wait a little - race condition in async slice-and-dice
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -353,6 +380,60 @@ impl ReadUntilClient {
                 unimplemented!("Basecaller not implemented")
             }
         };
+
+
+        // ==========================================
+        // Process clean-up task + terminate signal
+        // ==========================================
+
+
+        let _ = tokio::spawn(async move {
+
+            let mut manual_shutdown = false;
+
+            // Shutdown of threads and server tasks 
+            tokio::select! {
+                _ = signal::ctrl_c() => {
+                    log::warn!("Received manual shutdown signal");
+                    manual_shutdown = true;
+                },
+                _ = shutdown_rx.recv() => log::warn!("Received shutdown signal"),
+            }
+            
+            if let Some(mut basecaller_thread) = basecaller_process_handle {
+                log::warn!("Shutting down basecall server process...");
+
+                basecaller_thread.kill().map_err(|err| err).expect("Failed to kill basecaller thread - you may need to do this manually");
+            }
+
+            if let Some(dori_task) = dori_adaptive_task_handle {
+                log::warn!("Shutting down adaptive sampling server...");
+                dori_task.abort();
+            }
+
+            if let Some(dori_task) = dori_dynamic_task_handle {
+                log::warn!("Shutting down dynamic feedback server...");
+                dori_task.abort();
+            }
+
+            if let Some(icarust_task) = icarust_task_handle {
+                log::warn!("Shutting down Icarust runner...");
+                icarust_task.abort();
+            }
+
+            log::warn!("Completed task shutdowns, terminate client");
+            log::info!("So long, and thanks for all the fish! 🐟 🐟 🐟");
+
+            if manual_shutdown {
+                // Terminate the process
+                std::process::exit(1)
+            } else {
+                // Otherwise send the termination signal to the main routine 
+                // in case the termination configurations asks for return 
+                // from this method
+                terminate_tx.send(true).expect("Failed to send termination signal to main routine");
+            }
+        });
 
         
         // ==========================================
@@ -379,75 +460,25 @@ impl ReadUntilClient {
         let dori_data_tx = dori_tx.clone(); 
 
 
-        // ==========================================
-        // MPSC message queues: senders and receivers
-        // ==========================================
-
-        // All errors send a signal into this queue 
-
-        let client_name = config.meta.client_name.clone();
-        tokio::spawn(async move {
-            
-            tokio::select! {
-                _ = signal::ctrl_c() => log::warn!("{}: received manual shutdown signal", client_name),
-                _ = shutdown_rx.recv() => log::warn!("{}: received shutdown signal", client_name),
-            }
-            
-            if let Some(mut basecaller_thread) = basecaller_process_handle {
-                log::warn!("{}: shutting down basecall server process...", client_name);
-
-                basecaller_thread.kill().map_err(|err| err).expect("Failed to kill basecaller thread - you may need to do this manually");
-            }
-
-            if let Some(dori_task) = dori_adaptive_task_handle {
-                log::warn!("{}: shutting down processing adaptive sampling server...", client_name);
-                dori_task.abort();
-            }
-
-            if let Some(dori_task) = dori_dynamic_task_handle {
-                log::warn!("{}: shutting down processing dynamic feedback server...", client_name);
-                dori_task.abort();
-            }
-
-            if let Some(icarust_task) = icarust_task_handle {
-                log::warn!("{}: shutting down Icarust runner ...", client_name);
-                icarust_task.abort();
-            }
-
-
-            log::warn!("{}: shutting down Streamfish client...", client_name);
-            log::info!("{}: so long, and thanks for all the fish! 🐟", client_name);
-
-            // Give some time for shutdowns
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-
-            match termination {
-                Termination::ProcessExit => std::process::exit(1),
-                Termination::BenchmarkError => return ClientError::BenchmarkTerminationError,
-                Termination::SliceError => return ClientError::SliceTerminationError,
-            }
-
-        });
-
         // ===================
         // Client connections
         // ===================
 
         let mut dori_rpc = AdaptiveSamplingClient::connect(&config).await.map_err(|_| {
-            send_termination_signal(&shutdown_tx, ClientError::DoriServerConnectionInitiation)
+            send_termination_signal(&shutdown_tx, ClientError::DoriServerConnectionInitiation, 5)
         })?;
 
         let mut data_rpc = DataClient::from_minknow_client(
             &minknow_client, &run_config.device_name
         ).await.map_err(|err| {
-            send_termination_signal(&shutdown_tx, err)
+            send_termination_signal(&shutdown_tx, err, 5)
         })?;
 
 
         let mut acquisition_rpc = AcquisitionClient::from_minknow_client(
             &minknow_client, &run_config.device_name
         ).await.map_err(|err| {
-            send_termination_signal(&shutdown_tx, err)
+            send_termination_signal(&shutdown_tx, err, 5)
         })?;
 
 
@@ -485,7 +516,7 @@ impl ReadUntilClient {
 
             let request = tonic::Request::new(CurrentStatusRequest {});
             let response = acquisition_rpc.client.current_status(request).await.map_err(|_| {
-                send_termination_signal(&shutdown_tx, ClientError::ControlServerAcquisitionStatusRequest)
+                send_termination_signal(&shutdown_tx, ClientError::ControlServerAcquisitionStatusRequest, 5)
             })?.into_inner();
 
             if response.status() == MinknowStatus::Processing {
@@ -513,23 +544,23 @@ impl ReadUntilClient {
 
         // Send it into the action queue that unpacks into the request stream - this must happen before the request to control server weirdly
         action_tx.send(init_action).map_err(|_| {
-            send_termination_signal(&shutdown_tx, ClientError::ControlServerStreamInitSend)
+            send_termination_signal(&shutdown_tx, ClientError::ControlServerStreamInitSend, 5)
         })?;
 
         // DataService response stream is initiated with the data request stream to MinKNOW
         let mut minknow_stream = data_rpc.client.get_live_reads(tonic::Request::new(data_request_stream)).await.map_err(|_| {
-            send_termination_signal(&shutdown_tx, ClientError::ControlServerStreamInit)
+            send_termination_signal(&shutdown_tx, ClientError::ControlServerStreamInit, 5)
         })?.into_inner();
 
         log::info!("Initiated data streams with control server");
 
         // Initiate processing server stream - must happpen before the request to the processing server weirdly
         dori_tx.send(StreamfishRequest { channel: 0, number: 0, id: String::new(), data: Vec::new(), request: init_request }).map_err(|_| {
-            send_termination_signal(&shutdown_tx, ClientError::DoriServerStreamInitSend)
+            send_termination_signal(&shutdown_tx, ClientError::DoriServerStreamInitSend, 5)
         })?;
 
         let mut dori_stream = dori_rpc.client.cache(tonic::Request::new(dori_request_stream)).await.map_err(|_| {
-            send_termination_signal(&shutdown_tx, ClientError::DoriServerStreamInit)
+            send_termination_signal(&shutdown_tx, ClientError::DoriServerStreamInit, 5)
         })?.into_inner();
 
         // ===========================================
@@ -551,7 +582,7 @@ impl ReadUntilClient {
         let action_stream_handle = tokio::spawn(async move {
 
             while let Some(response) = minknow_stream.message().await.map_err(|_| {
-                send_termination_signal(&control_server_response_error_tx, ClientError::ControlServerConnectionTermination)
+                send_termination_signal(&control_server_response_error_tx, ClientError::ControlServerConnectionTermination, 0)
             })?
 
             {
@@ -568,7 +599,7 @@ impl ReadUntilClient {
                                     }
                                 ]})
                             )}).map_err(|_| {
-                                send_termination_signal(&control_server_response_error_tx, ClientError::ControlServerActionQueueSend) 
+                                send_termination_signal(&control_server_response_error_tx, ClientError::ControlServerActionQueueSend, 0) 
                             })?;
                     } else {
                     
@@ -580,7 +611,7 @@ impl ReadUntilClient {
                             data: read_data.raw_data,
                             request: data_request
                         }).map_err(|_| {
-                            send_termination_signal(&control_server_response_error_tx, ClientError::DoriStreamQueueSend)
+                            send_termination_signal(&control_server_response_error_tx, ClientError::DoriStreamQueueSend, 0)
                         })?;
                          
                     }
@@ -591,7 +622,7 @@ impl ReadUntilClient {
                         stage: PipelineStage::DoriRequest, 
                         time: minknow_response_clock.now(),
                     }).map_err(|_| {
-                        send_termination_signal(&control_server_response_error_tx, ClientError::LoggingQueueSend)
+                        send_termination_signal(&control_server_response_error_tx, ClientError::LoggingQueueSend, 0)
                     })?;
                 }
 
@@ -609,7 +640,7 @@ impl ReadUntilClient {
         let dori_stream_handle = tokio::spawn(async move {
 
             while let Some(dori_response) = dori_stream.message().await.map_err(|_| {
-                send_termination_signal(&dori_response_error_tx, ClientError::DoriServerConnectionTermination)
+                send_termination_signal(&dori_response_error_tx, ClientError::DoriServerConnectionTermination, 0)
             })?
 
             {
@@ -627,7 +658,7 @@ impl ReadUntilClient {
                             channel: dori_response.channel,
                         }
                     ).map_err(|_| {
-                        send_termination_signal(&dori_response_error_tx, ClientError::DecisionQueueSend)
+                        send_termination_signal(&dori_response_error_tx, ClientError::DecisionQueueSend, 0)
                     })?;
                     
 
@@ -641,7 +672,7 @@ impl ReadUntilClient {
                             channel: dori_response.channel,
                         }
                     ).map_err(|_| {
-                        send_termination_signal(&dori_response_error_tx, ClientError::DecisionQueueSend)
+                        send_termination_signal(&dori_response_error_tx, ClientError::DecisionQueueSend, 0)
                     })?;
 
                 } else {
@@ -654,7 +685,7 @@ impl ReadUntilClient {
                             channel: dori_response.channel,
                         }
                     ).map_err(|_| {
-                        send_termination_signal(&dori_response_error_tx, ClientError::DecisionQueueSend)
+                        send_termination_signal(&dori_response_error_tx, ClientError::DecisionQueueSend, 0)
                     })?;
 
                 }
@@ -666,7 +697,7 @@ impl ReadUntilClient {
                     channel: dori_response.channel, 
                     number: dori_response.number 
                 }).map_err(|_| {
-                    send_termination_signal(&dori_response_error_tx, ClientError::LoggingQueueSend)
+                    send_termination_signal(&dori_response_error_tx, ClientError::LoggingQueueSend, 0)
                 })?;
 
             }
@@ -689,7 +720,7 @@ impl ReadUntilClient {
                     minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
                         LiveReadsRequest::Actions(Actions { actions: Vec::from([control_action]) })
                     )}).map_err(|_| {
-                        send_termination_signal(&throttle_error_tx, ClientError::ControlServerActionQueueSend)
+                        send_termination_signal(&throttle_error_tx, ClientError::ControlServerActionQueueSend, 0)
                     })?;
 
                     continue;
@@ -703,7 +734,7 @@ impl ReadUntilClient {
                     minknow_dori_action_tx.send(GetLiveReadsRequest { request: Some(
                         LiveReadsRequest::Actions(Actions { actions })
                     )}).map_err(|_| {
-                        send_termination_signal(&throttle_error_tx, ClientError::ControlServerActionQueueSend)
+                        send_termination_signal(&throttle_error_tx, ClientError::ControlServerActionQueueSend, 0)
                     })?;
 
                     actions = Vec::new();
@@ -721,14 +752,14 @@ impl ReadUntilClient {
             if let Some(path) = run_config.latency_log {
 
                 let mut log_file = File::create(&path).await.map_err(|_| {
-                    send_termination_signal(&log_error_tx, ClientError::LogFileCreate)
+                    send_termination_signal(&log_error_tx, ClientError::LogFileCreate, 0)
                 })?;
 
                 while let Some(log) = log_rx.recv().await {
                     log::debug!("{:<15} {:<5} {:<7}", log.stage.as_str_name(), log.channel, log.number);
 
                     log_file.write_all(log.entry(start).as_bytes()).await.map_err(|_| {
-                        send_termination_signal(&log_error_tx, ClientError::LogFileWrite)
+                        send_termination_signal(&log_error_tx, ClientError::LogFileWrite, 0)
                     })?;
                 }
                 
@@ -738,7 +769,7 @@ impl ReadUntilClient {
                     log::debug!("{:<15} {:<5} {:<7}", log.stage.as_str_name(), log.channel, log.number);
                 }
             }
-
+            
             Ok::<(), ClientError>(())
         });
 
@@ -746,19 +777,53 @@ impl ReadUntilClient {
         // Await thread handles to run streams
         // ===================================
 
-        for handle in [
-            action_stream_handle,
-            dori_stream_handle,
-            logging_handle,
-            throttle_handle,
-        ] {
-            match handle.await {
-                Ok(Ok(())) => { },
-                Ok(Err(e)) => log::warn!("{}", e.to_string()),
-                Err(e) => log::error!("Join error: {}", e.to_string())
-            };
-        };
+        
+        let stream_join_handle = tokio::spawn(async move {
+            
+            // This runs the stream network
+            for handle in [
+                action_stream_handle,
+                dori_stream_handle,
+                logging_handle,
+                throttle_handle,
+            ] 
+            {
+                match handle.await {
+                    Ok(Ok(())) => {
+                        log::error!("Task has been joined... this shouldn't happen since we are running streams");
+                    },
+                    Ok(Err(e)) => {
+                        log::error!("Stream error: {}", e.to_string());
+                        terminate_from_join_handle.send(true).expect("Failed to send termination signal to main routine");
+                    },
+                    Err(e) => {
+                        log::error!("Join error: {}", e.to_string());
+                        terminate_from_join_handle.send(true).expect("Failed to send termination signal to main routine");
+                    } 
+                }
+            }  
 
+        });
+
+
+        if let Some(_) = terminate_rx.recv().await {
+
+            stream_join_handle.abort();
+
+            log::info!("Terminating client run...");
+            // Wait a little while for things to settle
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+            match termination {
+                Termination::ProcessExit => std::process::exit(1),
+                Termination::BenchmarkError => return Err(ClientError::BenchmarkTerminationError),
+                Termination::SliceError => return Err(ClientError::SliceTerminationError),
+                Termination::Error => { }
+                Termination::Ok => { }
+            }
+
+        }
+        
         Ok(())
     }
 }

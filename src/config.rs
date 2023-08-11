@@ -19,7 +19,7 @@ pub struct StreamfishConfig  {
     pub meta: MetaConfig,
     pub minknow: MinknowConfig,
     pub icarust: IcarustConfig,
-    pub guppy: GuppyConfig,
+    pub basecaller: BasecallerConfig,
     pub dori: DoriConfig,
     pub dynamic: DynamicConfig,
     pub readuntil: ReadUntilConfig,
@@ -155,13 +155,13 @@ pub struct ReadUntilConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct GuppyConfig {
-    pub client: GuppyClientConfig,
-    pub server: GuppyServerConfig,
+pub struct BasecallerConfig {
+    pub client: BasecallerClientConfig,
+    pub server: BasecallerServerConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct GuppyClientConfig {
+pub struct BasecallerClientConfig {
     pub path: PathBuf,
     pub script: PathBuf,
     pub address: String,
@@ -175,7 +175,7 @@ pub struct GuppyClientConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct GuppyServerConfig {
+pub struct BasecallerServerConfig {
     pub path: PathBuf,
     pub port: String,
     pub config: String,
@@ -410,22 +410,12 @@ impl StreamfishConfig {
         let toml_str = std::fs::read_to_string(file).map_err(|err| StreamfishConfigError::TomlConfigFile(err))?;
         let mut config: StreamfishConfig = toml::from_str(&toml_str).map_err(|err| StreamfishConfigError::TomlConfigParse(err))?;
 
-        let (unblock_all_client, unblock_all_server, unblock_all_basecaller, unblock_all_mapper) = match config.readuntil.unblock_all {
-            true => UnblockAll::from_str(&config.readuntil.unblock_all_mode).get_config(),
-            false => (false, false, false, false)
-        };
 
         // Host ports forwarded allows `docker-compose` to set the host via environmental variable
         config.minknow.host = match get_env_var("STREAMFISH_MINKNOW_HOST") { Some(var) => var, None => config.minknow.host.clone() };
 
         // Always sample uncalibrated data for now
         config.readuntil.raw_data_type = RawDataType::Uncalibrated;
-
-        // Easier access to the values in stream loops
-        config.readuntil.unblock_all_client = unblock_all_client;
-        config.readuntil.unblock_all_server = unblock_all_server;
-        config.readuntil.unblock_all_basecaller = unblock_all_basecaller;
-        config.readuntil.unblock_all_mapper = unblock_all_mapper;
 
         // If target list by file:
         if let Some(path) = config.experiment.target_file.clone() {
@@ -450,9 +440,20 @@ impl StreamfishConfig {
 }
 
 impl StreamfishConfig {
-    // Configure internal fields for basecaller and classifer arguments on the adaptive server
+    // Configure fields that require modifications, basecaller and classifer arguments on the adaptive server
     pub fn configure(&mut self) {
-            
+        
+        let (unblock_all_client, unblock_all_server, unblock_all_basecaller, unblock_all_mapper) = match self.readuntil.unblock_all {
+            true => UnblockAll::from_str(&self.readuntil.unblock_all_mode).get_config(),
+            false => (false, false, false, false)
+        };
+
+        // Easier access to the values in stream loops
+        self.readuntil.unblock_all_client = unblock_all_client;
+        self.readuntil.unblock_all_server = unblock_all_server;
+        self.readuntil.unblock_all_basecaller = unblock_all_basecaller;
+        self.readuntil.unblock_all_mapper = unblock_all_mapper;
+
         // Some checks and argument construction for basecaller configurations
         if self.dori.adaptive.classifier == Classifier::Minimap2Rust && self.experiment.reference.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
             panic!("Classifier reference must be an index file (.mmi)")
@@ -460,26 +461,26 @@ impl StreamfishConfig {
 
         if self.dori.adaptive.basecaller == Basecaller::Guppy && (self.dori.adaptive.classifier == Classifier::Minimap2Rust  || self.dori.adaptive.classifier == Classifier::Kraken2) {
             
-            self.guppy.client.args = format!(
+            self.basecaller.client.args = format!(
                 "{} --address {} --config {} --throttle {} --max-reads-queued {} --threads {}",
-                self.guppy.client.script.display(),
-                self.guppy.client.address,
-                self.guppy.client.config,
-                self.guppy.client.throttle,
-                self.guppy.client.max_reads_queued,
-                self.guppy.client.threads,
+                self.basecaller.client.script.display(),
+                self.basecaller.client.address,
+                self.basecaller.client.config,
+                self.basecaller.client.throttle,
+                self.basecaller.client.max_reads_queued,
+                self.basecaller.client.threads,
             ).split_whitespace().map(String::from).collect();
 
-            self.guppy.server.args = format!(
+            self.basecaller.server.args = format!(
                 "--log_path {} --port {} --config {} --ipc_threads {} --device {} --gpu_runners_per_device {} --num_callers {} --chunks_per_runner {}",
-                self.guppy.server.log_path.display(),
-                self.guppy.server.port,
-                self.guppy.server.config,
-                self.guppy.server.threads,
-                self.guppy.server.device,
-                self.guppy.server.runners,
-                self.guppy.server.callers,
-                self.guppy.server.chunks,
+                self.basecaller.server.log_path.display(),
+                self.basecaller.server.port,
+                self.basecaller.server.config,
+                self.basecaller.server.threads,
+                self.basecaller.server.device,
+                self.basecaller.server.runners,
+                self.basecaller.server.callers,
+                self.basecaller.server.chunks,
             ).split_whitespace().map(String::from).collect();
 
         } else {
@@ -849,8 +850,8 @@ impl SliceDiceConfig {
             slice_config.readuntil.channel_start = slice.channel_start;
             slice_config.readuntil.channel_end = slice.channel_end;
             slice_config.dori.adaptive.uds_path = slice.dori_adaptive_uds_path.clone();
-            slice_config.guppy.server.port = slice.guppy_server_port.clone();
-            slice_config.guppy.client.address = slice.guppy_client_address.clone();
+            slice_config.basecaller.server.port = slice.guppy_server_port.clone();
+            slice_config.basecaller.client.address = slice.guppy_client_address.clone();
 
             slice_config.configure(); // re-configure the basecaller server/client args
 

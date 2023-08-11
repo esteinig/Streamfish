@@ -39,7 +39,7 @@ stderr_log                              = "/tmp/dori.dynamic.stderr"
 
 # Gupp client and server confiurations
 
-[guppy.client]
+[basecaller.client]
 path                                    = "/data/opt/conda/envs/guppy/bin/python"                            # "/home/esteinig/micromamba/envs/guppy/bin/python"
 script                                  = "/data/dev/meta-gp/reefsquid/scripts/guppy/guppy_client.py"        # "/usr/src/streamfish/scripts/guppy/guppy_client.py"
 address                                 = "ipc:///tmp/.guppy_local/5556"
@@ -48,7 +48,7 @@ throttle                                = 0.01                                  
 threads                                 = 8
 max_reads_queued                        = 256
 
-[guppy.server]
+[basecaller.server]
 path                                    = "/opt/ont/guppy/bin/guppy_basecall_server" 
 port                                    = "/tmp/.guppy_local/5556"
 config                                  = "dna_r9.4.1_450bps_fast.cfg"
