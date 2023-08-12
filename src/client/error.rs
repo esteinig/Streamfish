@@ -28,6 +28,9 @@ pub enum ClientError {
     // this usually occurs because the connection has been terminated
     #[error("Control server connection has terminated")]
     ControlServerConnectionTermination,
+    // Represents failure to get the device calibration from the control server
+    #[error("Failed to get device calibration from control server")]
+    ControlServerDeviceCalibration,
     // Represent a failure to launch the Dori processing server as a task
     #[error("Failed to launch the processing server")]
     DoriServerLaunch,
@@ -50,6 +53,10 @@ pub enum ClientError {
     // Represents failure to send a decision action into the data processing stream queue
     #[error("Failed to send a data package into the processing server stream queue")]
     DoriStreamQueueSend,
+
+    // Represents failure to send a chunk data package into the write queue
+    #[error("Failed to send a data package into the chunk writer queue")]
+    ChunkWriterQueueSend,
     // Represents failure to send a termination signal into the shutdown queue
     #[error("Failed to send a termination signal into the shutdown queue")]
     ShutdownQueueSend,
@@ -59,8 +66,14 @@ pub enum ClientError {
     // Represents failure to create the logging file
     #[error("Failed to create the log file")]
     LogFileCreate,
+    // Represents failure to create the chunk file
+    #[error("Failed to create the chunk file")]
+    ChunkFileCreate,
+    // Represents failure to write to chunk file
+    #[error("Failed to write to the chunk file")]
+    ChunkFileWrite,
     // Represents failure to write to log file
-    #[error("Failed to create the log file")]
+    #[error("Failed to write to the log file")]
     LogFileWrite,
     // Represents failure to initiate the data acquisition stream with the control server
     #[error("Failed to initiate the stream with the control server")]

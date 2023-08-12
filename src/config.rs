@@ -131,7 +131,11 @@ pub struct ReadUntilConfig {
     pub dori_tcp_port: u32,    
     pub unblock_all: bool,
     pub unblock_all_mode: String,
+    pub unblock_all_chunk_file: PathBuf,
     pub read_cache: bool,
+    pub read_cache_ttl: u64,
+    pub read_cache_tti: u64,
+    pub read_cache_max_capacity: u64,
     pub read_cache_min_chunks: usize,
     pub read_cache_max_chunks: usize,
     pub action_throttle: u64,
@@ -179,9 +183,10 @@ pub struct BasecallerServerConfig {
     pub path: PathBuf,
     pub port: String,
     pub config: String,
-    pub callers: u32,
-    pub chunks: u32,
-    pub runners: u32,
+    pub num_callers: u32,
+    pub chunks_per_runner: u32,
+    pub gpu_runners_per_device: u32,
+    pub chunk_size: u32,
     pub threads: u32,
     pub device: String,
     pub log_path: PathBuf,
@@ -197,7 +202,7 @@ pub struct ExperimentConfig {
     pub mode: String,
     pub r#type: String,
     pub targets: Vec<Target>,
-    pub target_file: Option<PathBuf>,
+    pub target_file: PathBuf,
     pub min_match_len: i32,
     pub reference: PathBuf,
 
@@ -292,7 +297,7 @@ pub struct TargetFile {
     targets: Vec<Target>
 }
 impl TargetFile {
-    pub fn from(path: PathBuf) -> Result<Self, StreamfishConfigError> {
+    pub fn from(path: &PathBuf) -> Result<Self, StreamfishConfigError> {
         let mut targets = Vec::new();
         if let Ok(lines) = read_lines(&path) {
             for line in lines {
@@ -418,13 +423,13 @@ impl StreamfishConfig {
         config.readuntil.raw_data_type = RawDataType::Uncalibrated;
 
         // If target list by file:
-        if let Some(path) = config.experiment.target_file.clone() {
+        if !config.experiment.target_file.as_os_str().is_empty() {
             
-            if !path.exists() {
-                return Err(StreamfishConfigError::TargetFileNotFound(path.display().to_string()))
+            if !config.experiment.target_file.exists() {
+                return Err(StreamfishConfigError::TargetFileNotFound(config.experiment.target_file.display().to_string()))
             }
 
-            config.experiment.targets = TargetFile::from(path)?.targets;
+            config.experiment.targets = TargetFile::from(&config.experiment.target_file)?.targets;
             log::info!("Loaded targets from file: {:#?}", config.experiment.targets);
         }
 
@@ -472,15 +477,16 @@ impl StreamfishConfig {
             ).split_whitespace().map(String::from).collect();
 
             self.basecaller.server.args = format!(
-                "--log_path {} --port {} --config {} --ipc_threads {} --device {} --gpu_runners_per_device {} --num_callers {} --chunks_per_runner {}",
+                "--log_path {} --port {} --config {} --ipc_threads {} --device {} --gpu_runners_per_device {} --num_callers {} --chunks_per_runner {} --chunk_size {}",
                 self.basecaller.server.log_path.display(),
                 self.basecaller.server.port,
                 self.basecaller.server.config,
                 self.basecaller.server.threads,
                 self.basecaller.server.device,
-                self.basecaller.server.runners,
-                self.basecaller.server.callers,
-                self.basecaller.server.chunks,
+                self.basecaller.server.gpu_runners_per_device,
+                self.basecaller.server.num_callers,
+                self.basecaller.server.chunks_per_runner,
+                self.basecaller.server.chunk_size,
             ).split_whitespace().map(String::from).collect();
 
         } else {
@@ -850,8 +856,8 @@ impl SliceDiceConfig {
             slice_config.readuntil.channel_start = slice.channel_start;
             slice_config.readuntil.channel_end = slice.channel_end;
             slice_config.dori.adaptive.uds_path = slice.dori_adaptive_uds_path.clone();
-            slice_config.basecaller.server.port = slice.guppy_server_port.clone();
-            slice_config.basecaller.client.address = slice.guppy_client_address.clone();
+            slice_config.basecaller.server.port = slice.basecaller_server_port.clone();
+            slice_config.basecaller.client.address = slice.basecaller_client_address.clone();
 
             slice_config.configure(); // re-configure the basecaller server/client args
 
@@ -874,13 +880,13 @@ pub struct SliceConfig {
     pub channel_start: u32,
     pub channel_end: u32,
     pub dori_adaptive_uds_path: PathBuf,
-    pub guppy_server_port: String,
-    pub guppy_client_address: String,
+    pub basecaller_server_port: String,
+    pub basecaller_client_address: String,
 }
 
 
 impl std::fmt::Display for SliceConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}: start={} end={} dori={} guppy={}", self.client_name, self.channel_start, self.channel_end, self.dori_adaptive_uds_path.display(), self.guppy_client_address)
+        write!(f, "{}: start={} end={} dori={} basecaller_client={}", self.client_name, self.channel_start, self.channel_end, self.dori_adaptive_uds_path.display(), self.basecaller_client_address)
     }
 }

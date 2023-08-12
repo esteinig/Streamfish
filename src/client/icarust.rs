@@ -6,7 +6,6 @@ use icarust::config::{load_toml, Config as IcarustConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::client::error::ClientError;
-use crate::config::Basecaller;
 use crate::{config::StreamfishConfig, error::StreamfishConfigError};
 
 // Configure and run Icarust

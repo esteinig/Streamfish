@@ -1,7 +1,9 @@
 
 use std::io::Write;
+use itertools::join;
 use log::{LevelFilter, Level};
 use env_logger::{Builder, fmt::Color};
+use byteorder::{LittleEndian, ByteOrder};
 
 pub fn init_logger() {
     Builder::new()
@@ -38,4 +40,15 @@ pub fn init_logger() {
     .filter(None, LevelFilter::Info)
     .init();
 
+}
+
+pub fn get_basecall_client_input(id: String, raw_data: Vec<u8>, chunks: usize, channel: u32, number: u32, offset: f32, range: f32, digitisation: u32, sample_rate: u32) -> String {
+
+    // UNCALBIRATED SIGNAL CONVERSON BYTES TO SIGNED INTEGERS
+    let mut signal_data: Vec<i16> = Vec::new();
+    for i in (0..raw_data.len()).step_by(2) {
+        signal_data.push(LittleEndian::read_i16(&raw_data[i..]));
+    }
+
+    format!("{}::{}::{}::{} {} {} {} {:.1} {:.11} {} {}\n", id, channel, number, chunks, channel, number, digitisation, offset, range, sample_rate, join(&signal_data, " ")) 
 }

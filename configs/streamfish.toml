@@ -40,27 +40,28 @@ stderr_log                              = "/tmp/dori.dynamic.stderr"
 # Gupp client and server confiurations
 
 [basecaller.client]
-path                                    = "/data/opt/conda/envs/guppy/bin/python"                            # "/home/esteinig/micromamba/envs/guppy/bin/python"
-script                                  = "/data/dev/meta-gp/reefsquid/scripts/guppy/guppy_client.py"        # "/usr/src/streamfish/scripts/guppy/guppy_client.py"
-address                                 = "ipc:///tmp/.guppy_local/5556"
+path                                    = "/data/opt/conda/envs/dorado_basecall_server/bin/python"           # "/home/esteinig/micromamba/envs/guppy/bin/python"
+script                                  = "/data/dev/meta-gp/reefsquid/scripts/basecaller/ont_client.py"     # "/usr/src/streamfish/scripts/guppy/guppy_client.py"
+address                                 = "ipc:///tmp/.basecaller_local/5556"
 config                                  = "dna_r9.4.1_450bps_fast"
 throttle                                = 0.01                                                               # Receiver throttle for requests for completed reads
-threads                                 = 8
-max_reads_queued                        = 256
+threads                                 = 4     # default: 4
+max_reads_queued                        = 2000  # default: 2000
 
 [basecaller.server]
 path                                    = "/opt/ont/guppy/bin/guppy_basecall_server" 
-port                                    = "/tmp/.guppy_local/5556"
+port                                    = "/tmp/.basecaller_local/5556"
 config                                  = "dna_r9.4.1_450bps_fast.cfg"
-callers                                 = 4
-chunks                                  = 160
-threads                                 = 8
-runners                                 = 8
+num_callers                             = 4     # default: 4
+chunks_per_runner                       = 160   # default: 160
+threads                                 = 4     # default: 4
+gpu_runners_per_device                  = 2     # default: 2
+chunk_size                              = 1000  # default: 1000
 device                                  = "cuda:all"
-log_path                                = "/tmp/guppy.log"
-stderr_log                              = "/tmp/guppy.stderr"
+log_path                                = "/tmp/basecaller.log"
+stderr_log                              = "/tmp/basecaller.stderr"
 
-# Adaptive sampling routine configuration
+# Adaptive sampling routin and logic configuration
 
 [readuntil]
 device_name                             = "MS12345"
@@ -72,7 +73,10 @@ dori_tcp_host                           = 'dori-dev'                            
 dori_tcp_port                           = 10002                                                              # '10002' when running client inside container, otherwise '10002' (port forwarded from inside container) - no changes necessary, should match `dori.tcp_port`
 read_cache                              = true
 read_cache_min_chunks                   = 1
-read_cache_max_chunks                   = 1                                                   
+read_cache_max_chunks                   = 1                 
+read_cache_max_capacity                 = 100000
+read_cache_ttl                          = 300
+read_cache_tti                          = 180
 latency_log                             = "/tmp/latency.log"
 action_throttle                         = 0                                                                  # Streaming actions (= 0) or batched actions (> 0) - in milliseconds
 unblock_duration                        = 0.1
@@ -80,6 +84,7 @@ sample_minimum_chunk_size               = 200
 accepted_first_chunk_classifications    = [83, 65]
 unblock_all                             = true
 unblock_all_mode                        = "mapper"
+unblock_all_chunk_file                  = ""                                                                 # If unblock all set to 'client', write each received chunk as input string to file. Strings can be submitted with the basecall client script. Do not use this during client-side latency benchmarks.
 launch_dori_server                      = true
 launch_basecall_server                  = true
 
@@ -105,10 +110,9 @@ control                                 = false
 mode                                    = 'mapping'
 type                                    = 'targeted_sequencing'
 reference                               = '/tmp/chm13v2_chr1_chr2.mmi'
-min_match_len                           = 0                                                                        # minimum matched mapping length
-targets                                 = ["chr1"]                                                                       # empty to target all sequences  - target position range, 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
-
-# target_file                           = "/data/dev/meta-gp/reefsquid/configs/icarust/test_human/target.tsv"      # optional - overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed
+min_match_len                           = 0                                                                    # minimum matched mapping length
+targets                                 = ["chr1"]                                                             # empty to target all sequences  - target position range, 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
+target_file                             = ""                                                                   # optional - overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed
 
 # Dynamic feedback loop configuration
 

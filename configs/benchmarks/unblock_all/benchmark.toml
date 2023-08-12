@@ -1,20 +1,22 @@
 # Prefixes must be unique
 # Each combination benchmark is configured explicitly
 
-name            = "Unblock-all benchmarks"
+name            = "Unblock-all benchmark tests"
 outdir          = "/tmp/benchmarks/unblock_all"
 date            = "2023-08-07"
 commit          = ""
 description     = """
 Configurations to benchmark Streamfish component latency across
 unblock-all modes with variation in models, channels, and references
+using the default R9.4.1 squiggles with Icarust
 """
 
 # Base configurations
+
 streamfish_config   = "/data/dev/meta-gp/reefsquid/configs/streamfish.toml"
 icarust_config      = "/data/dev/meta-gp/reefsquid/configs/icarust/test_human/test.toml"
 
-# Default
+# Test benchmarking
 
 [[group]]
 prefix              = "default_unblock_all"
@@ -36,100 +38,3 @@ unblock_all_mode    = "basecaller"
 prefix              = "mapper"
 unblock_all_mode    = "mapper"
 
-# Guppy Model
-
-[[group]]
-prefix              = "guppy_model_unblock_all"
-description         = "Test benchmark of the baseline Streamfish/Icarust configuration across unblock-all modes and basecaller models"
-
-[[group.benchmark]]
-prefix              = "client_fast"
-unblock_all_mode    = "client"
-guppy_model         = "dna_r9.4.1_450bps_fast"
-
-[[group.benchmark]]
-prefix              = "server_fast"
-unblock_all_mode    = "server"
-guppy_model         = "dna_r9.4.1_450bps_fast"
-
-[[group.benchmark]]
-prefix              = "basecaller_fast"
-unblock_all_mode    = "basecaller"
-guppy_model         = "dna_r9.4.1_450bps_fast"
-
-[[group.benchmark]]
-prefix              = "mapper_fast"
-unblock_all_mode    = "mapper"
-guppy_model         = "dna_r9.4.1_450bps_fast"
-
-
-[[group.benchmark]]
-prefix              = "client_hac"
-unblock_all_mode    = "client"
-guppy_model         = "dna_r9.4.1_450bps_hac"
-
-[[group.group.benchmark]]
-prefix              = "server_hac"
-unblock_all_mode    = "server"
-guppy_model         = "dna_r9.4.1_450bps_hac"
-
-[[group.benchmark]]
-prefix              = "basecaller_hac"
-unblock_all_mode    = "basecaller"
-guppy_model         = "dna_r9.4.1_450bps_hac"
-
-[[group.benchmark]]
-prefix              = "mapper_hac"
-unblock_all_mode    = "mapper"
-guppy_model         = "dna_r9.4.1_450bps_hac"
-
-
-[[group.benchmark]]
-prefix              = "client_sup"
-unblock_all_mode    = "client"
-guppy_model         = "dna_r9.4.1_450bps_sup"
-
-[[group.benchmark]]
-prefix              = "server_sup"
-unblock_all_mode    = "server"
-guppy_model         = "dna_r9.4.1_450bps_sup"
-
-[[group.benchmark]]
-prefix              = "basecaller_sup"
-unblock_all_mode    = "basecaller"
-guppy_model         = "dna_r9.4.1_450bps_sup"
-
-[[group.benchmark]]
-prefix              = "mapper_sup"
-unblock_all_mode    = "mapper"
-guppy_model         = "dna_r9.4.1_450bps_sup"
-
-
-
-
-
-
-
-
-# [[benchmark]]
-# prefix              = "model"
-# description         = "Default benchmark of the baseline Streamfish/Icarust configuration across unblock-all modes and basecaller models"
-
-# unblock_all_mode    = ["client", "server",  "basecaller", "mapper"]
-# guppy_model         = ["dna_r9.4.1_450bps_fast", "dna_r9.4.1_450bps_hac", "dna_r9.4.1_450bps_sup"]
-
-
-# [[benchmark]]
-# prefix              = "reference"
-# description         = "Default benchmark of the baseline Streamfish/Icarust configuration across unblock-all modes and references"
-
-# unblock_all_mode    = ["client", "server",  "basecaller", "mapper"]
-# reference           = ["/tmp/viruses.mmi", "/tmp/bacteria.mmi", "/tmp/chm13v2_chr1_chr2.mmi", "/tmp/chm13v2_ont.mmi"]  # absolute paths
-
-
-# [[benchmark]]
-# prefix              = "channels"
-# description         = "Default benchmark of the baseline Streamfish/Icarust configuration across unblock-all modes and channels"
-
-# unblock_all_mode    = ["client", "server",  "basecaller", "mapper"]
-# channels            = [512, 1024, 1536, 2048, 2560, 3072]

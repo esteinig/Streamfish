@@ -10,28 +10,27 @@ import threading
 
 import numpy as np
 from pyguppy_client_lib.pyclient import PyGuppyClient
-from pyguppy_client_lib.helper_functions import package_read
 
-guppy_logger = logging.getLogger("GuppyCaller")
+guppy_logger = logging.getLogger("OntCaller")
 app = typer.Typer(add_completion=False)
 
 
 @app.command()
 def guppy_client(
         address: str = typer.Option(
-            ..., help="IPC or TCP address for GuppyServer"
+            ..., help="IPC or TCP address for Dorado or Guppy server"
         ),
         config: str = typer.Option(
-            "dna_r9.4.1_450bps_fast", help="Configuration name"
+            "dna_r9.4.1_450bps_fast", help="Configuration name to load"
         ),
         throttle: float = typer.Option(
             0.01, help="Client throttle in seconds"
         ),
         threads: int = typer.Option(
-            8, help="Client threads"  # important, test this
+            4, help="Client threads"  # important, test this
         ),
         max_reads_queued: int = typer.Option(
-            256, help="Maximum number of reads in queue"
+            2048, help="Maximum number of reads in queue"
         ),
 ):
     """
@@ -71,7 +70,7 @@ def guppy_client(
                     daq_scaling=float(line[5]) / float(line[3])
                 )   
 
-                success = caller.pass_read(input_data)
+                _ = caller.pass_read(input_data)
 
                 read_count += 1
 

@@ -3,13 +3,14 @@ use uuid::Uuid;
 use tokio::signal;
 use tokio::fs::File;
 use chrono::prelude::*;
-use tokio::io::AsyncWriteExt;
 use quanta::{Clock, Instant};
+use tokio::io::AsyncWriteExt;
 use crate::config::ServerType;
 use crate::server::dori::DoriServer;
 use crate::client::error::ClientError;
 use crate::client::icarust::IcarustRunner;
 use crate::client::minknow::MinknowClient;
+use crate::utils::get_basecall_client_input;
 use icarust::config::Config as IcarustConfig;
 use crate::client::services::data::DataClient;
 use crate::client::dori::AdaptiveSamplingClient;
@@ -200,11 +201,13 @@ impl ReadUntilClient {
 
         Ok(())
     }
+
     pub async fn run_cached(&self, config: StreamfishConfig, icarust_config: Option<IcarustConfig>, run_id: Option<String>, termination: Termination) -> Result<(), ClientError> {
 
         let (shutdown_tx, mut shutdown_rx): (UnboundedSender<ClientErrorSignal>, UnboundedReceiver<ClientErrorSignal>) = tokio::sync::mpsc::unbounded_channel();
         let (terminate_tx, mut terminate_rx) = tokio::sync::mpsc::unbounded_channel();
-        let terminate_from_join_handle = terminate_tx.clone();
+
+        let terminate_from_join_handle_tx = terminate_tx.clone();
 
         log::info!("{:#?}", config);
 
@@ -296,14 +299,17 @@ impl ReadUntilClient {
             (true, true) => {
                 let dori_config = config.clone();
 
-                log::info!("Launching Dori DynamicFeedback server in background task...");
+                log::info!("Launching Dori DynamicFeedback service as server...");
                 let dori_thread_handle = tokio::spawn(async move {
+
                     DoriServer::run(dori_config, ServerType::Dynamic).await.map_err(|_| ClientError::DoriServerLaunch)?;
+
                     Ok::<(), ClientError>(())
+
                 });
 
                 if config.dori.dynamic.tcp_enabled {
-                    log::info!("Dori DynamicFeedback server launched, available on TCP (http://{}:{})",  config.dori.dynamic.tcp_host, config.dori.dynamic.tcp_port)
+                    log::info!("Dori DynamicFeedback server launched, available on TCP (http://{}:{})", config.dori.dynamic.tcp_host, config.dori.dynamic.tcp_port)
                 } else {
                     log::info!("Dori DynamicFeedback server launched, available on UDS ({})", config.dori.dynamic.uds_path.display())
                 }
@@ -329,10 +335,13 @@ impl ReadUntilClient {
             true => {
                 let dori_config = config.clone();
 
-                log::info!("Launching Dori AdaptiveSampling serverin async task...");
+                log::info!("Launching Dori AdaptiveSampling service as server...");
                 let dori_thread_handle = tokio::spawn(async move {
+
                     DoriServer::run(dori_config, ServerType::Adaptive).await.map_err(|_| ClientError::DoriServerLaunch)?;
+
                     Ok::<(), ClientError>(())
+
                 });
 
                 if config.dori.adaptive.tcp_enabled {
@@ -355,7 +364,7 @@ impl ReadUntilClient {
             },
             (true, Basecaller::Guppy) => {
                 
-                log::info!("Launching Guppy server in process thread...");
+                log::info!("Launching basecall server in process thread...");
                 
                 let process_stderr = std::process::Stdio::from(std::fs::File::create( config.basecaller.server.stderr_log.clone()).expect(
                     &format!("Failed to create basecall server log file: {}", config.basecaller.server.stderr_log.display())
@@ -366,11 +375,11 @@ impl ReadUntilClient {
                     .stdout(std::process::Stdio::null())
                     .stderr(process_stderr)
                     .spawn()
-                    .expect("Failed to spawn basecall server process for Guppy server");
+                    .expect("Failed to spawn basecall server process");
                 
-                log::info!("Guppy server launched, available on: {}",  config.basecaller.client.address);
+                log::info!("Basecall server launched, available on: {}",  config.basecaller.client.address);
 
-                // Wait a little - race condition in async slice-and-dice
+                // Wait a little due to race condition in async slice-and-dice
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
                 Some(process)
@@ -379,6 +388,62 @@ impl ReadUntilClient {
             _ => {
                 unimplemented!("Basecaller not implemented")
             }
+        };
+
+
+        // ===========================================
+        // Single chunks reference writer [optional]
+        // ===========================================
+        
+        let (chunk_writer_tx, mut chunk_writer_rx) = tokio::sync::mpsc::unbounded_channel();
+        let write_chunk_file = !run_config.unblock_all_chunk_file.as_os_str().is_empty();
+        let shutdown_error_chunk_writer_tx = shutdown_tx.clone();
+
+        // Only need this for optional chunk writer - might be good getting this on client 
+        // rather than RPC server endpoint and send with initialisation request?
+
+        let chunk_writer_handle = match write_chunk_file {
+            true => {
+                // Calibration data - accounts for manual setting of sample rate in Icarust
+                let (sample_rate, calibration) = minknow_client.get_device_data(
+                    &config.readuntil.device_name, &1, &config.readuntil.channels  // Note that we get the whole channel array even if we slice
+                ).await.map_err(|_| {
+                    send_termination_signal(&shutdown_error_chunk_writer_tx, ClientError::ControlServerDeviceCalibration, 5)
+                })?;
+
+                let chunk_writer_handle = tokio::spawn(async move {
+
+                        let mut output = File::create(&run_config.unblock_all_chunk_file).await.map_err(|_| {
+                            send_termination_signal(&shutdown_error_chunk_writer_tx, ClientError::ChunkFileCreate, 0)
+                        })?;
+
+                        while let Some((read_id, channel, number, chunk)) = chunk_writer_rx.recv().await {
+                                            
+                            let channel_index = (channel - 1) as usize;
+                        
+                            output.write_all(get_basecall_client_input(
+                                read_id, 
+                                chunk,
+                                1, 
+                                channel, 
+                                number,
+                                calibration.offsets[channel_index],
+                                calibration.pa_ranges[channel_index], 
+                                calibration.digitisation, 
+                                sample_rate
+                            ).as_bytes()).await.map_err(|_| {
+                                send_termination_signal(&shutdown_error_chunk_writer_tx, ClientError::ChunkWriterQueueSend, 0)
+                            })?;
+                            
+                        }
+
+                        Ok::<(), ClientError>(())
+                    
+                });
+
+                Some(chunk_writer_handle)
+            }
+            false => None
         };
 
 
@@ -406,6 +471,13 @@ impl ReadUntilClient {
                 basecaller_thread.kill().map_err(|err| err).expect("Failed to kill basecaller thread - you may need to do this manually");
             }
 
+
+
+            if let Some(writer_task) = chunk_writer_handle {
+                log::warn!("Shutting down chunk writer...");
+                writer_task.abort();
+            }
+
             if let Some(dori_task) = dori_adaptive_task_handle {
                 log::warn!("Shutting down adaptive sampling server...");
                 dori_task.abort();
@@ -422,26 +494,28 @@ impl ReadUntilClient {
             }
 
             log::warn!("Completed task shutdowns, terminate client");
-            log::info!("So long, and thanks for all the fish! 🐟 🐟 🐟");
+            log::info!("So long, and thanks for all the fish... 🐟 🐟 🐟");
 
             if manual_shutdown {
                 // Terminate the process
                 std::process::exit(1)
             } else {
                 // Otherwise send the termination signal to the main routine 
-                // in case the termination configurations asks for return 
-                // from this method
+                // in case the termination configurations asks for return from this method
                 terminate_tx.send(true).expect("Failed to send termination signal to main routine");
             }
         });
+
+
+        
+
 
         
         // ==========================================
         // MPSC message queues: senders and receivers
         // ==========================================
 
-        // TODO: check unbounded channel if appropriate or better to have bounds
-
+        // TODO: check if better to have bounds
         let (action_tx, mut action_rx) = tokio::sync::mpsc::unbounded_channel();
         let (dori_tx, mut dori_rx) = tokio::sync::mpsc::unbounded_channel();
         let (log_tx, mut log_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -458,6 +532,7 @@ impl ReadUntilClient {
         let minknow_dori_action_tx = action_tx.clone();
         let minknow_action_tx = action_tx.clone(); 
         let dori_data_tx = dori_tx.clone(); 
+
 
 
         // ===================
@@ -563,6 +638,7 @@ impl ReadUntilClient {
             send_termination_signal(&shutdown_tx, ClientError::DoriServerStreamInit, 5)
         })?.into_inner();
 
+
         // ===========================================
         // Main adaptive sampling routine is initiated
         // ===========================================
@@ -581,6 +657,8 @@ impl ReadUntilClient {
         let control_server_response_error_tx = shutdown_tx.clone();
         let action_stream_handle = tokio::spawn(async move {
 
+
+
             while let Some(response) = minknow_stream.message().await.map_err(|_| {
                 send_termination_signal(&control_server_response_error_tx, ClientError::ControlServerConnectionTermination, 0)
             })?
@@ -588,7 +666,7 @@ impl ReadUntilClient {
             {
                 for (channel, read_data) in response.channels {
                     if run_config.unblock_all_client {
-                            // Unblock all to test unblocking, equivalent to Readfish
+                            // Unblock all configuration to test client-side unblocking 
                             minknow_action_tx.send(GetLiveReadsRequest { request: Some(
                                 LiveReadsRequest::Actions(Actions { actions: vec![
                                     Action {
@@ -601,6 +679,14 @@ impl ReadUntilClient {
                             )}).map_err(|_| {
                                 send_termination_signal(&control_server_response_error_tx, ClientError::ControlServerActionQueueSend, 0) 
                             })?;
+
+                            // If chunk file is configured, write the chunk to file
+                            if write_chunk_file {
+                                chunk_writer_tx.send((read_data.id, channel, read_data.number, read_data.raw_data)).map_err(|_| {
+                                    send_termination_signal(&control_server_response_error_tx, ClientError::DoriStreamQueueSend, 0)
+                                })?;
+                            }
+
                     } else {
                     
                         // Sends single channel data to Dori
@@ -780,7 +866,9 @@ impl ReadUntilClient {
         
         let stream_join_handle = tokio::spawn(async move {
             
-            // This runs the stream network
+            // This runs the stream network - not quite clear if we actually
+            // need to await these handles for the core stream functions,
+            // we never see the awaited stream or join error
             for handle in [
                 action_stream_handle,
                 dori_stream_handle,
@@ -794,11 +882,11 @@ impl ReadUntilClient {
                     },
                     Ok(Err(e)) => {
                         log::error!("Stream error: {}", e.to_string());
-                        terminate_from_join_handle.send(true).expect("Failed to send termination signal to main routine");
+                        terminate_from_join_handle_tx.send(true).expect("Failed to send termination signal to main routine");
                     },
                     Err(e) => {
                         log::error!("Join error: {}", e.to_string());
-                        terminate_from_join_handle.send(true).expect("Failed to send termination signal to main routine");
+                        terminate_from_join_handle_tx.send(true).expect("Failed to send termination signal to main routine");
                     } 
                 }
             }  
@@ -810,9 +898,8 @@ impl ReadUntilClient {
 
             stream_join_handle.abort();
 
-            log::info!("Terminating client run...");
             // Wait a little while for things to settle
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
             match termination {
                 Termination::ProcessExit => std::process::exit(1),

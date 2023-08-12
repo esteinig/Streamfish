@@ -1,25 +1,76 @@
 
 use minimap2::*;
 use std::pin::Pin;
-use itertools::join;
 use moka::future::Cache;
 use futures_core::Stream;
+use crate::config::Target;
 use futures_util::StreamExt;
 use futures_util::AsyncWriteExt;
 use futures_util::io::AsyncBufReadExt;
 use tonic::{Request, Response, Status};
-use byteorder::{LittleEndian, ByteOrder};
 use futures_util::io::{BufReader, Lines};
 use tokio::sync::mpsc::{Sender, Receiver};
-use crate::client::dori::DynamicFeedbackClient;
 use crate::client::minknow::MinknowClient;
-use crate::config::Target;
+use crate::utils::get_basecall_client_input;
+use crate::client::dori::DynamicFeedbackClient;
 use crate::config::{StreamfishConfig, Basecaller};
-use crate::services::dori_api::dynamic::{DynamicFeedbackRequest, RequestType as DynamicRequestType};
+use crate::services::dori_api::dynamic::DynamicTarget;
 use async_process::{Command, Stdio, ChildStdout, ChildStdin};
 use crate::services::dori_api::adaptive::adaptive_sampling_server::AdaptiveSampling;
+use crate::services::dori_api::dynamic::{DynamicFeedbackRequest, RequestType as DynamicRequestType};
 use crate::services::dori_api::adaptive::{StreamfishRequest, StreamfishResponse, Decision, RequestType as AdaptiveRequestType};
-use crate::services::dori_api::dynamic::DynamicTarget;
+
+pub struct FastxRecord {
+    pub channel: u32,
+    pub number: u32,
+    pub id: String,
+    pub seq: String
+}
+
+
+// Initiates the process pipeline from configuration
+fn init_pipeline(config: &StreamfishConfig) -> Result<(ChildStdin, Lines<BufReader<ChildStdout>>), Status> {
+
+    log::info!("Spawning pipeline process...");
+
+    let stderr_file = match std::fs::File::create(config.dori.adaptive.stderr_log.clone()) {
+        Ok(file) => file,
+        Err(_) => return Err(Status::internal("Failed to create pipeline stderr file"))
+    };
+
+    let process_stderr = Stdio::from(stderr_file);
+
+    match config.dori.adaptive.basecaller {
+        Basecaller::Guppy => {
+            let mut pipeline_process = match Command::new(config.basecaller.client.path.as_os_str())
+                .args(config.basecaller.client.args.clone())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(process_stderr)
+                .spawn() 
+            {
+                    Ok(process) => process,
+                    Err(_) => return Err(Status::internal("Failed to spawn pipeline process"))
+            };
+
+            let stdin = match pipeline_process.stdin.take() {
+                Some(stdin) => stdin,
+                None => return Err(Status::internal("Failed to open pipeline process stdin"))
+            };
+            let stdout = match pipeline_process.stdout.take() {
+                Some(stdout) => stdout,
+                None => return Err(Status::internal("Failed to open pipeline process stdout"))
+            };
+            
+            Ok((stdin, BufReader::new(stdout).lines()))
+
+        },
+        _ => unimplemented!("Dorado is not implemented yet!")
+    }
+    
+}
+
+
 
 pub struct AdaptiveSamplingService {
     config: StreamfishConfig
@@ -99,22 +150,12 @@ impl AdaptiveSampling for AdaptiveSamplingService {
             Err(_) => return Err(Status::internal("Failed to connect to control server"))
         };
 
+        // Calibration data - accounts for manual setting of sample rate in Icarust
 
-        // There may be a weird race condition with Icarust when 
-        // starting all slices in a slice-and-dice configuration
-        // simultaneously before Icarust spits out reads after 
-        // intials delay (works ok when starting sequentially 
-        // when reads have started) causing the wrong slice
-        // channel numbers to be transmitted to the slice 
-        // causing an out of bounds index error so we 
-        // check first here
-
-        // We could also just fet the full channel array 
-        // for the calibration (instead of the start - end)
-        // so this check won't be necessary, might be better
-
+        // We are getting the entire channel array because there may be some odd sporadic cross-overs
+        // when initiating a slice-and-dice configuration with a single Icarust instance
         let (sample_rate, calibration) = match minknow_client.get_device_data(
-            &self.config.readuntil.device_name, &1, &self.config.readuntil.channels
+            &self.config.readuntil.device_name, &1, &self.config.readuntil.channels  
         ).await {
             Ok(data) => data,
             Err(_) => return Err(Status::internal("Failed to get calibration data from control server"))
@@ -226,15 +267,12 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                     log::warn!("Switched to targets: {:?}", dynamic_mapping_config.targets);
 
                 }
-                
 
-            Ok::<(), Status>(()) 
-        });
+                Ok::<(), Status>(()) 
+            });
 
 
         }
-
-        
 
         // =========================
         // Request stream processing
@@ -266,11 +304,11 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
         let cache: Cache<String, Vec<Vec<u8>>> = Cache::builder()
             // Max 10,000 entries
-            .max_capacity(10_000)
+            .max_capacity(self.config.readuntil.read_cache_max_capacity)
             // Time to live (TTL): 5 minutes
-            .time_to_live(std::time::Duration::from_secs(5*60))
+            .time_to_live(std::time::Duration::from_secs(self.config.readuntil.read_cache_ttl)) 
             // Time to idle (TTI): 3 minutes
-            .time_to_idle(std::time::Duration::from_secs(3*60))
+            .time_to_idle(std::time::Duration::from_secs(self.config.readuntil.read_cache_tti))
             // Create the cache.
             .build();
         
@@ -285,14 +323,18 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         tokio::spawn(async move {
             
             while let Some(read_id) = cache_queue_rx.recv().await {
+
+                // Previous implementation with ArcMutex HashMap
                 // let mut read_cache  = read_cache_clone.lock().await;
                 
-                // This log is useful to ensure cache is cleared continuously -
-                // seems to be a decent indicator of things going wrong in general
+                // Cache log is useful to ensure cache is cleared continuously -
+                // seems to be a decent indicator of things going wrong in 
+                // general. Note that the Moka cache entry count is only
+                // approximate and takes some time to sync, so the cached
+                // counts will stay the same for a little while
                 log::info!("Reads cached: {}", cache_clearance.entry_count());
 
                 cache_clearance.remove(&read_id).await;
-
             }
         
         });
@@ -306,7 +348,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
             while let Some((read_id, channel, number, cached)) = basecall_rx.recv().await {
                                 
                 let channel_index = (channel - 1) as usize;
-                let data = get_dorado_input_string(
+                let data = get_basecall_client_input(
                     read_id,
                     cached.concat(),
                     cached.len(),
@@ -613,64 +655,3 @@ impl AdaptiveSampling for AdaptiveSamplingService {
     }
 }
 
-// Initiates the process pipeline from configuration
-fn init_pipeline(config: &StreamfishConfig) -> Result<(ChildStdin, Lines<BufReader<ChildStdout>>), Status> {
-
-    log::info!("Spawning pipeline process...");
-
-    let stderr_file = match std::fs::File::create(config.dori.adaptive.stderr_log.clone()) {
-        Ok(file) => file,
-        Err(_) => return Err(Status::internal("Failed to create pipeline stderr file"))
-    };
-
-    let process_stderr = Stdio::from(stderr_file);
-
-    match config.dori.adaptive.basecaller {
-        Basecaller::Guppy => {
-            let mut pipeline_process = match Command::new(config.basecaller.client.path.as_os_str())
-                .args(config.basecaller.client.args.clone())
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(process_stderr)
-                .spawn() 
-            {
-                    Ok(process) => process,
-                    Err(_) => return Err(Status::internal("Failed to spawn pipeline process"))
-            };
-
-            let stdin = match pipeline_process.stdin.take() {
-                Some(stdin) => stdin,
-                None => return Err(Status::internal("Failed to open pipeline process stdin"))
-            };
-            let stdout = match pipeline_process.stdout.take() {
-                Some(stdout) => stdout,
-                None => return Err(Status::internal("Failed to open pipeline process stdout"))
-            };
-            
-            Ok((stdin, BufReader::new(stdout).lines()))
-
-        },
-        _ => unimplemented!("Dorado is not implemented yet!")
-    }
-    
-}
-
-pub struct FastxRecord {
-    pub channel: u32,
-    pub number: u32,
-    pub id: String,
-    pub seq: String
-}
-
-
-
-pub fn get_dorado_input_string(id: String, raw_data: Vec<u8>, chunks: usize, channel: u32, number: u32, offset: f32, range: f32, digitisation: u32, sample_rate: u32) -> String {
-
-    // UNCALBIRATED SIGNAL CONVERSON BYTES TO SIGNED INTEGERS
-    let mut signal_data: Vec<i16> = Vec::new();
-    for i in (0..raw_data.len()).step_by(2) {
-        signal_data.push(LittleEndian::read_i16(&raw_data[i..]));
-    }
-
-    format!("{}::{}::{}::{} {} {} {} {:.1} {:.11} {} {}\n", id, channel, number, chunks, channel, number, digitisation, offset, range, sample_rate, join(&signal_data, " ")) 
-}
