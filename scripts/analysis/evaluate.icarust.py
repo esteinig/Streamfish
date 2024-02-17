@@ -11,6 +11,7 @@ pip install typer ont-fast5-api seaborn matplotlib
 
 import typer
 import statistics
+import mappy 
 
 import pandas
 import seaborn as sns
@@ -25,6 +26,8 @@ from collections import Counter
 
 from pathlib import Path
 from ont_fast5_api.fast5_interface import get_fast5_file
+
+import pod5 as p5
 
 
 #####################
@@ -383,12 +386,17 @@ def create_reference_summary_dataframe(
 
     return df, df_combined, combined
 
-def get_region_data_paf(ends: Path, alignment: Path, targets: Path) -> Dict[str, ReferenceData]:
+def get_region_data_paf(ends: Path, alignment: Path, targets: Path | None, mmi: Path | None) -> Dict[str, ReferenceData]:
 
     # Get endreasons and target regions
     endreasons = get_endreasons(file=ends)
-    target_regions = pandas.read_csv(targets, sep="\t", header=None, names=["ref", "start", "end", "name"])
 
+    if targets:
+        target_regions = pandas.read_csv(targets, sep="\t", header=None, names=["ref", "start", "end", "name"])
+    else:
+        # If not targets are specified use Mappy to get the reference sequence names
+        target_regions = pandas.DataFrame([[seq, 0, 0, "none"] for seq in mappy.Aligner(str(mmi)).seq_names], columns=["ref", "start", "end", "name"])
+        
     # Run identifier
     run = alignment.name.split(".")[0]
 
@@ -400,7 +408,7 @@ def get_region_data_paf(ends: Path, alignment: Path, targets: Path) -> Dict[str,
         ) for _, row in target_regions.iterrows()
     }
 
-    # Add off_target data summary for each reference
+    # Add off_target data summary for each reference - only relevant if targets were provided
     for _, row in target_regions.iterrows():
         outside = f"{row['ref']}::0::0::off_target"
         if outside not in target_region_data.keys():
@@ -424,7 +432,7 @@ def get_region_data_paf(ends: Path, alignment: Path, targets: Path) -> Dict[str,
     # We therefore have to iterate over the PAF output twice - the first time
     # to identify reads with secondary alignments, and the second time to 
     # extract the correct data for those reads with secondary alignments -
-    # if they are prmary only we just go ahead with the standard conditions
+    # if they are primary only we just go ahead with the standard conditions
     
     reads_with_secondary_alignments = get_reads_with_secondary_alignments(alignment=alignment)
 
@@ -538,6 +546,7 @@ def evaluate_target_regions_for_reads_with_secondary_alignments(records: List[Pa
     # grouped by read identifier - this uses the primary (first) alignment to 
     # assign to the off_target reference, query name and length (sequence length)
     # are the same for all alignment records
+        
     if not mapped:
         region_data = target_region_data[f"{records[0].tname}::0::0::off_target"]
         if endreasons[records[0].qname] == 4:
@@ -610,7 +619,7 @@ app = typer.Typer(add_completion=False)
 
 
 @app.command()
-def endreason(
+def endreason_fast5(
     fast5: Path = typer.Option(
         ..., help="Directory of Fast5 files from Icarust to extract end-reason"
     ),
@@ -622,14 +631,47 @@ def endreason(
     Get a table of read identifiers and end reasons from Fast5 (Icarust v0.3.0)
     """
 
-    # TODO: multi-thread this - too slow on large datasets
-
     out_handle = output.open("w")
     out_handle.write("id,channel,number,endreason\n")
 
     for file in fast5.glob("*.fast5"):
         with get_fast5_file(file, mode="r") as f5:
             for read in f5.get_reads():
+                channel_attrs = dict(read.handle[read.global_key + 'channel_id'].attrs)
+                raw_attrs = dict(read.handle[read.global_key + 'Raw'].attrs)
+
+                read_id = read.read_id
+                read_channel = channel_attrs.get("channel_number")
+                read_number = raw_attrs.get("read_number")
+                read_endreason = raw_attrs.get("end_reason")
+
+                out_handle.write(f"{read_id},{read_channel},{read_number},{read_endreason}\n")
+
+    out_handle.close()
+
+
+
+@app.command()
+def endreason_pod5(
+    pod5: Path = typer.Option(
+        ..., help="Directory of Fast5 files from Icarust to extract end-reason"
+    ),
+    output: Path = typer.Option(
+        ..., help="Output table in CSV"
+    )
+):
+    """
+    Get a table of read identifiers and end reasons from Fast5 (Icarust v0.3.0)
+    """
+
+    out_handle = output.open("w")
+    out_handle.write("id,channel,number,endreason\n")
+
+    # TODO
+    for file in pod5.glob("*.pod5"):
+        with p5.Reader(file) as reader:
+            for read in reader.reads():
+
                 channel_attrs = dict(read.handle[read.global_key + 'channel_id'].attrs)
                 raw_attrs = dict(read.handle[read.global_key + 'Raw'].attrs)
 
@@ -657,7 +699,10 @@ def evaluation(
         ..., help="PAF file from alignment with minimap2"
     ),
     target_regions: Path = typer.Option(
-        ..., help="Target regions file for the experiment"
+        None, help="Target regions file for the experiment"
+    ),
+    mmi: Path = typer.Option(
+        None, help="Target regions file for the experiment"
     ),
     plots_prefix: str = typer.Option(
         None, help="Prefix for plot names"
@@ -675,8 +720,11 @@ def evaluation(
     """
     Get a table of read identifiers and end reasons from Fast5 (Icarust v0.3.0)
     """
-       
-    active_summary = get_region_data_paf(ends=active_ends, alignment=active_paf, targets=target_regions)
+    
+    if not target_regions and not mmi:
+        raise ValueError("If no target region file is used, a reference index of simulated sequences must be provided")
+
+    active_summary = get_region_data_paf(ends=active_ends, alignment=active_paf, targets=target_regions, mmi=mmi)
     
     control_summary = None
     if control_paf and control_ends:
@@ -798,7 +846,7 @@ def plot_comparison(
         p = sns.violinplot(data=df, x="read_length", y="label", ax=ax, alpha=0.8, palette=colors, cut=0, scale="count")
         p = sns.stripplot(data=df, x="read_length", y="label", size=1, ax=ax, alpha=0.2, palette=["lightgray"], legend=False)
         
-        ax.set_ylabel('Read counts\n')
+        ax.set_ylabel('\n')
         ax.set_xlim(0, max(length_data['read_length']) + 100)
         sns.despine()
         ax.grid(False)
@@ -900,9 +948,8 @@ def plot_summaries(
 
     df = pandas.DataFrame([o.__dict__ for o in ref_summaries])
     df = df.sort_values(by="run")
-
+    
     df = df.drop(["all_lengths_pass", "all_lengths_unblocked", "all_mapq_pass", "all_mapq_unblocked"], axis=1)
-
 
     with pandas.option_context(
         'display.max_rows', None,

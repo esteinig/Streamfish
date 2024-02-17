@@ -1,72 +1,71 @@
 #!/usr/env/bash
 
-# =============================
-# ICARUST EXPERIMENT EVALUATION
-# =============================
+# ====================================
+# ICARUST SINGLE EXPERIMENT EVALUATION
+# ====================================
 
-# Run on host - uses containers to execute basecalling and other specific tasks. The following steps
-# require the container network to be configured and executed in development mode, for example:
-
-# docker compose -f docker/docker-compose.yml --profile dev --project-name main --env-file docker/.env up
-
-# Enter the evaluation container and execute the script on the correct input paths and settings (see below)
-
-# =============================
-# STEP 1: DORADO BASECALLING
-# =============================
-
-
-
+# Output directory for Fast5 from Icarust
 FAST5_ACTIVE_DIR=$1
+
+# Analysis identifier to create directory
 ANALYSIS_ID=$2
 
+# Optional target regions file if targets were provided 
+# Must also be provided if taregt string were set in the Streamfish configuration file
+TARGET_REGIONS=""
+
+# Output analysis directory for intermediary file outputs and results
 ANALYSIS_DIR="/data/storage/streamfish_benchmarks/${ANALYSIS_ID}"
-TARGET_REGIONS="/tmp/target.tsv"
 
-MAPPING_REFERENCE='/tmp/chm13v2_chr1_chr2.mmi'
-DORADO_FST_MODEL='/tmp/models/dna_r9.4.1_e8_fast@v3.4'
+# Reference of sequences used for simulation
+SIMULATION_INDEX='/tmp/viruses.mmi'
 
-# FAST5_CONTROL_DIR="/tmp/test_bacteria/test/20230711_0611_XIII_FAQ12345_5ef1fa3b9/fast5_pass/"
+# Model for Dorado to basecall Fast5 files
+DORADO_MODEL='/tmp/models/dna_r9.4.1_e8_fast@v3.4'
 
 # Micromamba shenanigans
 micromamba shell init -s bash -p ~/micromamba
 source ~/.bashrc
-
-if [ ! -d "$HOME/micromamba/envs/icarust_evaluation" ]; then
-    micromamba create -f /usr/src/streamfish/scripts/analysis/evaluate.icarust.yml -y
+if [ ! -d "$HOME/micromamba/envs/icarust_simulation" ]; then
+    micromamba create -f /usr/src/streamfish/scripts/analysis/icarust.simulation.yml -y
 fi
-
+# Analysis directory setuo
 if [ ! -d "$ANALYSIS_DIR" ]; then
     mkdir $ANALYSIS_DIR
 else
     echo "Analysis directory already exists. Overwriting analysis in directory: $ANALYSIS_DIR"
 fi
 
-echo "Running analysis on: $FAST5_ACTIVE_DIR"
+# Analysis start
+echo "Running with Fast5 files in: $FAST5_ACTIVE_DIR"
 
-micromamba activate icarust_evaluation
+micromamba activate icarust_simulation
 
-# Still uses modified fork - update to latest version
-# dorado basecaller --verbose --batchsize 0 --reference ${MAPPING_REFERENCE} -k 15 -w 10 -g 16 --batch-timeout 100000 --num-runners 2 --emit-sam ${DORADO_FST_MODEL} ${FAST5_ACTIVE_DIR} > ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.fst.sam
-# dorado basecaller --verbose --batchsize 0 --reference ${MAPPING_REFERENCE} -k 15 -w 10 -g 16 --batch-timeout 100000 --num-runners 2 --emit-sam ${DORADO_FST_MODEL} ${FAST5_CONTROL_DIR} > ${ANALYSIS_DIR}/${ANALYSIS_ID}.control.fst.sam
-
-dorado basecaller --verbose --batchsize 0 --batch-timeout 100000 --num-runners 2 --emit-fastq ${DORADO_FST_MODEL} ${FAST5_ACTIVE_DIR} > ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.fst.fq 
-minimap2 -cx map-ont ${MAPPING_REFERENCE} ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.fst.fq > ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.fst.paf
+dorado basecaller --verbose --emit-fastq ${DORADO_MODEL} ${FAST5_ACTIVE_DIR} > ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.fq 
+minimap2 -cx map-ont ${SIMULATION_INDEX} ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.fq > ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.paf
 
 # Gather the unblocked read identifiers
-python /usr/src/streamfish/scripts/analysis/evaluate.icarust.py endreason --fast5 ${FAST5_ACTIVE_DIR} --output ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.endreasons.csv
+python /usr/src/streamfish/scripts/analysis/evaluate.icarust.py endreason-fast5 --fast5 ${FAST5_ACTIVE_DIR} --output ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.endreasons.csv
 
-# python /usr/src/streamfish/scripts/analysis/evaluate.icarust.py endreason --fast5 ${FAST5_CONTROL_DIR} --output ${ANALYSIS_DIR}/${ANALYSIS_ID}.control.endreasons.csv
+if [ ! -d "$TARGET_REGIONS" ]; then
+    echo "No target region file provided, using all reference sequence present in the simulation index as targets"
+    python /usr/src/streamfish/scripts/analysis/evaluate.icarust.py evaluation \
+        --summary-table ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.summary.csv \
+        --active-paf ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.paf \
+        --active-ends ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.endreasons.csv \
+        --plots-prefix ${ANALYSIS_DIR}/${ANALYSIS_ID} \
+        --mmi ${SIMULATION_INDEX} \
+        --summary-json ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.summary.json
+else 
+    echo "Target region file provided, using targets as specified in: $TARGET_REGIONS"
+    python /usr/src/streamfish/scripts/analysis/evaluate.icarust.py evaluation \
+        --summary-table ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.summary.csv \
+        --active-paf ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.paf \
+        --active-ends ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.endreasons.csv \
+        --plots-prefix ${ANALYSIS_DIR}/${ANALYSIS_ID} \
+        --target-regions $TARGET_REGIONS \
+        --summary-json ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.summary.json
+fi
 
-python /usr/src/streamfish/scripts/analysis/evaluate.icarust.py evaluation \
-    --summary-table ${ANALYSIS_DIR}/${ANALYSIS_ID}.summary.csv \
-    --active-paf ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.fst.paf \
-    --active-ends ${ANALYSIS_DIR}/${ANALYSIS_ID}.active.endreasons.csv \
-    --plots-prefix ${ANALYSIS_DIR}/${ANALYSIS_ID} \
-    --target-regions ${TARGET_REGIONS} \
-    --summary-json ${ANALYSIS_DIR}/${ANALYSIS_ID}.summary.json  # \
-    # --control-sam ${ANALYSIS_DIR}/${ANALYSIS_ID}.control.fst.sam \
-    # --control-ends ${ANALYSIS_DIR}/${ANALYSIS_ID}.control.endreasons.csv \
-    # --control-output ${ANALYSIS_DIR}/${ANALYSIS_ID}.control.summary.csv
 
 

@@ -36,16 +36,21 @@ impl IcarustRunner {
             log::error!("IcarustRunner: channel sizes of Icarust configuration ({}) and Streamfish ReadUntil configuration ({}) do not match", icarust.config.parameters.channels, config.readuntil.channels);
             std::process::exit(1);
         }
-
         if icarust.config.parameters.manager_port != config.icarust.manager_port {
             log::error!("IcarustRunner: manager port of Icarust configuration ({}) and Streamfish Icarust configuration ({}) do not match", icarust.config.parameters.manager_port, config.icarust.manager_port );
             std::process::exit(1);
         }
-
         if icarust.config.parameters.position_port != config.icarust.position_port {
             log::error!("IcarustRunner: position port of Icarust configuration ({}) and Streamfish Icarust configuration ({}) do not match", icarust.config.parameters.position_port, config.icarust.position_port );
             std::process::exit(1);
         }
+        if let Some(sample_rate_icarust) = icarust.config.parameters.sample_rate {
+            if sample_rate_icarust as u32 != config.icarust.sample_rate {
+                log::error!("IcarustRunner: sample rate of Icarust configuration ({}) and Streamfish Icarust configuration ({}) do not match", sample_rate_icarust, config.icarust.sample_rate );
+                std::process::exit(1);
+            }
+        }
+        
 
         Self { icarust, config: config.clone() }
     }
@@ -81,17 +86,8 @@ impl StreamfishBenchmark {
         let icarust_config = load_toml(&self.icarust_config);
 
         log::info!("Creating benchmark directory: {}", &self.outdir.display());
-        if self.outdir.exists() && !force {
-            log::error!("Benchmark run directory exists");
-            std::process::exit(1)
-        } else if self.outdir.exists() && force {
-            log::error!("Benchmark run directory exists and force is activated - recreating directory tree!");
-            std::fs::remove_dir_all(self.outdir.clone()).map_err(
-                |_| ClientError::StreamfishBenchmarkDirectoryDelete(self.outdir.display().to_string())
-            )?;
-            std::fs::create_dir_all(self.outdir.clone()).map_err(
-                |_| ClientError::StreamfishBenchmarkDirectory(self.outdir.display().to_string())
-            )?;
+        if self.outdir.exists() {
+            log::warn!("Benchmark run directory exists, continue with benchmark groups");
         } else {
             std::fs::create_dir_all(self.outdir.clone()).map_err(
                 |_| ClientError::StreamfishBenchmarkDirectory(self.outdir.display().to_string())
@@ -108,9 +104,17 @@ impl StreamfishBenchmark {
             
             // Create the benchmark output directories using their prefixes
             let group_dir = self.outdir.join(&group.prefix);
+            
             if group_dir.exists() && !force {
-                log::error!("Benchmark group directory already exists");
-                std::process::exit(1)
+                log::warn!("Benchmark group directory exists");
+            } else if group_dir.exists() && force {
+                log::error!("Benchmark group directory exists and force is activated, recreating directory tree");
+                std::fs::remove_dir_all(group_dir.clone()).map_err(
+                    |_| ClientError::StreamfishBenchmarkDirectoryDelete(group_dir.display().to_string())
+                )?;
+                std::fs::create_dir_all(group_dir.clone()).map_err(
+                    |_| ClientError::StreamfishBenchmarkDirectory(group_dir.display().to_string())
+                )?;
             } else {
                 std::fs::create_dir_all(&group_dir).map_err(
                     |_| ClientError::StreamfishBenchmarkDirectory(group_dir.display().to_string())
@@ -128,8 +132,16 @@ impl StreamfishBenchmark {
 
                 let benchmark_dir = group_dir.join(&benchmark.prefix);
                 if benchmark_dir.exists() && !force {
-                    log::error!("Benchmark directory already exists");
-                    std::process::exit(1)
+                    log::error!("Benchmark directory already exists, skipping benchmark");
+                    continue;
+                } else if benchmark_dir.exists() && force {
+                    log::warn!("Benchmark directory exists and force is activated, recreating directory");
+                    std::fs::remove_dir_all(group_dir.clone()).map_err(
+                        |_| ClientError::StreamfishBenchmarkDirectoryDelete(group_dir.display().to_string())
+                    )?;
+                    std::fs::create_dir_all(group_dir.clone()).map_err(
+                        |_| ClientError::StreamfishBenchmarkDirectory(group_dir.display().to_string())
+                )?;
                 } else {
                     std::fs::create_dir_all(&benchmark_dir).map_err(
                         |_| ClientError::StreamfishBenchmarkDirectory(benchmark_dir.display().to_string())

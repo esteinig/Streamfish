@@ -1,4 +1,4 @@
-name: icarust_evaluation
+name: icarust_simulation
 channels:
   - conda-forge
   - bioconda
@@ -10,7 +10,9 @@ dependencies:
   - pip:
     - matplotlib
     - ont-fast5-api
+    - pod5
     - seaborn
     - typer
     - pandas
     - pafpy
+    - mappy

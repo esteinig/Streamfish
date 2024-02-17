@@ -4,7 +4,11 @@ use clap::{Args, Parser, Subcommand};
 /// Streamfish: a streamy adaptive sampling client
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
+#[command(styles=get_styles())]
+#[command(arg_required_else_help(true))]
 #[clap(name = "streamfish", version)]
+
+
 pub struct App {
     #[clap(flatten)]
     pub global: GlobalOptions,
@@ -68,7 +72,6 @@ pub struct BenchmarkArgs {
 
 #[derive(Debug, Args)]
 pub struct AddDeviceArgs {
-
     /// TOML configuration file for Streamfish
     #[clap(long, short)]
     pub config: PathBuf,
@@ -97,4 +100,34 @@ pub struct GlobalOptions {
     /// Verbosity level (can be specified multiple times)
     #[clap(long, short, global = true, default_value="0")]
     pub verbose: usize,
+}
+
+
+
+pub fn get_styles() -> clap::builder::Styles {
+	clap::builder::Styles::styled()
+        .error(
+            anstyle::Style::new()
+            .bold()
+            .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Red))),
+        )
+        .invalid(
+            anstyle::Style::new()
+            .bold()
+            .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Red))),
+        )
+		.header(
+			anstyle::Style::new()
+				.underline()
+				.fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Yellow))),
+		)
+        .usage(
+			anstyle::Style::new()
+				.underline()
+				.fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Yellow))),
+		)
+		.literal(
+			anstyle::Style::new()
+				.fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green))),
+		)
 }

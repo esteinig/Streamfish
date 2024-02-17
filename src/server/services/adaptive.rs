@@ -332,7 +332,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                 // general. Note that the Moka cache entry count is only
                 // approximate and takes some time to sync, so the cached
                 // counts will stay the same for a little while
-                log::info!("Reads cached: {}", cache_clearance.entry_count());
+                log::debug!("Reads cached: {}", cache_clearance.entry_count());
 
                 cache_clearance.remove(&read_id).await;
             }

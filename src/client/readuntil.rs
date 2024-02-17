@@ -77,7 +77,7 @@ impl ClientLog {
 }
 
 fn send_termination_signal(sender: &UnboundedSender<ClientErrorSignal>, error: ClientError, delay: u64) -> ClientError {
-    sender.send(ClientErrorSignal {  }).map_err(|_| return ClientError::ShutdownQueueSend).unwrap();
+    sender.send(ClientErrorSignal {  }).map_err(|_| ClientError::ShutdownQueueSend).unwrap();
 
     // Termination signal has been sent to the termination thread  give it some time to execute and then terminate 
     // the function - this will bubble up and error (main errors) or respond with a configured termination response
@@ -172,7 +172,13 @@ impl ReadUntilClient {
         for (group_config, benchmark_config, streamfish_config, icarust_config) in run_configs {
             log::info!("Benchmark: group={} prefix={} uuid={}", &group_config.prefix, &benchmark_config.prefix, &benchmark_config.uuid);
 
-            let result = self.run_cached(streamfish_config, Some(icarust_config), Some(benchmark_config.uuid.clone()), Termination::BenchmarkError).await;
+            let result = self.run_cached(
+                streamfish_config, 
+                Some(icarust_config), 
+                Some(benchmark_config.uuid.clone()),
+                Termination::BenchmarkError
+                ).await;
+
             match result {
                 Err(ClientError::BenchmarkTerminationError) => {
                     log::info!("Completed benchmark {}",  benchmark_config.uuid);
@@ -194,7 +200,11 @@ impl ReadUntilClient {
         }
 
         let completed = Utc::now() - start;
-        log::info!("Completed benchmarks in: {:0>2}m {:0>2}s", (completed.num_seconds() / 60) % 60, completed.num_seconds() % 60);
+        log::info!(
+            "Completed benchmarks in: {:0>2}m {:0>2}s",
+            (completed.num_seconds() / 60) % 60, 
+            completed.num_seconds() % 60
+        );
 
         log::info!("Exiting benchmark process... ");
         std::process::exit(0);

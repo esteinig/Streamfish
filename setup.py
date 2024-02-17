@@ -16,5 +16,5 @@ setup(
     """,
     version="0.1.0",
     license="MIT",
-    description="Deepfish is a platform to train and evaluate neural networks for nanopore signal classification",
+    description="Deepfish is a platform to train and evaluate neural network architectures for nanopore signal classification from complex microbial communities",
 )

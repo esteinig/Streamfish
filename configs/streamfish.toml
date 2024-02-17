@@ -24,7 +24,7 @@ tcp_port                                = 10002                                 
 minknow_host                            = "127.0.0.1"                                                        # Host port of control server (MinKNOW or Icarust) for access from Dori - if forwarded to container the value is `minknow_host` (docker/docker-compose.dev.yml)
 minknow_port                            = 10000                                                              # Manager service port on `minknow_host` - this matches the `minknow.port` above but can be alternatively configured inside container
 classifier                              = "minimap2-rs"                                                      # Classifier for adaptive sampling algorithm running on Dori [`minimap2-rs`]
-basecaller                              = "guppy"                                                            # Basecaller fpr adapitve sampling algorithm running through Dori [`guppy`]
+basecaller                              = "guppy"                                                            # Basecaller for adaptive sampling algorithm running through Dori [`guppy`, `dorado`]
 stderr_log                              = "/tmp/dori.adaptive.stderr"                                        
 
 # Dori server - dynamic feedback service 
@@ -43,15 +43,15 @@ stderr_log                              = "/tmp/dori.dynamic.stderr"
 path                                    = "/data/opt/conda/envs/dorado_basecall_server/bin/python"           # "/home/esteinig/micromamba/envs/guppy/bin/python"
 script                                  = "/data/dev/meta-gp/reefsquid/scripts/basecaller/ont_client.py"     # "/usr/src/streamfish/scripts/guppy/guppy_client.py"
 address                                 = "ipc:///tmp/.basecaller_local/5556"
-config                                  = "dna_r9.4.1_450bps_fast"
-throttle                                = 0.01                                                               # Receiver throttle for requests for completed reads
+config                                  = "dna_r10.4.1_e8.2_400bps_5khz_fast"
+throttle                                = 0.01                                                               # Receiver throttle on requests for completed reads
 threads                                 = 4     # default: 4
 max_reads_queued                        = 2000  # default: 2000
 
 [basecaller.server]
-path                                    = "/opt/ont/guppy/bin/guppy_basecall_server" 
+path                                    = "/opt/ont/guppy/bin/guppy_basecall_server"                         # `guppy`
 port                                    = "/tmp/.basecaller_local/5556"
-config                                  = "dna_r9.4.1_450bps_fast.cfg"
+config                                  = "dna_r10.4.1_e8.2_400bps_5khz_fast.cfg"
 num_callers                             = 4     # default: 4
 chunks_per_runner                       = 160   # default: 160
 threads                                 = 4     # default: 4
@@ -61,7 +61,7 @@ device                                  = "cuda:all"
 log_path                                = "/tmp/basecaller.log"
 stderr_log                              = "/tmp/basecaller.stderr"
 
-# Adaptive sampling routin and logic configuration
+# Adaptive sampling routine and logic configuration
 
 [readuntil]
 device_name                             = "MS12345"
@@ -73,7 +73,7 @@ dori_tcp_host                           = 'dori-dev'                            
 dori_tcp_port                           = 10002                                                              # '10002' when running client inside container, otherwise '10002' (port forwarded from inside container) - no changes necessary, should match `dori.tcp_port`
 read_cache                              = true
 read_cache_min_chunks                   = 1
-read_cache_max_chunks                   = 1                 
+read_cache_max_chunks                   = 16                 
 read_cache_max_capacity                 = 100000
 read_cache_ttl                          = 300
 read_cache_tti                          = 180
@@ -82,8 +82,8 @@ action_throttle                         = 0                                     
 unblock_duration                        = 0.1
 sample_minimum_chunk_size               = 200
 accepted_first_chunk_classifications    = [83, 65]
-unblock_all                             = true
-unblock_all_mode                        = "mapper"
+unblock_all                             = false
+unblock_all_mode                        = "mapper"                                                           # `client`, `server`, `basecaller`, `mapper`
 unblock_all_chunk_file                  = ""                                                                 # If unblock all set to 'client', write each received chunk as input string to file. Strings can be submitted with the basecall client script. Do not use this during client-side latency benchmarks.
 launch_dori_server                      = true
 launch_basecall_server                  = true
@@ -95,12 +95,12 @@ launch_basecall_server                  = true
 enabled                                 = true                                                               # Uses MinKNOW configuration of host, port and certificate
 manager_port                            = 10000
 position_port                           = 10001                                                              # Required position port to connect to device
-sample_rate                             = 4000                                                               # Sample rate is currently not configurable in Icarust, must be manually specified for DeviceService calibration getter
-config                                  = '/data/dev/meta-gp/reefsquid/configs/icarust/test_human/test.toml'                                                # Path to config file if launching as part of the adaptive sampling run
+sample_rate                             = 5000                                                               # Sample rate is now configurable in Icarust; currently still needs to be manually specified for DeviceService calibration getter - is checked for congruency in Icarust configuration file
+config                                  = '/data/dev/meta-gp/reefsquid/configs/icarust/test_virus/test.toml' # Path to config file if launching as part of the adaptive sampling run
 launch                                  = true
 delay                                   = 30                                                                 # Seconds to wait to start generating data after launching Icarust
 runtime                                 = 180                                                                # Seconds to run the data generation loop before ceasing
-task_delay                              = 5                                                                  # Seconds to wait after launchign Icarust before launching Streamfish
+task_delay                              = 10                                                                 # Seconds to wait after launching Icarust task - Icarust needs some time for loading squiggles before connections can be established, increase this to avoid connection failure
 
 
 # Adaptive sampling experiment configuration
@@ -109,9 +109,9 @@ task_delay                              = 5                                     
 control                                 = false
 mode                                    = 'mapping'
 type                                    = 'targeted_sequencing'
-reference                               = '/tmp/chm13v2_chr1_chr2.mmi'
+reference                               = '/tmp/viruses.mmi'
 min_match_len                           = 0                                                                    # minimum matched mapping length
-targets                                 = ["chr1"]                                                             # empty to target all sequences  - target position range, 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
+targets                                 = ["NC_045512.2"]                                                      # empty to target all sequences  - target position range, 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
 target_file                             = ""                                                                   # optional - overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed
 
 # Dynamic feedback loop configuration
@@ -121,4 +121,4 @@ enabled                                 = false
 launch_server                           = true
 interval_seconds                        = 10
 cache_capacity                          = 10000
-test_targets                            = ["chr1", "chr2"]
+test_targets                            = ["NC_045512.2", "NC_063383.1"]

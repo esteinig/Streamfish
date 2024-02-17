@@ -24,28 +24,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /usr/src/dorado 
 
-ADD https://github.com/Kitware/CMake/releases/download/v3.27.0-rc3/cmake-3.27.0-rc3-linux-x86_64.sh /cmake-3.27.0-rc3-linux-x86_64.sh 
-RUN mkdir /opt/cmake
-RUN sh /cmake-3.27.0-rc3-linux-x86_64.sh --prefix=/opt/cmake --skip-license
-RUN ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake
-RUN cmake --version
+# RUN curl https://github.com/Kitware/CMake/releases/download/v3.27.0-rc3/cmake-3.27.0-rc3-linux-x86_64.sh --output /cmake-3.27.0-rc3-linux-x86_64.sh 
+# RUN mkdir /opt/cmake
+# RUN sh /cmake-3.27.0-rc3-linux-x86_64.sh --prefix=/opt/cmake --skip-license
+# RUN ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake
+# RUN cmake --version
 
+ADD https://cdn.oxfordnanoportal.com/software/analysis/dorado-0.5.3-linux-x64.tar.gz dorado-0.5.3-linux-x64.tar.gz
+RUN tar xf dorado-0.5.3-linux-x64.tar.gz
+RUN ln -s /usr/src/dorado/dorado-0.5.3-linux-x64/bin/dorado /usr/local/bin/dorado 
 
-# Needed for Dori development container for running
-# server inside Dorado compatible environment -
-# this uses the Dori STDIN fork (Dorado v0.3.1)
+# Switching back to Dorado release versions
 
-# This uses the latest commit checkout specifically due to need to rebuild image for this
+# Fails with `libdorado_torch_lib.so` errors in this image build
 
-RUN git clone --single-branch --branch dori-stdin-v0.3.1 https://github.com/esteinig/dorado && \   
-    cd dorado && git checkout 9815dd9886e9dbffcf4fae82692e95bfa5d71e87 && \
-    git config --global --add safe.directory "*" && \
-    cmake -S . -B cmake-build && \
-    cmake --build cmake-build --config Release -j4 && \ 
-    cmake --install cmake-build --prefix /opt/dorado 
+# RUN git clone --single-branch --branch v0.3.3 https://github.com/nanoporetech/dorado && \   
+#     cd dorado && \
+#     git config --global --add safe.directory "*" && \
+#     cmake -S . -B cmake-build && \
+#     cmake --build cmake-build --config Release -j4 && \ 
+#     cmake --install cmake-build --prefix /opt/dorado 
 
-RUN ln -s /opt/dorado/bin/dorado /usr/local/bin/dorado
-
+# RUN ln -s /opt/dorado/bin/dorado /usr/local/bin/dorado
 
 # Host user 
 USER ${USERNAME}

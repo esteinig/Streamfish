@@ -19,7 +19,7 @@ icarust_config      = "/data/dev/meta-gp/reefsquid/configs/icarust/test_human/te
 # Guppy Model
 
 [[group]]
-prefix                              = "guppy_model_unblock_all"
+prefix                              = "dorado_model_unblock_all"
 description                         = "Test benchmark of the baseline Streamfish/Icarust configuration across unblock-all modes and basecaller models with Dorado"
 
 [[group.benchmark]]
