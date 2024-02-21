@@ -127,9 +127,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
         // Adaptive sampling experiment configuration
         let experiment = self.config.experiment.experiment.clone();
-
         let mapping_config = experiment.get_mapping_config();
-
         log::info!("Loaded mapping configuration");
 
         // Define the decisions as <i32> - repeated into() calls in the stream processing
@@ -298,7 +296,12 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         
         // Read chunk cache for storing consecutive chunks of raw signal for re-evaluation
 
+        // Timed read chunk cache is because we do not react to responses from actions requests
+        // where the original ReadUntil API is configured to clear cache entries on successful 
+        // no further data actions - instead we simply let the cache entries expire for now
+
         // Previous implementation with ArcMutex HashMap:
+
         // let read_cache: Arc<Mutex<HashMap<String, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
         // let read_cache_clone = Arc::clone(&read_cache);
 
@@ -507,8 +510,9 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                         line_counter += 1;
                         continue;
                     }
+                    
 
-                    if let Err(_) = alignment_tx.send(
+                    if let Err(err) = alignment_tx.send(
                         FastxRecord {
                             channel: current_channel,
                             number: current_number,
@@ -516,7 +520,7 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                             id: current_id.clone()
                         }
                     ).await {
-                        log::warn!("Failed to send sequence record to alignment queue")
+                        log::warn!("Failed to send sequence record to alignment queue ({})", err.to_string());
                     }
 
                     line_counter += 1;
@@ -558,9 +562,8 @@ impl AdaptiveSampling for AdaptiveSamplingService {
         // =========================
         
         tokio::spawn(async move {
-
-            // This might silently fail if reference does not exist - run checks on config builder! [TODO]
-
+            
+            // This might silently fail if reference does not exist - check file exists in config builder
             let aligner = match Aligner::builder().map_ont().with_index(run_config_2.experiment.reference.clone(), None) {
                 Ok(aligner) => {
                     log::info!("Built the aligner for: {:?}", run_config_2.experiment.reference.display());

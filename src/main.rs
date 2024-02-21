@@ -42,7 +42,7 @@ async fn main() -> Result<(), StreamfishError> {
                 },
                 None => {
                     if config.readuntil.read_cache {
-                        client.run_cached(config, None, None, Termination::ProcessExit).await?;
+                        client.run_cached(config, None, Termination::ProcessExit).await?;
                     } else {
                         unimplemented!("Streaming RPC not implemented")
                     }

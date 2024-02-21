@@ -136,7 +136,7 @@ impl ReadUntilClient {
             log::info!("{}", &slice_dice.slice[i]);
 
             let handle = tokio::spawn(async move {
-                client.run_cached(slice_cfg, None, None, Termination::SliceError).await?;  // run the slice config
+                client.run_cached(slice_cfg, None, Termination::SliceError).await?;  // run the slice config
                 Ok::<(), ClientError>(())
             });
             task_handles.push(handle);
@@ -175,7 +175,6 @@ impl ReadUntilClient {
             let result = self.run_cached(
                 streamfish_config, 
                 Some(icarust_config), 
-                Some(benchmark_config.uuid.clone()),
                 Termination::BenchmarkError
                 ).await;
 
@@ -212,7 +211,7 @@ impl ReadUntilClient {
         Ok(())
     }
 
-    pub async fn run_cached(&self, config: StreamfishConfig, icarust_config: Option<IcarustConfig>, run_id: Option<String>, termination: Termination) -> Result<(), ClientError> {
+    pub async fn run_cached(&self, mut config: StreamfishConfig, icarust_config: Option<IcarustConfig>, termination: Termination) -> Result<(), ClientError> {
 
         let (shutdown_tx, mut shutdown_rx): (UnboundedSender<ClientErrorSignal>, UnboundedReceiver<ClientErrorSignal>) = tokio::sync::mpsc::unbounded_channel();
         let (terminate_tx, mut terminate_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -229,7 +228,7 @@ impl ReadUntilClient {
             (true, true) => {
 
                 log::info!("Creating IcarustRunner...");
-                let icarust_runner = IcarustRunner::new(&config, icarust_config, run_id);
+                let icarust_runner = IcarustRunner::new(&mut config, icarust_config);
 
                 log::info!("Icarust data delay is: {} seconds", &config.icarust.delay);
                 log::info!("Icarust data runtime is: {} seconds", &config.icarust.runtime);
@@ -244,7 +243,7 @@ impl ReadUntilClient {
                     })?;
                     
                     log::info!("Sending termination signal after Icarust completion");
-                    send_termination_signal(&icarust_shutdown_tx, ClientError::ControlServerConnectionTermination, 0);
+                    send_termination_signal(&icarust_shutdown_tx, ClientError::ControlServerConnectionTermination, 0); // Wait until write out thread has finished (10 seconds)
 
                     Ok::<(), ClientError>(())
 

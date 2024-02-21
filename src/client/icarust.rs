@@ -14,42 +14,38 @@ pub struct IcarustRunner {
     pub config: StreamfishConfig
 }
 impl IcarustRunner {
-    pub fn new(config: &StreamfishConfig, icarust_config: Option<IcarustConfig>, run_id: Option<String>) -> Self {
+    pub fn new(config: &mut StreamfishConfig, icarust_config: Option<IcarustConfig>) -> Self {
 
         // Streamfish and Icarust are configured in two distinct files
         // we need to do some checks to ensure that settings are
         // matching between the configurations
 
         let icarust = match icarust_config {
-            Some(config) => Icarust {
-                output_path: config.output_path.clone(), // uses the direct output path configured, rather than the constructed one
-                run_id: match run_id {
-                    Some(id) => id,
-                    None => panic!("Must provide run identifier when providing Icarust configuration without file")
-                },
-                config,
-            },
-            None => Icarust::from_toml(&config.icarust.config)
-        };
+            Some(icarust_config) => Icarust { config: icarust_config },
+            None => Icarust::from_toml(&config.icarust.config, None),
+        }; // output path configured in toml
+
+        // Set the sampling rate of the 
 
         if icarust.config.parameters.channels != config.readuntil.channels as usize {
             log::error!("IcarustRunner: channel sizes of Icarust configuration ({}) and Streamfish ReadUntil configuration ({}) do not match", icarust.config.parameters.channels, config.readuntil.channels);
             std::process::exit(1);
         }
-        if icarust.config.parameters.manager_port != config.icarust.manager_port {
-            log::error!("IcarustRunner: manager port of Icarust configuration ({}) and Streamfish Icarust configuration ({}) do not match", icarust.config.parameters.manager_port, config.icarust.manager_port );
+        if icarust.config.server.manager_port != config.icarust.manager_port {
+            log::error!("IcarustRunner: manager port of Icarust configuration ({}) and Streamfish Icarust configuration ({}) do not match", icarust.config.server.manager_port, config.icarust.manager_port );
             std::process::exit(1);
         }
-        if icarust.config.parameters.position_port != config.icarust.position_port {
-            log::error!("IcarustRunner: position port of Icarust configuration ({}) and Streamfish Icarust configuration ({}) do not match", icarust.config.parameters.position_port, config.icarust.position_port );
+        if icarust.config.server.position_port != config.icarust.position_port {
+            log::error!("IcarustRunner: position port of Icarust configuration ({}) and Streamfish Icarust configuration ({}) do not match", icarust.config.server.position_port, config.icarust.position_port);
             std::process::exit(1);
         }
-        if let Some(sample_rate_icarust) = icarust.config.parameters.sample_rate {
-            if sample_rate_icarust as u32 != config.icarust.sample_rate {
-                log::error!("IcarustRunner: sample rate of Icarust configuration ({}) and Streamfish Icarust configuration ({}) do not match", sample_rate_icarust, config.icarust.sample_rate );
-                std::process::exit(1);
-            }
-        }
+
+        // We set the sampling rate manually because the device service implementation does not support it,
+        // Icarust fork parses it from the simulation Slow5/Blow5 header and we simply transfer it to the 
+        // Streamfish Dori adaptive sampling service config:
+
+        config.icarust.sample_rate = icarust.config.simulation.sampling_rate as u32;
+        log::info!("Sample rate for adaptive sampling service set using Icarust configuration: {} Hz", config.icarust.sample_rate);
         
 
         Self { icarust, config: config.clone() }
@@ -131,10 +127,13 @@ impl StreamfishBenchmark {
                 log::info!("Benchmark: prefix={} uuid={}", benchmark.prefix, benchmark.uuid);
 
                 let benchmark_dir = group_dir.join(&benchmark.prefix);
+
                 if benchmark_dir.exists() && !force {
                     log::error!("Benchmark directory already exists, skipping benchmark");
                     continue;
-                } else if benchmark_dir.exists() && force {
+                } 
+                
+                if benchmark_dir.exists() && force {
                     log::warn!("Benchmark directory exists and force is activated, recreating directory");
                     std::fs::remove_dir_all(group_dir.clone()).map_err(
                         |_| ClientError::StreamfishBenchmarkDirectoryDelete(group_dir.display().to_string())
@@ -147,6 +146,7 @@ impl StreamfishBenchmark {
                         |_| ClientError::StreamfishBenchmarkDirectory(benchmark_dir.display().to_string())
                     )?;
                 }
+
                 benchmark.path = benchmark_dir.clone();
 
                 // Create a mutable clone of the Streamfish and Icarust configuratiosn for each benchmark
@@ -154,8 +154,8 @@ impl StreamfishBenchmark {
                 let mut benchmark_icarust = icarust_config.clone();
 
 
-                // Set the Icarust output path for the Fast5 files
-                benchmark_icarust.output_path = benchmark_dir.join("fast5");
+                // Set the Icarust output path for the Blow5 files
+                benchmark_icarust.outdir = benchmark_dir.join("blow5");
 
 
                 // Configure the benchmark options

@@ -49,12 +49,14 @@ pub struct IcarustConfig {
     pub enabled: bool,
     pub manager_port: u32,
     pub position_port: u32,
-    pub sample_rate: u32,
     pub config: PathBuf,
     pub launch: bool,
     pub delay: u64,
     pub runtime: u64,
     pub task_delay: u64,
+
+    #[serde(skip_deserializing)]
+    pub sample_rate: u32,
 }
 
 
@@ -461,7 +463,11 @@ impl StreamfishConfig {
 
         // Some checks and argument construction for basecaller configurations
         if self.dori.adaptive.classifier == Classifier::Minimap2Rust && self.experiment.reference.extension().expect("Could not extract extension of classifier reference path") != "mmi" {
-            panic!("Classifier reference must be an index file (.mmi)")
+            panic!("Minimap2 reference must be an index file ending with: .mmi")
+        }
+        // Some checks on file availability
+        if self.dori.adaptive.classifier == Classifier::Minimap2Rust && !self.experiment.reference.exists() {
+            panic!("Minimap2 reference does not exist at: {}", self.experiment.reference.display())
         }
 
         if self.dori.adaptive.basecaller == Basecaller::Guppy && (self.dori.adaptive.classifier == Classifier::Minimap2Rust  || self.dori.adaptive.classifier == Classifier::Kraken2) {
