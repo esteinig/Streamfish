@@ -8,12 +8,15 @@ use config::SliceDiceConfig;
 use crate::utils::init_logger;
 use crate::error::StreamfishError;
 use crate::server::dori::DoriServer;
-use crate::config::{StreamfishConfig, ServerType};
-use crate::terminal::{App, Commands};
+use crate::config::{StreamfishConfig, StreamfishConfigArgs, ServerType};
+use crate::terminal::{App, Commands, EvaluateCommands};
 use crate::client::minknow::MinknowClient;
 use crate::client::readuntil::ReadUntilClient;
 use crate::services::minknow_api::manager::SimulatedDeviceType;
 use crate::client::readuntil::Termination;
+use crate::evaluation::tools::EvaluationTools;
+
+mod evaluation;
 mod terminal;
 mod services;
 mod server;
@@ -32,16 +35,30 @@ async fn main() -> Result<(), StreamfishError> {
     match &terminal.command {
         Commands::ReadUntil ( args ) => {
 
-            let config = StreamfishConfig::from_toml(&args.config)?;
+            let config_args = Some(
+                StreamfishConfigArgs::new(
+                    args.control, 
+                    args.dynamic,
+                    args.debug_mapping,
+                    args.outdir.clone(),
+                    args.prefix.clone(),
+                    args.simulation.clone(),
+                    args.seed
+                )
+            );
+
             let client = ReadUntilClient::new();
+            let config = StreamfishConfig::from_toml(&args.config, config_args)?;
             
             match &args.slice_dice {
                 Some(slice_config) => {
+                    log::info!("Launched slice-and-dice adaptive sampling routine...");
                     let slice_cfg = SliceDiceConfig::from_toml(&slice_config)?;
                     client.run_slice_dice(&config, &slice_cfg).await?;
                 },
                 None => {
                     if config.readuntil.read_cache {
+                        log::info!("Launched cache-enabled adaptive sampling routine...");
                         client.run_cached(config, None, Termination::ProcessExit).await?;
                     } else {
                         unimplemented!("Streaming RPC not implemented")
@@ -53,26 +70,38 @@ async fn main() -> Result<(), StreamfishError> {
 
         Commands::Benchmark ( args ) => {
             
-            let config = StreamfishBenchmark::from_toml(&args.config)?;
             let client = ReadUntilClient::new();
+            let config = StreamfishBenchmark::from_toml(&args.config)?;
 
             client.run_benchmark(&config, args.force, Termination::ProcessExit).await?;
 
         },
         Commands::DoriServer ( args ) => {
 
-            let config = StreamfishConfig::from_toml(&args.config)?;
+            let config = StreamfishConfig::from_toml(&args.config, None)?;
             DoriServer::run(config, ServerType::from(&args.server_type)).await?;
         },
+
+        Commands::Evaluate ( subcommand ) => {
+
+            let tools = EvaluationTools::new();
+
+            match subcommand {
+                EvaluateCommands::Cipher(args) => {
+                    tools.cipher_timeseries(&args.directory, &args.read_summary, &args.output)?;
+                }
+            };
+        },
+
         Commands::AddDevice ( args  ) => {
 
-            let config = StreamfishConfig::from_toml(&args.config)?;
+            let config = StreamfishConfig::from_toml(&args.config, None)?;
             let mut minknow_client = MinknowClient::connect(&config.minknow, None).await?;
             minknow_client.clients.manager.add_simulated_device(&args.name, SimulatedDeviceType::from_cli(&args.r#type)).await?;
         },
         Commands::RemoveDevice ( args  ) => {
 
-            let config = StreamfishConfig::from_toml(&args.config)?;
+            let config = StreamfishConfig::from_toml(&args.config, None)?;
             let mut minknow_client = MinknowClient::connect(&config.minknow, None).await?;
             minknow_client.clients.manager.remove_simulated_device(&args.name).await?;
         }

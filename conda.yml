@@ -1,10 +1,11 @@
-name: deepfish
+name: streamfish
 channels:
   - conda-forge
   - bioconda
   - defaults
 dependencies:
   - python=3.11
-  - squigulator=0.2.0
+  - squigulator=0.2.2
+  - slow5tools
   - pip:
-    - typer
+    - .

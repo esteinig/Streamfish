@@ -27,3 +27,11 @@ cmake-build/
 
 # mkdocs
 site/
+
+# pip
+/streamfish.egg-info/
+/build
+
+# nextflow
+.nextflow*
+work/

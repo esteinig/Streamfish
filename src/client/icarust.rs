@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 use icarust::icarust::Icarust;
-use icarust::config::{load_toml, Config as IcarustConfig};
+use icarust::config::Config as IcarustConfig;
 use serde::{Deserialize, Serialize};
 
 use crate::client::error::ClientError;
@@ -14,18 +14,27 @@ pub struct IcarustRunner {
     pub config: StreamfishConfig
 }
 impl IcarustRunner {
-    pub fn new(config: &mut StreamfishConfig, icarust_config: Option<IcarustConfig>) -> Self {
+    pub fn new(config: &mut StreamfishConfig, icarust_config: Option<IcarustConfig>, ) -> Self {
 
         // Streamfish and Icarust are configured in two distinct files
         // we need to do some checks to ensure that settings are
         // matching between the configurations
 
-        let icarust = match icarust_config {
-            Some(icarust_config) => Icarust { config: icarust_config },
-            None => Icarust::from_toml(&config.icarust.config, None),
-        }; // output path configured in toml
 
-        // Set the sampling rate of the 
+        let mut icarust = match icarust_config {
+            Some(icarust_config) => Icarust { 
+                config: icarust_config
+            },
+            None => Icarust::from_toml(
+                &config.icarust.config,
+                config.icarust.simulation.clone(), 
+                Some(config.icarust.deplete),
+                config.icarust.outdir.clone(),
+                None,
+                false,
+
+            ),
+        }; // output path configured in optional streamfish [icarust] `outdir` (cli and toml)
 
         if icarust.config.parameters.channels != config.readuntil.channels as usize {
             log::error!("IcarustRunner: channel sizes of Icarust configuration ({}) and Streamfish ReadUntil configuration ({}) do not match", icarust.config.parameters.channels, config.readuntil.channels);
@@ -39,6 +48,10 @@ impl IcarustRunner {
             log::error!("IcarustRunner: position port of Icarust configuration ({}) and Streamfish Icarust configuration ({}) do not match", icarust.config.server.position_port, config.icarust.position_port);
             std::process::exit(1);
         }
+
+        // Modification after Icarust intitalisation from command-line overrides of Streamfish configuration
+        icarust.config.seed = Some(config.icarust.data_seed);
+        log::info!("Seed value for Icarust adaptive sampling set to: {:?}", icarust.config.seed);
 
         // We set the sampling rate manually because the device service implementation does not support it,
         // Icarust fork parses it from the simulation Slow5/Blow5 header and we simply transfer it to the 
@@ -76,10 +89,11 @@ impl StreamfishBenchmark {
     pub fn configure(&self, force: bool) -> Result<Vec<(BenchmarkGroup, Benchmark, StreamfishConfig, IcarustConfig)>, ClientError> {
 
         log::info!("Reading base configuration files for Streamfish and Icarust");
-        let streamfish_config = StreamfishConfig::from_toml(&self.streamfish_config).map_err(
+        let streamfish_config = StreamfishConfig::from_toml(&self.streamfish_config, None).map_err(
             |err| ClientError::StreamfishConfiguration(err)
         )?;
-        let icarust_config = load_toml(&self.icarust_config);
+
+        let icarust_config = Icarust::from_toml(&self.icarust_config, None, None,  None, None, false).config;
 
         log::info!("Creating benchmark directory: {}", &self.outdir.display());
         if self.outdir.exists() {
@@ -156,7 +170,9 @@ impl StreamfishBenchmark {
 
                 // Set the Icarust output path for the Blow5 files
                 benchmark_icarust.outdir = benchmark_dir.join("blow5");
-
+                std::fs::create_dir_all(&benchmark_icarust.outdir).map_err(
+                    |_| ClientError::StreamfishBenchmarkDirectory(benchmark_icarust.outdir.display().to_string())
+                )?;
 
                 // Configure the benchmark options
                 if let Some(unblock_all_mode) = &benchmark.unblock_all_mode {

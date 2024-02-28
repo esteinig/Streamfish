@@ -4,13 +4,11 @@ In this section of the manuscript, we improve the adaptive sampling client and p
 
 1. Re-engineer and describe the low-latency adaptive sampling client `Streamfish`
 2. Identify contributions to latency in client implementations using experimental simulations in `Icarust`
+2. Evaluate signal community evaluations and  simulations in `Icarust`
 
-## Part 1 - Streamfish architecture and modes of operation
+## Part 1 - Streamfish architecture, modes of operation and system latency evaluation with `unblock-all`
 
 We describe the re-implementation of an adaptive sampling client optimized for low-latency operation in Rust. 
-
-
-## Part 2 - Latency evaluation with `unblock-all`
 
 We describe latency optimisation experiments using playback runs and simulations. `Readfish` (Payne et al. 2021) is used as a reference for comparison.
 
@@ -48,7 +46,7 @@ docker compose -f docker/docker-compose.yml --profile streamfish --project-name 
 
 **MinKNOW control server**: configuration of `MinKNOW` includes the `Readfish` recommended change in the control server configuration file from `break_reads_after_seconds=1.0` (1.0 seconds) to `break_reads_after_seconds=0.4` (0.4 seconds). This parameter controls the size of the signal chunks that are sent from the `MinKNOW` control server endpoint `GetLiveReads`. At a sample rate of 4000 Hz, each chunk corresponds to 1600 ADC values (analogue-to-digital converter values) which are the uncalibrated (raw) signal values sampled from the the device with `MinKNOW`. This translates to 184 bp reads using the default 460 bases per second (bp/s) translocation speeds during a sequening run (R9.4.1). 
 
-Therefore, in the ideal case of no latency occuring between receipt of signal chunks and unblocking a read, we would expect to observe reads lengths distributed around a mean of 184 bp in the `unblock-all` configuration with some variation in the actual length of the signal chunks (200 ADC, as configured in the setup request to `MinKNOW`) and from basecalling (Figure 2). Each additional base sequenced then corresponds to an observed latency of 2.17 milliseconds and is the result of latency in the client architecture and data transmission, as we are ignoring basecalling and classification stages.
+Therefore, in the ideal case of no latency occuring between receipt of signal chunks and unblocking a read, we would expect to observe reads lengths distributed around a mean of 184 bp in the `unblock-all` configuration with some variation in the actual length of the signal chunks (200 ADC minimum, as configured in the setup request to `MinKNOW`) and from basecaller variation between models and underlying neural architectures e.g. Guppy vs Dorado (Figure 2). Each additional base sequenced then corresponds to an observed latency of 2.17 milliseconds and is the result of latency in the client architecture and data transmission, as we are ignoring basecalling and classification stages.
 
 We further configure the control server using the setup action request and set an unblock duration of 100 milliseconds (default in `Readfish`), return data on all channels across the array (512 for MinION, 2048 for PromethION) and specify a minimum of 200 ADC values per sample of the device signal stream that makes up the signal chunks of 1600 ADC values returned from the control server. We use the aforementioned play-back run from a R9.4.1 MinION flowcell running a human LSK110 library (DNA). We note that pore occupancy varies between approximately 64 - 128 actively sequencing pores and therefore constitute low-throughput experimental conditions on a MinION. Live basecalling with `guppy_server` was active during the run with default configurations. Outputs were set to `.fast5` signal files to harmonize with the output format currently supported in `Icarust`.
 
@@ -60,7 +58,6 @@ We further configure the control server using the setup action request and set a
 
 
 **Streamfish client**:
-
 
 
 ### Results
@@ -89,5 +86,11 @@ Slice and dice rescues latency (effect somewhat mild, but may be more pronounced
 Compare max read chunks (allowign longer unblocks) with the gain in unblocked percent of target and ratio of target/non-target - looks like lower read chunks might be more effective than allowing larger one, despite lower percentage unblocked of target.
 
 Compare unblock all settings on range of test datasets and experiment combinations - small reference (known, e.g. two viruses), large reference (known, human), medium reference but many sequences (known, viral database)
+
+
+### Integration with `Icarust` fork and `Cipher` community simulation benchmarks
+
+
+
 
 ## Supplementary Data

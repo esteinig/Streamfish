@@ -238,7 +238,7 @@ impl ReadUntilClient {
                 log::info!("Launching Icarust in background task...");
                 let icarust_handle = tokio::spawn(async move {
                     
-                    icarust_runner.icarust.run(config.icarust.delay, config.icarust.runtime).await.map_err(|_| {
+                    icarust_runner.icarust.run(config.icarust.delay, config.icarust.runtime, config.icarust.log_actions).await.map_err(|_| {
                         send_termination_signal(&icarust_shutdown_tx, ClientError::IcarustRunner, 0)
                     })?;
                     
@@ -262,8 +262,21 @@ impl ReadUntilClient {
             _ => None
         };
 
-        // Connect to control server
+        // Attempt to connect with control server - try this for a while...
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3));
+        loop {
+            interval.tick().await;
 
+            let check = MinknowClient::connect(&config.minknow, Some(config.icarust.clone())).await;
+            if let Err(_) = check {
+                log::info!("Waiting for control server ...");
+                continue;
+            } 
+
+            break;
+        }
+        
+        // We now connect for real...
         let minknow_client = MinknowClient::connect(&config.minknow, Some(config.icarust.clone())).await?;
 
         // Wait a little just in case
@@ -740,7 +753,17 @@ impl ReadUntilClient {
 
             {
                 if experiment_config.control {
-                    continue;
+                    // If we are running a control experiment send stop further data to not overload memory
+                    throttle_tx.send(
+                        Action {
+                            action_id: Uuid::new_v4().to_string(),
+                            read: Some(action::Read::Number(dori_response.number)),
+                            action: Some(action::Action::StopFurtherData(StopFurtherData {})),
+                            channel: dori_response.channel,
+                        }
+                    ).map_err(|_| {
+                        send_termination_signal(&dori_response_error_tx, ClientError::DecisionQueueSend, 0)
+                    })?;
                 }
 
                 if dori_response.decision == unblock_decision {
@@ -887,7 +910,7 @@ impl ReadUntilClient {
             {
                 match handle.await {
                     Ok(Ok(())) => {
-                        log::error!("Task has been joined... this shouldn't happen since we are running streams");
+                        log::error!("Task has been joined... this shouldn't happen since we are running streams?");
                     },
                     Ok(Err(e)) => {
                         log::error!("Stream error: {}", e.to_string());
@@ -911,7 +934,7 @@ impl ReadUntilClient {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
             match termination {
-                Termination::ProcessExit => std::process::exit(1),
+                Termination::ProcessExit => std::process::exit(0),
                 Termination::BenchmarkError => return Err(ClientError::BenchmarkTerminationError),
                 Termination::SliceError => return Err(ClientError::SliceTerminationError),
                 Termination::Error => { }

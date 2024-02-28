@@ -5,3 +5,4 @@ pub mod config;
 pub mod client;
 pub mod terminal;
 pub mod services;
+pub mod evaluation;

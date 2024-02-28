@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{client::error::ClientError, server::error::ServerError};
+use crate::{client::error::ClientError, server::error::ServerError, evaluation::error::EvaluationError};
 
 #[derive(Error, Debug)]
 pub enum StreamfishError {
@@ -10,6 +10,9 @@ pub enum StreamfishError {
     /// Represents a failure to run server tasks
     #[error("Streamfish server error")]
     StreamfishServer(#[from] ServerError),
+    /// Represents a failure to run evaluation tasks
+    #[error("Streamfish evaluation error")]
+    StreamfishEvaluation(#[from] EvaluationError),
     /// Represents a failure to configure Streamfish
     #[error("Streamfish configuration error")]
     StreamfishConfig(#[from] StreamfishConfigError),
@@ -30,7 +33,6 @@ pub enum StreamfishConfigError {
     /// Represents a failure to parse a target string from the configuration
     #[error("Failed to parse target due to incorrect format: {0}")]
     TargetFormat(String),
-
     /// Represents a failure to parse a target string from the configuration
     #[error("Failed to find target file: {0}")]
     TargetFileNotFound(String),

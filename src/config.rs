@@ -4,8 +4,10 @@
 use minimap2::Mapping;
 use std::path::PathBuf;
 use std::io::BufRead;
+use rand::{self, Rng};
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize};
+
 use crate::services::dori_api::dynamic::DynamicTarget;
 use crate::{services::{minknow_api::data::get_live_reads_request::RawDataType, dori_api::adaptive::Decision}, error::StreamfishConfigError};
 
@@ -13,10 +15,37 @@ fn get_env_var(var: &str) -> Option<String> {
     std::env::var(var).ok()
 }
 
+// Command line overrides on launchin Streamgish Read-Until
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct StreamfishConfigArgs {
+    control: bool,
+    dynamic: bool,
+    debug_mapping: bool,
+    outdir: Option<PathBuf>,
+    prefix: Option<String>,
+    simulation: Option<PathBuf>,
+    seed: u64
+}
+impl StreamfishConfigArgs {
+    pub fn new(control: bool, dynamic: bool,  debug_mapping: bool, outdir: Option<PathBuf>, prefix: Option<String>, simulation: Option<PathBuf>, seed: u64) -> Self {
+        Self {
+            control,
+            dynamic,
+            debug_mapping,
+            outdir,
+            prefix,
+            simulation,
+            seed
+        }
+    }
+}
+
+
 // An exposed subset of configurable parameters for the user
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StreamfishConfig  {
     pub meta: MetaConfig,
+    pub debug: DebugConfig,
     pub minknow: MinknowConfig,
     pub icarust: IcarustConfig,
     pub basecaller: BasecallerConfig,
@@ -35,6 +64,14 @@ pub struct MetaConfig {
     pub server_name: String,
 }
 
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DebugConfig {
+    pub cache: bool,
+    pub mapping: bool
+}
+
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MinknowConfig {
     pub port: i32,
@@ -47,13 +84,19 @@ pub struct MinknowConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IcarustConfig {
     pub enabled: bool,
+    pub data_seed: u64,
     pub manager_port: u32,
     pub position_port: u32,
     pub config: PathBuf,
+    pub outdir: Option<PathBuf>,           // overrides path in configuration 
+    pub prefix: Option<String>,            // adds subdir to outdir
+    pub simulation: Option<PathBuf>,       // change input simulation on the fly
+    pub deplete: bool,                     // should be true for now
     pub launch: bool,
     pub delay: u64,
     pub runtime: u64,
     pub task_delay: u64,
+    pub log_actions: bool,
 
     #[serde(skip_deserializing)]
     pub sample_rate: u32,
@@ -196,6 +239,7 @@ pub struct BasecallerServerConfig {
 
     #[serde(skip_deserializing)]
     pub args: Vec<String>,
+
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -335,10 +379,10 @@ impl UnblockAll {
     // evaluation in streams than matching enumeration types or values
     fn get_config(&self) -> (bool, bool, bool, bool) {
         match self {
-            UnblockAll::Client => return (true, false, false, false),
-            UnblockAll::Server => return (false, true, false, false),
-            UnblockAll::Basecaller => return (false, false, true, false),
-            UnblockAll::Mapper => return (false, false, false, true)
+            UnblockAll::Client => (true, false, false, false),
+            UnblockAll::Server => (false, true, false, false),
+            UnblockAll::Basecaller => (false, false, true, false),
+            UnblockAll::Mapper => (false, false, false, true)
         }
     }
 }
@@ -412,7 +456,7 @@ impl<'de> Deserialize<'de> for Classifier {
 }
 
 impl StreamfishConfig {
-    pub fn from_toml(file: &PathBuf) -> Result<Self, StreamfishConfigError> {
+    pub fn from_toml(file: &PathBuf, args: Option<StreamfishConfigArgs>) -> Result<Self, StreamfishConfigError> {
 
         let toml_str = std::fs::read_to_string(file).map_err(|err| StreamfishConfigError::TomlConfigFile(err))?;
         let mut config: StreamfishConfig = toml::from_str(&toml_str).map_err(|err| StreamfishConfigError::TomlConfigParse(err))?;
@@ -441,6 +485,29 @@ impl StreamfishConfig {
         // Configure the basecaller and classifier arguments
         config.configure();
 
+        // Command line argument override...
+        if let Some(args) = args {
+            config.dynamic.enabled = args.dynamic;
+            config.experiment.control = args.control;
+            config.icarust.outdir = args.outdir.clone();
+            
+            let data_seed = match args.seed > 0 {
+                true => args.seed,
+                false =>    { 
+                    let mut rng = rand::thread_rng();
+                    rng.gen()
+                }
+            };
+            
+            // Used in configuration when Icarust is launched
+            config.icarust.data_seed = data_seed;
+            config.debug.mapping = args.debug_mapping;
+            config.icarust.prefix = args.prefix.clone();
+            config.icarust.simulation = args.simulation.clone();
+
+            log::info!("Command-line arguments override: {:#?}", args);
+        }
+         
         Ok(config)
 
     }
@@ -650,7 +717,7 @@ impl MappingConfig {
         Self {
             targets: targets.clone(),
             target_all: targets.is_empty(),
-            min_match_len: min_match_len,
+            min_match_len,
 
             multi_on: DecisionConfig { 
                 decision: Decision::Unblock.into(), 
@@ -683,7 +750,7 @@ impl MappingConfig {
         Self {
             targets: targets.clone(),
             target_all: targets.is_empty(),
-            min_match_len: min_match_len,
+            min_match_len,
 
             multi_on: DecisionConfig { 
                 decision: Decision::StopData.into(), 
@@ -715,7 +782,7 @@ impl MappingConfig {
         Self {
             targets: Vec::new(),
             target_all: true,  // all mapped
-            min_match_len: min_match_len,
+            min_match_len,
 
             multi_on: DecisionConfig { 
                 decision: Decision::Unblock.into(), 
@@ -743,7 +810,7 @@ impl MappingConfig {
             }
         }
     }
-    #[deprecated(since = "0.1.0", note = "Dorado fork with straeming implementation has been removed due to instability and imminent release of server version.")]
+    #[deprecated(since = "0.1.0", note = "Dorado fork with streaming implementation has been removed due to instability and imminent release of server version.")]
     pub fn decision_from_sam(&self, flag: &u32, tid: &str) -> i32 {
 
         let target_mapped = match self.target_all {
@@ -787,7 +854,6 @@ impl MappingConfig {
                 let mut mapped = 0;
                 for mapping in mappings.into_iter() {
                     if let Some(tid) = mapping.target_name {
-                        log::debug!("Detected mapping for {}", tid);
                         // For each mapping test if it matches the aligned 
                         // sequence identifier and optionally if the alignment
                         // start falls within the target range

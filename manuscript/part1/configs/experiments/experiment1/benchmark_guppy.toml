@@ -1,0 +1,98 @@
+# Prefixes must be unique
+# Each combination benchmark is configured explicitly
+
+name            = "Unblock-all benchmarks: Guppy models"
+outdir          = "/tmp/benchmarks/unblock_all"
+date            = "2024-02-25"
+commit          = ""
+description     = """
+Configurations to benchmark Streamfish component latency across
+unblock-all modes with variation in models, channels, and references
+using the default R10.4.1 simulated communities from Cipher served 
+with Icarust fork (Daedalost)
+"""
+
+# Base configurations
+
+streamfish_config   = "streamfish.toml"
+icarust_config      = "test.toml"
+
+# Guppy Model
+
+[[group]]
+prefix                              = "guppy_model_unblock_all"
+description                         = "Test benchmark of the baseline Streamfish/Icarust configuration across unblock-all modes and basecaller models with Guppy"
+
+[[group.benchmark]]
+prefix                              = "client_fast"
+unblock_all_mode                    = "client"
+basecaller_model                    = "dna_r10.4.1_e8.2_400bps_5khz_fast"
+basecaller_server_path              = "/opt/ont/guppy/bin/guppy_basecall_server"
+
+[[group.benchmark]]
+prefix                              = "server_fast"
+unblock_all_mode                    = "server"
+basecaller_model                    = "dna_r10.4.1_e8.2_400bps_5khz_fast"
+basecaller_server_path              = "/opt/ont/guppy/bin/guppy_basecall_server"
+
+[[group.benchmark]]
+prefix                              = "basecaller_fast"
+unblock_all_mode                    = "basecaller"
+basecaller_model                    = "dna_r10.4.1_e8.2_400bps_5khz_fast"
+basecaller_server_path              = "/opt/ont/guppy/bin/guppy_basecall_server"
+
+[[group.benchmark]]
+prefix                              = "mapper_fast"
+unblock_all_mode                    = "mapper"
+basecaller_model                    = "dna_r10.4.1_e8.2_400bps_5khz_fast"
+basecaller_server_path              = "/opt/ont/guppy/bin/guppy_basecall_server"
+
+
+[[group.benchmark]]
+prefix                              = "client_hac"
+unblock_all_mode                    = "client"
+basecaller_model                    = "dna_r10.4.1_e8.2_400bps_5khz_hac"
+basecaller_server_path              = "/opt/ont/guppy/bin/guppy_basecall_server"
+
+[[group.benchmark]]
+prefix                              = "server_hac"
+unblock_all_mode                    = "server"
+basecaller_model                    = "dna_r10.4.1_e8.2_400bps_5khz_hac"
+basecaller_server_path              = "/opt/ont/guppy/bin/guppy_basecall_server"
+
+[[group.benchmark]]
+prefix                              = "basecaller_hac"
+unblock_all_mode                    = "basecaller"
+basecaller_model                    = "dna_r10.4.1_e8.2_400bps_5khz_hac"
+basecaller_server_path              = "/opt/ont/guppy/bin/guppy_basecall_server"
+
+[[group.benchmark]]
+prefix                              = "mapper_hac"
+unblock_all_mode                    = "mapper"
+basecaller_model                    = "dna_r10.4.1_e8.2_400bps_5khz_hac"
+basecaller_server_path              = "/opt/ont/guppy/bin/guppy_basecall_server"
+
+
+[[group.benchmark]]
+prefix                              = "client_sup"
+unblock_all_mode                    = "client"
+basecaller_model                    = "dna_r10.4.1_e8.2_400bps_5khz_sup"
+basecaller_server_path              = "/opt/ont/guppy/bin/guppy_basecall_server"
+
+[[group.benchmark]]
+prefix                              = "server_sup"
+unblock_all_mode                    = "server"
+basecaller_model                    = "dna_r10.4.1_e8.2_400bps_5khz_sup"
+basecaller_server_path              = "/opt/ont/guppy/bin/guppy_basecall_server"
+
+[[group.benchmark]]
+prefix                              = "basecaller_sup"
+unblock_all_mode                    = "basecaller"
+basecaller_model                    = "dna_r10.4.1_e8.2_400bps_5khz_sup"
+basecaller_server_path              = "/opt/ont/guppy/bin/guppy_basecall_server"
+
+[[group.benchmark]]
+prefix                              = "mapper_sup"
+unblock_all_mode                    = "mapper"
+basecaller_model                    = "dna_r10.4.1_e8.2_400bps_5khz_sup"
+basecaller_server_path              = "/opt/ont/guppy/bin/guppy_basecall_server"

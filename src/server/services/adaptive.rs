@@ -335,7 +335,10 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                 // general. Note that the Moka cache entry count is only
                 // approximate and takes some time to sync, so the cached
                 // counts will stay the same for a little while
-                log::debug!("Reads cached: {}", cache_clearance.entry_count());
+                if run_config_1.debug.cache {
+                    log::info!("Reads cached: {}", cache_clearance.entry_count());
+                }
+                
 
                 cache_clearance.remove(&read_id).await;
             }
@@ -575,6 +578,9 @@ impl AdaptiveSampling for AdaptiveSamplingService {
             // Alignment queue
             while let Some(record_data) = alignment_rx.recv().await {
 
+                // DO NOT LOG THE MAPPINGS OR USE BORROWS ON THEM - FOR SOME ULTRA ARCANE REASON THIS BRAKES EVERYTHING
+                // I THINK IT IS IN PART MUSL-BUILD RELATED - BUT MAY CONTRIBUTE TO MEMORY LEAK BY MINIMAP2-RS?
+                
                 let mappings = match aligner.map(record_data.seq.as_bytes(), false, false, None, None) {
                     Ok(mappings) => mappings,
                     Err(_) => {
@@ -582,14 +588,11 @@ impl AdaptiveSampling for AdaptiveSamplingService {
                         continue
                     }
                 };  
-                
-                // DO NOT LOG THE MAPPINGS OR USE BORROWS ON THEM - FOR SOME ULTRA ARCANE REASON THIS BRAKES EVERYTHING
-                // I THINK IT IS MUSL BUILD RELATED - NORMAL X86_64 BUILDS DO NOT RUN WILD EXCEPT FOR MISCONFIGURED EXPERIMENTS
+
                 
                 // Dynamic mapping updates require Arc<Mutex<MappingConfig>> locks within the
                 // decision/evaluation stream- this does introduce some latency but is
-                // not as much as anticipated.
-
+                // not as much as anticipated
                 let dynamic_mapping_config = dynamic_mapping_config_stream.lock().await; 
 
                 let decision = dynamic_mapping_config.decision_from_mapping(mappings);
@@ -602,11 +605,14 @@ impl AdaptiveSampling for AdaptiveSamplingService {
 
                 // On stop further data decision, add the read identifier to the 
                 // dynamic mapping config cache - do we need a full cache or just
-                // an ArcMutex vector? Note also this might miss the reads that received
-                // a "Proceed" decision but terminated before another chunk could be sent
-                // and therefore got stuck in the cache
+                // an ArcMutex vector? 
+
+                // Note also this might miss the reads that received a "Proceed" decision 
+                // but terminated before another chunk could be sent and therefore got stuck in the cache
                 if run_config_2.dynamic.enabled && decision == stop_decision {
-                    dynamic_task_cache_decision.insert(record_data.id.clone(), record_data.id.clone()).await;
+                    dynamic_task_cache_decision.insert(
+                        record_data.id.clone(), record_data.id.clone()
+                    ).await;
                 }
 
 

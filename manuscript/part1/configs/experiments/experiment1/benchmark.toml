@@ -1,0 +1,41 @@
+# Prefixes must be unique
+# Each combination benchmark is configured explicitly
+
+name            = "Unblock-all benchmark tests"
+outdir          = "/tmp/benchmarks/unblock_all"
+date            = "2024-02-25"
+commit          = ""
+description     = """
+Configurations to benchmark Streamfish component latency across
+unblock-all modes with variation in models, channels, and references
+using the default R10.4.1 simulated communities from Cipher served 
+with Icarust fork (Daedalost)
+"""
+
+# Base configurations
+
+streamfish_config   = "/data/dev/meta-gp/reefsquid/configs/streamfish.toml"
+icarust_config      = "/data/dev/meta-gp/reefsquid/configs/icarust/test_basic/test.toml"
+
+# Test benchmarking
+
+[[group]]
+prefix              = "default_unblock_all"
+description         = "Test benchmark of the baseline Streamfish/Icarust configuration across unblock-all modes"
+
+[[group.benchmark]]
+prefix              = "client"
+unblock_all_mode    = "client"
+
+[[group.benchmark]]
+prefix              = "server"
+unblock_all_mode    = "server"
+
+[[group.benchmark]]
+prefix              = "basecaller"
+unblock_all_mode    = "basecaller"
+
+[[group.benchmark]]
+prefix              = "mapper"
+unblock_all_mode    = "mapper"
+

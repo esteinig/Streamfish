@@ -1,0 +1,86 @@
+# Definition of a simple mock community for testing
+
+name = "SARS mock community 1: 0.1:0.9"
+description = "Simple mock community of an active SARS-COV-2 infection with small-ish RNA genome (30kbp) in human host background. Modelled as DNA for experimental purpose."
+prefix = "sars_"
+
+
+# Squigulator simulation configuration - currently only basic
+# parameters configuration possible, will be expanded to  
+# developer when integrating with Icarust and Streamfish
+
+# Dwell mean adjustment: sampling rate / translocation speed 
+# 5000/400 for latest R10.4.1 chemistry and Dorado models
+
+# Seed is not working at this stage, there are some odd
+# differences arising from Squigulator read order, need
+# to investigate
+
+[simulation]
+seed = 341414
+target_yield = 1_000_000_000  # bases
+
+[simulation.nanopore]
+simulation_profile = "dna-r10-min"
+mean_read_length = 5000
+sampling_rate = 5000
+dwell_mean = 12.5
+pod5 = true
+
+# Requires `dorado` on $PATH
+
+# At this stage the basecalled reads may have differences in
+# the simulated locations due to processing with Dorado, which
+# may not call the exact number of bases as indicated by the 
+# simulated read. This means that we need to basecall first 
+# and then correct the basecalled reads to the correct
+# abundance; because this may introduce slight variation
+# in which reads are used anyway, we let Dorado output the
+# reads (in order that may not match the input signal reads)
+# and we produce two subset files of the simualted reads meta
+# data: one for the corrected signal and one for the corrected
+# basecalls.
+
+# Final community signal CAN be rebasecalled, but due to 
+# variations in Dorado read length output for the merged
+# signal simulations (which is trimmed to exact abundance) 
+# it may slightly over or undercall total expected bases 
+# for each member, this can be done from the final community 
+# POD5 file if an exact abundance is not required
+
+basecall = false
+dorado_model = "/tmp/dna_r10.4.1_e8.2_400bps_fast@v4.3.0" 
+dorado_device = "cuda:all"
+
+# Due to including member name, role and target in the 
+# simulated read headers from Squigulator, do not use 
+# exclamation marks (delimiter in read identifier)
+
+# Community member #1
+
+[[community.member]]
+
+id = "SARS-CoV-2"
+abundance = 0.1
+role = "pathogen"
+target = true
+
+fasta = "/tmp/sars.fasta"
+accession = "NC_045512.2"
+taxid = "2697049"
+scientific_name = "Severe acute respiratory syndrome coronavirus 2"
+
+# Community member #2
+
+[[community.member]]
+
+id = "T2T-CHM13v2.0"
+abundance = 0.9
+role = "host"
+target = false
+
+fasta = "/tmp/chm13v2.fa.gz"
+accession = "GCF_009914755.1" # refseq
+taxid = "9606"  # ncbi tax
+scientific_name = "Homo sapiens"
+

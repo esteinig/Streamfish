@@ -9,8 +9,8 @@ setup(
     include_package_data=True,
     install_requires=[
         "typer",
-        "pyslow5",
-        "ridgeplot"
+        "ridgeplot",
+        "seaborn"
     ],
     entry_points="""
         [console_scripts]

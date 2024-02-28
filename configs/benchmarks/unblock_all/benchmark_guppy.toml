@@ -14,7 +14,7 @@ using the default R9.4.1 squiggles with Icarust
 # Base configurations
 
 streamfish_config   = "/data/dev/meta-gp/reefsquid/configs/streamfish.toml"
-icarust_config      = "/data/dev/meta-gp/reefsquid/configs/icarust/test_human/test.toml"
+icarust_config      = "/data/dev/meta-gp/reefsquid/configs/icarust/test_basic/test.toml"
 
 # Guppy Model
 

@@ -1,14 +1,61 @@
 import typer
 
+from typing import List
+from pathlib import Path
+from .evaluation import plot_relative_frequency
+
 app = typer.Typer(add_completion=False)
 
 
 @app.command()
 def test():
     """
-    Test some functions
+    Test command-line interface
+    """
+    typer.echo("ok")
+
+@app.command()
+def plot_simulation(
+    paths: List[Path] = typer.Argument(
+        ..., help="Community meta-data linked simulation signal read summaries (Slow5-like) - multiple runs e.g. control and experiment"
+    ), 
+    outdir: Path = typer.Option(
+        Path.cwd(), help="Output directory for plot files"
+    ), 
+    prefix: str = typer.Option(
+        "simulation", help="Plot output file prefix"
+    ), 
+    interval: int = typer.Option(
+        10, help="Interval in seconds for time slices in cumulative signal plots"
+    ), 
+    title: str = typer.Option(
+        "Relative cumlative signal of simulated microbiome", help="Plot output title"
+    ), 
+    size: str = typer.Option(
+        "18,12", help="Plot dimensions as comma-delimited tuple e.g. 18,12"
+    ),
+    format: str = typer.Option(
+        "pdf", help="Plot output file format"
+    ),
+    host_chr: bool = typer.Option(
+        False, help="Summarize reference contigs starting with 'chr' as 'Host' in cumulative signal plots"
+    ),
+    sim_tags: str = typer.Option(
+        "", help="Comma-delimited str of str for each input file to tag members in cumulative signal plots"
+    ),
+
+):
+    """
+    Plot community meta-data linked simulation runs and experiment evaluations
     """
 
-    print("Testing some functions")
+    tags = []
+    for t in sim_tags.split(","):
+        if t.strip():
+            tags.append(t.strip())
+
+    
+    plot_relative_frequency(paths=paths, outdir=outdir, prefix=prefix, title=title, plot_size=size, plot_format=format, by_chromosome=not host_chr, interval=interval, sim_tags=tags)
 
 
+    
