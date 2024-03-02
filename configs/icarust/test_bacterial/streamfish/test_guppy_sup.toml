@@ -43,7 +43,7 @@ stderr_log                              = "/tmp/streamfish_dori_dynamic.stderr"
 path                                    = "/data/opt/conda/envs/dorado_basecall_server/bin/python"           # "/home/esteinig/micromamba/envs/guppy/bin/python"
 script                                  = "/data/dev/meta-gp/reefsquid/scripts/basecaller/ont_client.py"     # "/usr/src/streamfish/scripts/guppy/guppy_client.py"
 address                                 = "ipc:///tmp/.basecaller_local/5556"
-config                                  = "dna_r10.4.1_e8.2_400bps_5khz_hac"
+config                                  = "dna_r10.4.1_e8.2_400bps_5khz_sup"
 throttle                                = 0.01                                                               # Receiver throttle on requests for completed reads
 threads                                 = 4                                                                  # default: 4
 max_reads_queued                        = 4000                                                               # default: 4000  - may be important on faster and larger throughput runs
@@ -51,7 +51,7 @@ max_reads_queued                        = 4000                                  
 [basecaller.server]
 path                                    = "/opt/ont/guppy/bin/guppy_basecall_server"                         # `guppy`
 port                                    = "/tmp/.basecaller_local/5556"
-config                                  = "dna_r10.4.1_e8.2_400bps_5khz_hac.cfg"
+config                                  = "dna_r10.4.1_e8.2_400bps_5khz_sup.cfg"
 num_callers                             = 4                                                                  # default: 4
 chunks_per_runner                       = 160                                                                # default: 160
 threads                                 = 4                                                                  # default: 4
@@ -112,9 +112,9 @@ data_seed                               = 0                                     
 control                                 = false
 mode                                    = 'mapping'
 type                                    = 'targeted_sequencing'
-reference                               = '/tmp/host_virosaurus.mmi'
+reference                               = '/tmp/solo_dar4145.mmi'
 min_match_len                           = 0                                                                    # minimum matched mapping length
-targets                                 = ["SARS-CoV-2"]                                                       # empty to target any mapped sequences - target string format can be refid::start::end wher positions are 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
+targets                                 = ["SOLO"]                                                             # empty to target any mapped sequences - target string format can be refid::start::end wher positions are 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
 target_file                             = ""                                                                   # optional - overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed
 
 # Dynamic feedback loop configuration
@@ -124,7 +124,7 @@ enabled                                 = false
 launch_server                           = true
 interval_seconds                        = 180
 cache_capacity                          = 10000
-test_targets                            = ["SARS-CoV-2", "chr"]
+test_targets                            = ["SOLO", "NZ_CP010526.1"]
 
 [debug]
 cache                                   = false

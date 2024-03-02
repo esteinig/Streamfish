@@ -80,4 +80,13 @@ message DynamicTarget {
     // Optional name of the target (currently not used)
     optional string name = 4;
 
+    // Path to the dynamic controller alignment index for this target
+    optional string alignment_index = 5;
+
+    // Path to the dynamic controller alignment index for this target
+    optional int32 channel_start = 6;
+
+    // Path to the dynamic controller alignment index for this target
+    optional int32 channel_end = 7;
+
 }

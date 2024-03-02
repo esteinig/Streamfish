@@ -11,7 +11,7 @@ device_id = "MN12345"
 position = "MS12345"
 channels = 512
 break_read_ms = 400
-working_pore_percent = 85
+working_pore_percent = 95
 
 # OPTIONAL
 
@@ -34,7 +34,7 @@ working_pore_percent = 85
 data_service_sleep_ms = 0       #  default `break_read_ms`
 
 [simulation]
-community = "/data/dev/meta-gp/cipher/testing/sars_test_1/sars_community.blow5"
+community = ""
 deplete = true
 
 # Note that continous sampling (deplete = false) generates new unique identifiers

@@ -112,9 +112,9 @@ data_seed                               = 0                                     
 control                                 = false
 mode                                    = 'mapping'
 type                                    = 'targeted_sequencing'
-reference                               = '/tmp/host_virosaurus.mmi'
+reference                               = '/tmp/solo_dar4145.mmi'
 min_match_len                           = 0                                                                    # minimum matched mapping length
-targets                                 = ["SARS-CoV-2"]                                                       # empty to target any mapped sequences - target string format can be refid::start::end wher positions are 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
+targets                                 = ["SOLO"]                                                             # empty to target any mapped sequences - target string format can be refid::start::end wher positions are 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
 target_file                             = ""                                                                   # optional - overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed
 
 # Dynamic feedback loop configuration
@@ -124,7 +124,7 @@ enabled                                 = false
 launch_server                           = true
 interval_seconds                        = 180
 cache_capacity                          = 10000
-test_targets                            = ["SARS-CoV-2", "chr"]
+test_targets                            = ["SOLO", "NZ_CP010526.1"]
 
 [debug]
 cache                                   = false

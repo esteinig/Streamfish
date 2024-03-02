@@ -32,6 +32,11 @@ impl DynamicFeedback for DynamicFeedbackService {
 
         let mut request_stream = request.into_inner();
 
+        /*  Dynamic workflow controller service for pore target assignment HashMap<channel_number, ExperimentConfig>
+    
+            ExperimentConfig is also used to determine the number of unique required threads with minimap2-rs to which the basecalled sequences are routed
+
+         */
 
         let config = self.config.clone();
 

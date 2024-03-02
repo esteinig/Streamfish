@@ -16,6 +16,7 @@ use crate::services::minknow_api::manager::SimulatedDeviceType;
 use crate::client::readuntil::Termination;
 use crate::evaluation::tools::EvaluationTools;
 
+use crate::server::watcher;
 mod evaluation;
 mod terminal;
 mod services;
@@ -68,6 +69,19 @@ async fn main() -> Result<(), StreamfishError> {
             }
         },
 
+        Commands::Watch ( args ) => {
+          
+            if let Err(error) = watcher::watch_production(
+                &args.path, 
+                std::time::Duration::from_secs(args.interval),
+                std::time::Duration::from_secs(args.timeout),
+                std::time::Duration::from_secs(args.timeout_interval)
+            ) {
+                log::error!("Error: {error:?}");
+            }
+            
+
+        },
         Commands::Benchmark ( args ) => {
             
             let client = ReadUntilClient::new();
@@ -88,7 +102,7 @@ async fn main() -> Result<(), StreamfishError> {
 
             match subcommand {
                 EvaluateCommands::Cipher(args) => {
-                    tools.cipher_timeseries(&args.directory, &args.read_summary, &args.output)?;
+                    tools.cipher_timeseries(&args.directory, &args.metadata, &args.output)?;
                 }
             };
         },

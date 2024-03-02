@@ -3,55 +3,43 @@ process StreamfishSimulation {
 
     label "streamfish_sim"
     
-    publishDir "$params.outdir/$dataset_name/$config_name/$output_subdir/$replicate", mode: "symlink", pattern: "sim/*.blow5"
-
+    publishDir "$params.outdir/blow5", mode: "symlink", pattern: "${identifier}"
+    publishDir "$params.outdir/evals", mode: "copy", pattern: "${identifier}.tsv"
+    publishDir "$params.outdir/sims/${identifier}", mode: "symlink", pattern: "${blow5}"
+    publishDir "$params.outdir/sims/${identifier}", mode: "symlink", pattern: "${toml}"
+    publishDir "$params.outdir/sims/${identifier}", mode: "symlink", pattern: "${tsv}"
+    
     input:
-    val control
+    tuple file(blow5), file(toml), file(tsv)
     each replicate
-    each config
-    each dataset
+    val control
 
     output:
-    tuple val(replicate), val(config_name), val(dataset_name), file("sim")
-    tuple val(replicate), val(config_name), val(dataset_name), file("sim/*.blow5")
-
+    tuple val(replicate), val(config_name), val(simulation_name), val(ctrl_exp), file("${identifier}"), file("${identifier}.tsv")
+    tuple file(blow5), file(toml), file(tsv)
     script:
 
-    dataset_name = dataset.getBaseName()
-    config_name = config.getBaseName()
-    output_subdir = control ? "control" : "experiment"
+    ctrl_exp = control ? "control" : "experiment"
+
+    simulation_name = blow5.getBaseName()
+    config_name = toml.getBaseName()
+
+    identifier = "${simulation_name}__${config_name}__${ctrl_exp}__${replicate}"
 
     if (control) {
         """
-        streamfish read-until --config $config --simulation $dataset --outdir sim/ --control
+        streamfish read-until --config $toml --simulation $blow5 --outdir $identifier/ --control
+        streamfish evaluate cipher --directory $identifier/ --metadata $tsv --output ${identifier}.tsv
         """
     } else {
         """
-        streamfish read-until --config $config --simulation $dataset --outdir sim/
+        streamfish read-until --config $toml --simulation $blow5 --outdir $identifier/
+        streamfish evaluate cipher --directory $identifier/ --metadata $tsv --output ${identifier}.tsv
         """
     }
 
 }
 
-
-process StreamfishEvaluation {
-
-    label "streamfish_eval"
-
-    input:
-    tuple val(replicate), val(config_name), val(dataset_name), file(sim_dir)
-
-    output:
-    
-
-    script:
-    config_name = config.baseName()
-
-    """
-    streamfish evaluate cipher --directory $sim_dir --reads 
-    """
-
-}
 
 
 process CipherSimulateCommunity {

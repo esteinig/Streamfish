@@ -29,7 +29,8 @@ pub enum Commands {
     AddDevice(AddDeviceArgs),
     /// Remove a simulated device from MinKnow
     RemoveDevice(RemoveDeviceArgs),
-
+    /// Test the watcher service for launching Nextflow pipelines
+    Watch(WatcherArgs),
     #[clap(subcommand)]
     /// Evaluation subcommands
     Evaluate(EvaluateCommands),
@@ -77,6 +78,23 @@ pub struct ReadUntilArgs {
     pub seed: u64,
  }
 
+
+
+ #[derive(Debug, Args)]
+ pub struct WatcherArgs {
+     /// File path to watch recursively for input folders
+     #[clap(long, short = 'p', default_value=".")]
+     pub path: PathBuf,
+     /// Interval for polling file path recursively in seconds
+     #[clap(long, short = 'i', default_value="3")]
+     pub interval: u64,
+     /// Timeout in seconds to proceed after no further events on input folder
+     #[clap(long, short = 't', default_value="10")]
+     pub timeout: u64,
+     /// Timeout interval for polling input folder recursively in seconds
+     #[clap(long, short = 'm', default_value="1")]
+     pub timeout_interval: u64,
+ }
 
 #[derive(Debug, Args)]
 pub struct BenchmarkArgs {
@@ -142,9 +160,9 @@ pub struct CipherArgs {
     /// to meta-data of the community simulation
     #[clap(long, short)]
     pub output: PathBuf,
-    /// Cipher signal read file for meta data linkage 
+    /// Cipher signal read file for metadata linkage 
     #[clap(long, short)]
-    pub read_summary: PathBuf,
+    pub metadata: PathBuf,
     
  }
 

@@ -93,12 +93,12 @@ impl EvaluationTools {
     }
     /// Create a timeseries from the output of a simulated community adaptive sequencing run
     /// for downstream plotting and other evaluation analysis using the `streamfish-utils` package
-    pub fn cipher_timeseries(&self, directory: &PathBuf, read_summary: &PathBuf, output: &PathBuf) -> Result<(), EvaluationError> {
+    pub fn cipher_timeseries(&self, directory: &PathBuf, metadata: &PathBuf, output: &PathBuf) -> Result<(), EvaluationError> {
 
         let pattern = directory.join("*.blow5").to_string_lossy().into_owned();
 
         let read_records: HashMap<String, ReadRecord> = HashMap::from_iter(
-            get_cipher_read_records(&read_summary)?.into_iter().map(|r| (r.uuid.clone(), r))
+            get_cipher_read_records(&metadata)?.into_iter().map(|r| (r.uuid.clone(), r))
         );
 
         let mut records: Vec<CipherTimeSeriesRecord> = Vec::new();

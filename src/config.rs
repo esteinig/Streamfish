@@ -308,7 +308,10 @@ impl Target {
             reference: self.reference.clone(),
             start: self.start, 
             end: self.end,
-            name: self.name.clone()
+            name: self.name.clone(),
+            alignment_index: None,
+            channel_start: None,
+            channel_end: None
         }
     } 
     pub fn from_dynamic_target(dynamic_target: &DynamicTarget) -> Self {
@@ -858,7 +861,8 @@ impl MappingConfig {
                         // sequence identifier and optionally if the alignment
                         // start falls within the target range
                         for target in &self.targets {
-                            if target.reference == tid {
+                            // CHANGED TO STARTSWITH HERE - ES 20240303
+                            if target.reference.starts_with(&tid) { 
                                 // If a target range is specified, test if the start OR end of the alignment
                                 // falls within the target range - if so, this counts as a mapped read
                                 if let (Some(start), Some(end)) = (target.start, target.end) {

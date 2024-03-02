@@ -489,7 +489,6 @@ impl ReadUntilClient {
             
             if let Some(mut basecaller_thread) = basecaller_process_handle {
                 log::warn!("Shutting down basecall server process...");
-
                 basecaller_thread.kill().map_err(|err| err).expect("Failed to kill basecaller thread - you may need to do this manually");
             }
 
@@ -511,7 +510,9 @@ impl ReadUntilClient {
             }
 
             if let Some(icarust_task) = icarust_task_handle {
+                log::warn!("Waiting 10 seconds for Icarust writer to complete...");
                 log::warn!("Shutting down Icarust runner...");
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                 icarust_task.abort();
             }
 
@@ -521,11 +522,12 @@ impl ReadUntilClient {
             if manual_shutdown {
                 // Terminate the process
                 std::process::exit(1)
-            } else {
-                // Otherwise send the termination signal to the main routine 
-                // in case the termination configurations asks for return from this method
-                terminate_tx.send(true).expect("Failed to send termination signal to main routine");
             }
+
+            // Otherwise send the termination signal to the main routine 
+            // in case the termination configurations asks for return from this method
+            terminate_tx.send(true).expect("Failed to send termination signal to main routine");
+            
         });
 
 
