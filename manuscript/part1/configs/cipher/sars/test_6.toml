@@ -22,7 +22,7 @@ target_yield = 1_000_000_000  # bases
 
 [simulation.nanopore]
 simulation_profile = "dna-r10-min"
-mean_read_length = 5000
+mean_read_length = 10000
 sampling_rate = 5000
 dwell_mean = 12.5
 pod5 = true
@@ -65,7 +65,7 @@ abundance = 0.05
 role = "pathogen"
 target = true
 
-fasta = "/tmp/sars.fasta"
+fasta = "/data/data/dori/sars2.fasta"
 accession = "NC_045512.2"
 taxid = "2697049"
 scientific_name = "Severe acute respiratory syndrome coronavirus 2"
@@ -79,7 +79,7 @@ abundance = 0.95
 role = "host"
 target = false
 
-fasta = "/tmp/chm13v2.fa.gz"
+fasta = "/data/data/dori/chm13v2.fa"
 accession = "GCF_009914755.1" # refseq
 taxid = "9606"  # ncbi tax
 scientific_name = "Homo sapiens"

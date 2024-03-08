@@ -65,7 +65,7 @@ abundance = 0.05
 role = "pathogen"
 target = true
 
-fasta = "/data/opt/vzv.fasta"
+fasta = "/data/data/dori/vzv.fasta"
 accession = ""
 taxid = ""
 scientific_name = "Human alphaherpesvirus 3"
@@ -79,7 +79,7 @@ abundance = 0.95
 role = "host"
 target = false
 
-fasta = "/data/opt/chm13v2.fa.gz"
+fasta = "/data/data/dori/chm13v2.fa"
 accession = "GCF_009914755.1" # refseq
 taxid = "9606"  # ncbi tax
 scientific_name = "Homo sapiens"

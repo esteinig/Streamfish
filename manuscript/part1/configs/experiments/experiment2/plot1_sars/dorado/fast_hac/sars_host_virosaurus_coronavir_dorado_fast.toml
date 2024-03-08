@@ -49,7 +49,7 @@ threads                                 = 4                                     
 max_reads_queued                        = 4000                                                               # default: 4000  - may be important on faster and larger throughput runs
 
 [basecaller.server]
-path                                    = "/opt/ont/guppy/bin/guppy_basecall_server"                         # `guppy`
+path                                    = "/opt/ont/ont-dorado-server/bin/dorado_basecall_server"                         # `guppy`
 port                                    = "/tmp/.basecaller_local/5556"
 config                                  = "dna_r10.4.1_e8.2_400bps_5khz_fast.cfg"
 num_callers                             = 4                                                                  # default: 4
@@ -73,7 +73,7 @@ dori_tcp_host                           = 'dori-dev'                            
 dori_tcp_port                           = 10002                                                              # '10002' when running client inside container, otherwise '10002' (port forwarded from inside container) - no changes necessary, should match `dori.tcp_port`
 read_cache                              = true
 read_cache_min_chunks                   = 1
-read_cache_max_chunks                   = 12                
+read_cache_max_chunks                   = 16                
 read_cache_max_capacity                 = 100000
 read_cache_ttl                          = 18
 read_cache_tti                          = 12
@@ -95,26 +95,26 @@ launch_basecall_server                  = true
 enabled                                 = true                                                               
 manager_port                            = 10000
 position_port                           = 10001                                                              # Required position port to connect to device
-config                                  = '/data/dev/meta-gp/reefsquid/configs/icarust/test_sars/test.toml'  # Path to config file if launching as part of the adaptive sampling run
+config                                  = '/tmp/icarust_sars.toml'                                           # Path to config file if launching as part of the adaptive sampling run
 deplete                                 = true
 launch                                  = true
 delay                                   = 30                                                                 # Seconds to wait to start generating data after launching Icarust
-runtime                                 = 1800                                                                # Seconds to run the data generation loop before ceasing
+runtime                                 = 1800                                                               # Seconds to run the data generation loop before ceasing
 task_delay                              = 10                                                                 # Seconds to wait after launching Icarust async runner for loading data and config
 log_actions                             = false                                                              # Log action counts to console, may become busy
-data_seed                               = 0                                                                  # D20 roll seed if equal to zero
-prefix                                  = "ctrl"
+data_seed                               = 0                                                                  # 0 = random for each execution of the Icarust runner
+prefix                                  = "exp"
 
 # Adaptive sampling experiment configuration
 
 [experiment]  
-control                                 = true
+control                                 = false
 mode                                    = 'mapping'
 type                                    = 'targeted_sequencing'
-reference                               = '/tmp/hostvir.mmi'
+reference                               = '/tmp/hostvir_nosars2.mmi'
 min_match_len                           = 0                                                                    # minimum matched mapping length
-targets                                 = ["NC_045512:NC_045512;"]                                             # empty to target any mapped sequences - target string format can be refid::start::end wher positions are 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
-target_file                             = ""                                                                   # optional - overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed
+targets                                 = []                                                                   # empty to target any mapped sequences - target string format can be refid::start::end wher positions are 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
+target_file                             = "/tmp/coronaviruses.txt"                                             # optional - overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed
 
 # Dynamic feedback loop configuration
 
@@ -123,7 +123,8 @@ enabled                                 = false
 launch_server                           = true
 interval_seconds                        = 120
 cache_capacity                          = 10000
-test_targets                            = ["NC_045512:NC_045512;", "chr*"]
+test_targets                            = []
 
 [debug]
+cache                                   = false
 mapping                                 = false                                                                 # logging of mappings introduces significant latency

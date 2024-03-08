@@ -1,0 +1,130 @@
+[meta]
+name                                    = 'streamfish-icarust-test'
+version                                 = '0.1.0'
+description                             = 'Streamfish default configuration for Icarust testing'
+client_name                             = 'ReadfishClient'                                                   # Named for more informative messages in slice configurations
+server_name                             = 'DoriServer'                                                       # Named for better distinction from client in terminal logs 
+
+# MinKnow control server connection and authentication
+
+[minknow]       
+host                                    = 'localhost'                                                        # Control server host - should always be 'localhost' for now
+port                                    = 9502                                                               # Control server manager service port - defaults for MinKNOW (9502)
+token                                   = 'ea953950-a67e-405b-ab3f-82bd728d0105'                             # MinKNOW developer token for authentication
+certificate                             = '/opt/ont/minknow/conf/rpc-certs/ca.crt'                           # MinKNOW certificate needed for MinKNOW and Icarust 
+
+# Dori server - adaptive sampling service
+
+[dori.adaptive] 
+uds_path                                = '/tmp/.dori.adaptive/socket'                                       # Unix domain socket path on 'localhost', parent directory is created if not exists - SSD/NVME drives recommended, can be mounted in multiple containers for connections
+uds_override                            = true                                                               
+tcp_enabled                             = false                                                              # TCP connection to Dori processing server - not preferred
+tcp_host                                = '0.0.0.0'                                                          # TCP server host - `0.0.0.0` inside container to make available on forwarded ports
+tcp_port                                = 10002                                                              # TCP server port - can be mapped from container to host
+minknow_host                            = "127.0.0.1"                                                        # Host port of control server (MinKNOW or Icarust) for access from Dori - if forwarded to container the value is `minknow_host` (docker/docker-compose.dev.yml)
+minknow_port                            = 10000                                                              # Manager service port on `minknow_host` - this matches the `minknow.port` above but can be alternatively configured inside container
+classifier                              = "minimap2-rs"                                                      # Classifier for adaptive sampling algorithm running on Dori [`minimap2-rs`]
+basecaller                              = "guppy"                                                            # Basecaller for adaptive sampling algorithm running through Dori [`guppy`, `dorado`]
+stderr_log                              = "/tmp/streamfish_dori_adaptive.stderr"                                        
+
+# Dori server - dynamic feedback service 
+
+[dori.dynamic] 
+uds_path                                = '/tmp/.dori.dynamic/socket'                                        # Unix domain socket path on 'localhost', parent directory is created if not exists - SSD/NVME drives recommended, can be mounted in multiple containers for connections
+uds_override                            = true                                                               
+tcp_enabled                             = false                                                              # TCP connection to Dori processing server - not preferred
+tcp_host                                = '0.0.0.0'                                                          # TCP server host - `0.0.0.0` inside container to make available on forwarded ports
+tcp_port                                = 10002                                                              # TCP server port - can be mapped from container to host
+stderr_log                              = "/tmp/streamfish_dori_dynamic.stderr"                                         
+
+# Gupp client and server confiurations
+
+[basecaller.client]
+path                                    = "/data/opt/conda/envs/dorado_basecall_server/bin/python"           # "/home/esteinig/micromamba/envs/guppy/bin/python"
+script                                  = "/data/dev/meta-gp/reefsquid/scripts/basecaller/ont_client.py"     # "/usr/src/streamfish/scripts/guppy/guppy_client.py"
+address                                 = "ipc:///tmp/.basecaller_local/5556"
+config                                  = "dna_r10.4.1_e8.2_400bps_5khz_fast"
+throttle                                = 0.01                                                               # Receiver throttle on requests for completed reads
+threads                                 = 4                                                                  # default: 4
+max_reads_queued                        = 4000                                                               # default: 4000  - may be important on faster and larger throughput runs
+
+[basecaller.server]
+path                                    = "/opt/ont/ont-dorado-server/bin/dorado_basecall_server"                         # `guppy`
+port                                    = "/tmp/.basecaller_local/5556"
+config                                  = "dna_r10.4.1_e8.2_400bps_5khz_fast.cfg"
+num_callers                             = 4                                                                  # default: 4
+chunks_per_runner                       = 160                                                                # default: 160
+threads                                 = 4                                                                  # default: 4
+gpu_runners_per_device                  = 2                                                                  # default: 2
+chunk_size                              = 1000                                                               # default: 1000
+device                                  = "cuda:all"
+log_path                                = "/tmp/streamfish_basecaller_logs"
+stderr_log                              = "/tmp/streamfish_basecaller.stderr"
+
+# Adaptive sampling routine and logic configuration
+
+[readuntil]
+device_name                             = "MS12345"
+channels                                = 512
+channel_start                           = 1
+channel_end                             = 512
+init_delay                              = 10
+dori_tcp_host                           = 'dori-dev'                                                         # 'dori-dev' when running client inside container to connect to networked 'dori-dev' container, otherwise 'localhost' (port forwarded from inside container)
+dori_tcp_port                           = 10002                                                              # '10002' when running client inside container, otherwise '10002' (port forwarded from inside container) - no changes necessary, should match `dori.tcp_port`
+read_cache                              = true
+read_cache_min_chunks                   = 1
+read_cache_max_chunks                   = 16                
+read_cache_max_capacity                 = 100000
+read_cache_ttl                          = 18
+read_cache_tti                          = 12
+latency_log                             = "/tmp/latency.log"
+action_throttle                         = 0                                                                  # Streaming actions (= 0) or batched actions (> 0) - in milliseconds
+unblock_duration                        = 0.1
+sample_minimum_chunk_size               = 200
+accepted_first_chunk_classifications    = [83, 65]
+unblock_all                             = false
+unblock_all_mode                        = "mapper"                                                           # `client`, `server`, `basecaller`, `mapper`
+unblock_all_chunk_file                  = ""                                                                 # If unblock all set to 'client', write each received chunk as input string to file. Strings can be submitted with the basecall client script. Do not use this during client-side latency benchmarks.
+launch_dori_server                      = true
+launch_basecall_server                  = true
+
+
+# Icarust control server connection and runner configurations
+
+[icarust]       
+enabled                                 = true                                                               
+manager_port                            = 10000
+position_port                           = 10001                                                              # Required position port to connect to device
+config                                  = '/tmp/icarust_sars.toml'                                           # Path to config file if launching as part of the adaptive sampling run
+deplete                                 = true
+launch                                  = true
+delay                                   = 30                                                                 # Seconds to wait to start generating data after launching Icarust
+runtime                                 = 1800                                                               # Seconds to run the data generation loop before ceasing
+task_delay                              = 10                                                                 # Seconds to wait after launching Icarust async runner for loading data and config
+log_actions                             = false                                                              # Log action counts to console, may become busy
+data_seed                               = 0                                                                  # 0 = random for each execution of the Icarust runner
+prefix                                  = "exp"
+
+# Adaptive sampling experiment configuration
+
+[experiment]  
+control                                 = false
+mode                                    = 'mapping'
+type                                    = 'targeted_sequencing'
+reference                               = '/tmp/hostvir_sars2.mmi'
+min_match_len                           = 0                                                                    # minimum matched mapping length
+targets                                 = ["NC_045512:NC_045512;"]                                             # empty to target any mapped sequences - target string format can be refid::start::end wher positions are 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
+target_file                             = ""                                                                   # optional - overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed
+
+# Dynamic feedback loop configuration
+
+[dynamic]
+enabled                                 = false
+launch_server                           = true
+interval_seconds                        = 120
+cache_capacity                          = 10000
+test_targets                            = ["NC_045512:NC_045512;", "chr"]
+
+[debug]
+cache                                   = false
+mapping                                 = false                                                                 # logging of mappings introduces significant latency

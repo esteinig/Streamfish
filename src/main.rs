@@ -44,7 +44,9 @@ async fn main() -> Result<(), StreamfishError> {
                     args.outdir.clone(),
                     args.prefix.clone(),
                     args.simulation.clone(),
-                    args.seed
+                    args.reference.clone(),
+                    args.basecaller_model.clone(),
+                    args.seed,
                 )
             );
 

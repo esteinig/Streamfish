@@ -52,21 +52,24 @@ pub struct ReadUntilArgs {
     /// TOML configuration file for Streamfish
     #[clap(long, short)]
     pub config: PathBuf,
-    /// Input simulation (.blow5) from Cipher/Squigulator overrides config input for Icarust
-    #[clap(long, short)]
-    pub simulation: Option<PathBuf>,
-    /// TOML configuration file for slice-and-dice operation with Streamfish
-    #[clap(long)]
-    pub slice_dice: Option<PathBuf>,
     /// Output directory for read data from Icarust simulation
     #[clap(long, short)]
     pub outdir: Option<PathBuf>,
+    /// Input simulation (.blow5) from Cipher/Squigulator overrides config input for Icarust
+    #[clap(long, short)]
+    pub simulation: Option<PathBuf>,
     /// Run the experiment in control mode - every action request is StopFurtherData
     #[clap(long)]
     pub control: bool,
     /// Enable the dynamic adaptive sampling loop configuration
     #[clap(long, short)]
     pub dynamic: bool,
+    /// Reference index for a globally configured e.g. `targeted_sequencing` or `host_depletion` experiment preset
+    #[clap(long, short)]
+    pub reference: Option<PathBuf>,
+    #[clap(long, short)]
+    /// Basecaller model for the Guppy or Dorado basecaller server config and request data
+    pub basecaller_model: Option<String>,
     /// Debug read mapping and action requests - introduces significant latency, do not use for experiments!
     #[clap(long)]
     pub debug_mapping: bool,
@@ -76,6 +79,9 @@ pub struct ReadUntilArgs {
     /// Seed default set to 0 which generates new seed value for every run execution
     #[clap(long, default_value="0")]
     pub seed: u64,
+    /// TOML configuration file for slice-and-dice operation with Streamfish
+    #[clap(long)]
+    pub slice_dice: Option<PathBuf>,
  }
 
 

@@ -1,5 +1,5 @@
 import typer
-
+from typing import List
 from pathlib import Path
 from .evaluation import plot_relative_signal
 
@@ -15,17 +15,11 @@ def test():
 
 @app.command()
 def plot_simulation(
-    experiments: Path = typer.Option(
+    summaries: List[Path] = typer.Argument(
         ..., help="Directory containing exeriment community meta-data linked simulation signal read summaries (Slow5-like)"
     ), 
-    controls: Path = typer.Option(
-        None, help="Directory containing control community meta-data linked simulation signal read summaries (Slow5-like)"
-    ), 
-    exp_glob: str = typer.Option(
-        "*__experiment__*.tsv", help="Experiment file name glob pattern"
-    ), 
-    ctrl_glob: str = typer.Option(
-        "*__control__*.tsv", help="Experiment file name glob pattern"
+    variant: List[str] = typer.Option(
+        None, help="Config name glob patterns, use multiple to show as color variants in panels"
     ), 
     outdir: Path = typer.Option(
         Path.cwd(), help="Output directory for plot files"
@@ -37,7 +31,7 @@ def plot_simulation(
         10, help="Interval in seconds for time slices in cumulative signal plots"
     ), 
     title: str = typer.Option(
-        "Relative cumlative signal of simulated microbiome", help="Plot output title"
+        "Cumulative signal for members of simulated community", help="Plot output title"
     ), 
     size: str = typer.Option(
         "30,12", help="Plot dimensions as comma-delimited tuple e.g. 18,12"
@@ -54,30 +48,22 @@ def plot_simulation(
     diff_limit: float = typer.Option(
         600, help="Comma-delimited str of str for each input file to tag members in cumulative signal plots"
     ),
-
 ):
     """
     Plot community meta-data linked simulation runs and experiment evaluations
     """
+
+    outdir.mkdir(exist_ok=True)
 
     tags = []
     for t in sim_tags.split(","):
         if t.strip():
             tags.append(t.strip())
 
-    exp_paths = [
-        p for p in experiments.glob(exp_glob)
-    ]
-    
-    ctrl_paths = [
-        p for p in controls.glob(ctrl_glob)
-    ] if controls else [
-        p for p in experiments.glob(ctrl_glob)
-    ]
-    
+
     plot_relative_signal(
-        experiments=exp_paths, 
-        controls=ctrl_paths,
+        summaries=summaries, 
+        variants=variant,
         outdir=outdir, 
         prefix=prefix, 
         title=title, 

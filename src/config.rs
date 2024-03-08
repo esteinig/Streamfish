@@ -2,6 +2,7 @@
 
 
 use minimap2::Mapping;
+use std::ops::Add;
 use std::path::PathBuf;
 use std::io::BufRead;
 use rand::{self, Rng};
@@ -24,10 +25,12 @@ pub struct StreamfishConfigArgs {
     outdir: Option<PathBuf>,
     prefix: Option<String>,
     simulation: Option<PathBuf>,
+    reference: Option<PathBuf>,
+    basecaller_model: Option<String>,
     seed: u64
 }
 impl StreamfishConfigArgs {
-    pub fn new(control: bool, dynamic: bool,  debug_mapping: bool, outdir: Option<PathBuf>, prefix: Option<String>, simulation: Option<PathBuf>, seed: u64) -> Self {
+    pub fn new(control: bool, dynamic: bool,  debug_mapping: bool, outdir: Option<PathBuf>, prefix: Option<String>, simulation: Option<PathBuf>, reference: Option<PathBuf>, basecaller_model: Option<String>, seed: u64) -> Self {
         Self {
             control,
             dynamic,
@@ -35,6 +38,8 @@ impl StreamfishConfigArgs {
             outdir,
             prefix,
             simulation,
+            reference,
+            basecaller_model,
             seed
         }
     }
@@ -490,10 +495,15 @@ impl StreamfishConfig {
 
         // Command line argument override...
         if let Some(args) = args {
+
             config.dynamic.enabled = args.dynamic;
             config.experiment.control = args.control;
             config.icarust.outdir = args.outdir.clone();
             
+            if let Some(ref_index) = &args.reference {
+                config.experiment.reference = ref_index.to_path_buf();
+            }
+
             let data_seed = match args.seed > 0 {
                 true => args.seed,
                 false =>    { 
@@ -502,11 +512,29 @@ impl StreamfishConfig {
                 }
             };
             
-            // Used in configuration when Icarust is launched
+            // Used in data sampling configuration (pore /channel strand order) during Icarust fork reader from Cipher (.blow5)
             config.icarust.data_seed = data_seed;
+
+            // => REMOVED <= Debug mappings for experiment tests by logging to console => REMOVED <=
             config.debug.mapping = args.debug_mapping;
+
+            // Prefix for output filers in Icarust writer (.blow5)
             config.icarust.prefix = args.prefix.clone();
+
+            // Simulation input for Icarust and Cipher (.blow5))
             config.icarust.simulation = args.simulation.clone();
+
+            // Override basecaller server model configuration
+            if let Some(model) = &args.basecaller_model {
+
+                config.basecaller.client.config = model.clone();
+
+                let mut model_cfg = model.clone();
+                model_cfg.push_str(".cfg");
+
+                config.basecaller.server.config = model_cfg;
+            }
+           
 
             log::info!("Command-line arguments override: {:#?}", args);
         }
@@ -700,7 +728,7 @@ pub struct MappingConfig {
     pub targets: Vec<Target>,
     // Target all sequences in reference - used when target list is empty
     pub target_all: bool,
-    //	Read fragment maps multiple locations including region of interest.
+    // Read fragment maps multiple locations including region of interest.
     pub multi_on: DecisionConfig,
     // Read fragment maps to multiple locations not including region of interest.
     pub multi_off: DecisionConfig,
@@ -760,7 +788,7 @@ impl MappingConfig {
                 flags: MappingFlags::Multi.sam() 
             }, 
             multi_off: DecisionConfig { 
-                decision: Decision::Proceed.into(), 
+                decision: Decision::Unblock.into(), // ES - 20240303 changed from Proceed
                 flags: MappingFlags::Multi.sam() 
             }, 
             single_on: DecisionConfig { 

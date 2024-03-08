@@ -1,5 +1,5 @@
 name = "Test configuration for Icarust fork Daedalost"
-outdir = "/tmp/daedalost/test_sars_1_virosaurus_testing"
+outdir = "/tmp/daedalost/test_vzv_1_virosaurus_testing"
 seed = 13124123
 
 [server]
@@ -45,5 +45,5 @@ deplete = true
 # If specified with depletion sampling (deplete = true) the community linked 
 # value is overwritten. Target yield affects the chance of pore death.
 
-# target_yield = 100000000000   # if active and set to high value essentially disabled pore death model (very low death rate)
+target_yield = 100000000000   # if active and set to high value essentially disabled pore death model (very low death rate)
 
