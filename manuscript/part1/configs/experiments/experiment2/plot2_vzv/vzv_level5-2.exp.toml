@@ -1,0 +1,9 @@
+# Adaptive sampling experiment configuration
+
+control                                 = false
+mode                                    = 'mapping'
+type                                    = 'targeted_sequencing'
+reference                               = '/tmp/l5_psit_host.mmi'
+min_match_len                           = 0                                                                    # minimum matched mapping length
+targets                                 = ["NC_005264.1"]                                                                   # empty to target any mapped sequences - target string format can be refid::start::end wher positions are 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
+target_file                             = ""                                             # optional - overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed

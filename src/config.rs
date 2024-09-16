@@ -2,7 +2,6 @@
 
 
 use minimap2::Mapping;
-use std::ops::Add;
 use std::path::PathBuf;
 use std::io::BufRead;
 use rand::{self, Rng};
@@ -27,10 +26,24 @@ pub struct StreamfishConfigArgs {
     simulation: Option<PathBuf>,
     reference: Option<PathBuf>,
     basecaller_model: Option<String>,
+    basecaller_server: Option<PathBuf>,
+    experiment_config: Option<PathBuf>,
     seed: u64
 }
 impl StreamfishConfigArgs {
-    pub fn new(control: bool, dynamic: bool,  debug_mapping: bool, outdir: Option<PathBuf>, prefix: Option<String>, simulation: Option<PathBuf>, reference: Option<PathBuf>, basecaller_model: Option<String>, seed: u64) -> Self {
+    pub fn new(
+        control: bool, 
+        dynamic: bool, 
+        debug_mapping: bool, 
+        outdir: Option<PathBuf>, 
+        prefix: Option<String>, 
+        simulation: Option<PathBuf>, 
+        reference: Option<PathBuf>, 
+        basecaller_model: Option<String>,
+        basecaller_server: Option<PathBuf>,
+        experiment_config: Option<PathBuf>, 
+        seed: u64
+    ) -> Self {
         Self {
             control,
             dynamic,
@@ -40,6 +53,8 @@ impl StreamfishConfigArgs {
             simulation,
             reference,
             basecaller_model,
+            basecaller_server,
+            experiment_config,
             seed
         }
     }
@@ -249,6 +264,7 @@ pub struct BasecallerServerConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ExperimentConfig {
+    pub config: Option<PathBuf>,
     pub control: bool,
     pub mode: String,
     pub r#type: String,
@@ -470,11 +486,30 @@ impl StreamfishConfig {
         let mut config: StreamfishConfig = toml::from_str(&toml_str).map_err(|err| StreamfishConfigError::TomlConfigParse(err))?;
 
 
+        // Command line argument override...
+        if let Some(args) = args.clone() {
+            // ... has to happen before parsing the experiment altgernative TOML
+            config.experiment.config = args.experiment_config.clone();
+            log::info!("Experiment config path was set to >> {:?} << from the command-line", config.experiment.config);
+
+            // Override basecaller server model configuration
+            if let Some(server) = &args.basecaller_server {
+                config.basecaller.server.path = server.to_owned();
+            }
+        }
+
         // Host ports forwarded allows `docker-compose` to set the host via environmental variable
         config.minknow.host = match get_env_var("STREAMFISH_MINKNOW_HOST") { Some(var) => var, None => config.minknow.host.clone() };
 
         // Always sample uncalibrated data for now
         config.readuntil.raw_data_type = RawDataType::Uncalibrated;
+
+        // If experiment.config TOML file path is set, use config from file
+        if let Some(exp_config) = config.experiment.config {
+            let toml_str = std::fs::read_to_string(exp_config).map_err(|err| StreamfishConfigError::TomlConfigFile(err))?;
+            let exp_cfg: ExperimentConfig = toml::from_str(&toml_str).map_err(|err| StreamfishConfigError::TomlConfigParse(err))?;
+            config.experiment = exp_cfg;
+        }
 
         // If target list by file:
         if !config.experiment.target_file.as_os_str().is_empty() {
@@ -486,6 +521,7 @@ impl StreamfishConfig {
             config.experiment.targets = TargetFile::from(&config.experiment.target_file)?.targets;
             log::info!("Loaded targets from file: {:#?}", config.experiment.targets);
         }
+
 
         // Configure the experiment and mapping settings
         config.experiment.configure();
@@ -534,7 +570,12 @@ impl StreamfishConfig {
 
                 config.basecaller.server.config = model_cfg;
             }
-           
+            
+
+            // Override basecaller server model configuration
+            if let Some(model) = &args.basecaller_model {
+
+            }
 
             log::info!("Command-line arguments override: {:#?}", args);
         }

@@ -1,0 +1,49 @@
+name = "Test configuration for Icarust fork Daedalost"
+outdir = "/tmp/daedalost/test_sars_1_virosaurus_testing"
+seed = 13124123
+
+[server]
+manager_port = 10000
+position_port = 10001
+
+[parameters]
+device_id = "MN12345"
+position = "MS12345"
+channels = 512
+break_read_ms = 400
+working_pore_percent = 95
+
+# OPTIONAL
+
+# Use this value to multiply chance of
+# pore death (no unblock and unblock 
+# adjusted due to target yield 
+# integration)
+
+# pore_death_multiplier = 1.0
+
+# Use these to setup a tradtional run output
+# directory where signal data is deposited
+# in the `fast5_pass` subdirectory
+
+# sample_name = "test"
+# experiment_name = "test_virus"
+# flowcell_name = "FAQ12345"
+
+# data_generator_sleep_ms = 10      #  default 10
+# data_service_sleep_ms = 400       #  default `break_read_ms`
+
+[simulation]
+community = ""
+deplete = true
+
+# Note that continous sampling (deplete = false) generates new unique identifiers
+# for each signal read as the same read may be sampled multiple times - at the 
+# moment these cannot be linked to the input community for evaluation!
+
+# Target yield must be specified if continuously sampling (deplete = false)
+# If specified with depletion sampling (deplete = true) the community linked 
+# value is overwritten. Target yield affects the chance of pore death.
+
+# target_yield = 100000000000   # if active and set to high value essentially disabled pore death model (very low death rate)
+

@@ -13,31 +13,26 @@ port                                    = 9502                                  
 token                                   = 'ea953950-a67e-405b-ab3f-82bd728d0105'                             # MinKNOW developer token for authentication
 certificate                             = '/opt/ont/minknow/conf/rpc-certs/ca.crt'                           # MinKNOW certificate needed for MinKNOW and Icarust 
 
-# Dori server - adaptive sampling service
 
-[dori.adaptive] 
-uds_path                                = '/tmp/.dori.adaptive/socket'                                       # Unix domain socket path on 'localhost', parent directory is created if not exists - SSD/NVME drives recommended, can be mounted in multiple containers for connections
-uds_override                            = true                                                               
-tcp_enabled                             = false                                                              # TCP connection to Dori processing server - not preferred
-tcp_host                                = '0.0.0.0'                                                          # TCP server host - `0.0.0.0` inside container to make available on forwarded ports
-tcp_port                                = 10002                                                              # TCP server port - can be mapped from container to host
-minknow_host                            = "127.0.0.1"                                                        # Host port of control server (MinKNOW or Icarust) for access from Dori - if forwarded to container the value is `minknow_host` (docker/docker-compose.dev.yml)
-minknow_port                            = 10000                                                              # Manager service port on `minknow_host` - this matches the `minknow.port` above but can be alternatively configured inside container
-classifier                              = "minimap2-rs"                                                      # Classifier for adaptive sampling algorithm running on Dori [`minimap2-rs`]
-basecaller                              = "guppy"                                                            # Basecaller for adaptive sampling algorithm running through Dori [`guppy`, `dorado`]
-stderr_log                              = "/tmp/streamfish_dori_adaptive.stderr"                                        
+# Icarust control server connection and runner configurations
 
-# Dori server - dynamic feedback service 
+[icarust]       
+enabled                                 = true                                                               
+manager_port                            = 10000
+position_port                           = 10001                                                              # Required position port to connect to device
+config                                  = '/data/dev/meta-gp/reefsquid/configs/icarust/test_sars/test.toml'  # Path to config file if launching as part of the adaptive sampling run
+# outdir                                  = '/tmp/daedalost/test_sars'
+# simulation                              = '/data/dev/meta-gp/cipher/testing/sars_test_6/sars_community.blow5'
+deplete                                 = true
+launch                                  = true
+delay                                   = 60                                                                 # Seconds to wait to start generating data after launching Icarust
+runtime                                 = 1860                                                               # Seconds to run the data generation loop before ceasing
+task_delay                              = 10                                                                 # Seconds to wait after launching Icarust async runner for loading data and config
+log_actions                             = false                                                              # Log action counts to console, may become busy
+data_seed                               = 0                                                                  # D20 roll seed if equal to zero
 
-[dori.dynamic] 
-uds_path                                = '/tmp/.dori.dynamic/socket'                                        # Unix domain socket path on 'localhost', parent directory is created if not exists - SSD/NVME drives recommended, can be mounted in multiple containers for connections
-uds_override                            = true                                                               
-tcp_enabled                             = false                                                              # TCP connection to Dori processing server - not preferred
-tcp_host                                = '0.0.0.0'                                                          # TCP server host - `0.0.0.0` inside container to make available on forwarded ports
-tcp_port                                = 10002                                                              # TCP server port - can be mapped from container to host
-stderr_log                              = "/tmp/streamfish_dori_dynamic.stderr"                                         
 
-# Gupp client and server confiurations
+# Guppy client and server confiurations
 
 [basecaller.client]
 path                                    = "/data/opt/conda/envs/dorado_basecall_server/bin/python"           # "/home/esteinig/micromamba/envs/guppy/bin/python"
@@ -60,6 +55,22 @@ chunk_size                              = 1000                                  
 device                                  = "cuda:all"
 log_path                                = "/tmp/streamfish_basecaller_logs"
 stderr_log                              = "/tmp/streamfish_basecaller.stderr"
+
+
+# Dori server - adaptive sampling service
+
+[dori.adaptive] 
+uds_path                                = '/tmp/.dori.adaptive/socket'                                       # Unix domain socket path on 'localhost', parent directory is created if not exists - SSD/NVME drives recommended, can be mounted in multiple containers for connections
+uds_override                            = true                                                               
+tcp_enabled                             = false                                                              # TCP connection to Dori processing server - not preferred
+tcp_host                                = '0.0.0.0'                                                          # TCP server host - `0.0.0.0` inside container to make available on forwarded ports
+tcp_port                                = 10002                                                              # TCP server port - can be mapped from container to host
+minknow_host                            = "127.0.0.1"                                                        # Host port of control server (MinKNOW or Icarust) for access from Dori - if forwarded to container the value is `minknow_host` (docker/docker-compose.dev.yml)
+minknow_port                            = 10000                                                              # Manager service port on `minknow_host` - this matches the `minknow.port` above but can be alternatively configured inside container
+classifier                              = "minimap2-rs"                                                      # Classifier for adaptive sampling algorithm running on Dori [`minimap2-rs`]
+basecaller                              = "guppy"                                                            # Basecaller for adaptive sampling algorithm running through Dori [`guppy`, `dorado`]
+stderr_log                              = "/tmp/streamfish_dori_adaptive.stderr"                                        
+
 
 # Adaptive sampling routine and logic configuration
 
@@ -88,24 +99,6 @@ unblock_all_chunk_file                  = ""                                    
 launch_dori_server                      = true
 launch_basecall_server                  = true
 
-
-# Icarust control server connection and runner configurations
-
-[icarust]       
-enabled                                 = true                                                               
-manager_port                            = 10000
-position_port                           = 10001                                                              # Required position port to connect to device
-config                                  = '/data/dev/meta-gp/reefsquid/configs/icarust/test_sars/test.toml'  # Path to config file if launching as part of the adaptive sampling run
-# outdir                                  = '/tmp/daedalost/test_sars'
-# simulation                              = '/data/dev/meta-gp/cipher/testing/sars_test_6/sars_community.blow5'
-deplete                                 = true
-launch                                  = true
-delay                                   = 60                                                                 # Seconds to wait to start generating data after launching Icarust
-runtime                                 = 1860                                                               # Seconds to run the data generation loop before ceasing
-task_delay                              = 10                                                                 # Seconds to wait after launching Icarust async runner for loading data and config
-log_actions                             = false                                                              # Log action counts to console, may become busy
-data_seed                               = 0                                                                  # D20 roll seed if equal to zero
-
 # Adaptive sampling experiment configuration
 
 [experiment]  
@@ -114,8 +107,19 @@ mode                                    = 'mapping'
 type                                    = 'targeted_sequencing'
 reference                               = '/tmp/host_virosaurus.mmi'
 min_match_len                           = 0                                                                    # minimum matched mapping length
-targets                                 = ["SARS-CoV-2"]                                                       # empty to target any mapped sequences - target string format can be refid::start::end wher positions are 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
+targets                                 = ["chr11::9365480::9400673"]                                          # empty to target any mapped sequences - target string format can be refid::start::end wher positions are 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
 target_file                             = ""                                                                   # optional - overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed
+
+
+# Dori server - dynamic feedback service 
+
+[dori.dynamic] 
+uds_path                                = '/tmp/.dori.dynamic/socket'                                        # Unix domain socket path on 'localhost', parent directory is created if not exists - SSD/NVME drives recommended, can be mounted in multiple containers for connections
+uds_override                            = true                                                               
+tcp_enabled                             = false                                                              # TCP connection to Dori processing server - not preferred
+tcp_host                                = '0.0.0.0'                                                          # TCP server host - `0.0.0.0` inside container to make available on forwarded ports
+tcp_port                                = 10002                                                              # TCP server port - can be mapped from container to host
+stderr_log                              = "/tmp/streamfish_dori_dynamic.stderr"                                         
 
 # Dynamic feedback loop configuration
 

@@ -1,7 +1,7 @@
 import typer
 from typing import List
 from pathlib import Path
-from .evaluation import plot_relative_signal
+from .evaluation import plot_relative_signal, plot_signal_distribution
 
 app = typer.Typer(add_completion=False)
 
@@ -48,6 +48,9 @@ def plot_simulation(
     diff_limit: float = typer.Option(
         600, help="Comma-delimited str of str for each input file to tag members in cumulative signal plots"
     ),
+    distribution: bool = typer.Option(
+        False, help="Plot the distribution plots only"
+    ),
 ):
     """
     Plot community meta-data linked simulation runs and experiment evaluations
@@ -60,8 +63,22 @@ def plot_simulation(
         if t.strip():
             tags.append(t.strip())
 
+    if not distribution:
+        plot_relative_signal(
+            summaries=summaries, 
+            variants=variant,
+            outdir=outdir, 
+            prefix=prefix, 
+            title=title, 
+            plot_size=size, 
+            plot_format=format, 
+            by_chromosome=not host_chr, 
+            interval=interval, 
+            sim_tags=tags,
+            diff_limit=diff_limit
+        )
 
-    plot_relative_signal(
+    plot_signal_distribution(
         summaries=summaries, 
         variants=variant,
         outdir=outdir, 

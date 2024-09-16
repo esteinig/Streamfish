@@ -5,7 +5,8 @@ channels:
   - defaults
 dependencies:
   - python=3.11
-  - squigulator=0.2.2
+  - pip
   - slow5tools
+  - squigulator=0.2.2
   - pip:
     - .

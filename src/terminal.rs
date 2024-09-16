@@ -68,8 +68,14 @@ pub struct ReadUntilArgs {
     #[clap(long, short)]
     pub reference: Option<PathBuf>,
     #[clap(long, short)]
+    /// Basecaller server path for the Guppy or Dorado basecaller server 
+    pub basecaller_server: Option<PathBuf>,
+    #[clap(long, short)]
     /// Basecaller model for the Guppy or Dorado basecaller server config and request data
-    pub basecaller_model: Option<String>,
+    pub model: Option<String>,
+    /// Experiment config file path to toml, use --config as default and --experiment-config as runtime
+    #[clap(long, short)]
+    pub experiment: Option<PathBuf>,
     /// Debug read mapping and action requests - introduces significant latency, do not use for experiments!
     #[clap(long)]
     pub debug_mapping: bool,

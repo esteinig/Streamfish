@@ -35,6 +35,49 @@ class CipherTimeSeriesEvaluation:
     member_scientific_name: str
     member_accession: str
 
+def plot_signal_distribution(
+    summaries: List[Path], 
+    variants: List[str] | None = None,
+    sim_tags: List[str] = [],
+    interval: int = 10,
+    prefix: str = "", 
+    outdir: Path = Path.cwd(), 
+    title: str = "Relative cumlative signal of simulated microbiome",
+    plot_size: str = "24,12",
+    plot_format: str = "pdf",
+    by_chromosome: bool = False,
+    diff_limit: float = 300,
+):
+    sns.set_theme(style="darkgrid")
+    prefix = prefix+"." if prefix else ""
+    
+    data = get_signal_distribution_data(
+        data=summaries, 
+        sim_tags=sim_tags, 
+        by_chromosome=by_chromosome, 
+        interval=interval,
+        color_variants=variants
+    )    
+
+    num_plots = 1
+    num_configs = 3
+    fig1, axes = plt.subplots(
+        nrows=num_configs, ncols=num_plots, figsize=(num_plots*12, num_configs*12)
+    )
+
+    axes = axes.flat
+    
+    i = 0
+    for config, cfg_data in data.groupby("config"):
+        p = sns.histplot(data=cfg_data, x="output_signal_length", hue="experiment", kde=True, fill=True, alpha=0.5, ax=axes[i])
+        p.set_title(config)
+        i += 1
+
+    fig1.savefig(outdir / f"{prefix}_dist.{plot_format}", dpi=300, transparent=False)
+    data.to_csv(outdir / f"{prefix}_full.tsv", sep="\t", index=False)
+    
+
+
 def plot_relative_signal(
     summaries: List[Path], 
     variants: List[str] | None = None,
@@ -151,7 +194,7 @@ def plot_relative_signal(
         # Title on first plot of row with config description
         p1.set_title(label=cfg, fontsize=18, fontweight="bold")
         
-        # Bottom middle legent
+        # Bottom middle legend
         if n_cfg == num_configs-1:
             p2.legend(
                 handles=[exp_line, ctrl_line]+member_variant_lines, 
@@ -269,3 +312,48 @@ def get_signal_time_series(data: List[Path], sim_tags: List[str], by_chromosome:
                     timeseries_data.append([sim, var_cfg, variant, exp_ctrl, rep, second, member, total_cumulative_signal, relative_cumulative_signal])
 
     return pandas.DataFrame(timeseries_data, columns=["simulation", "config", "variant", "experiment", "replicate", "second", "member", "total_signal", "relative_signal"])
+
+def get_signal_distribution_data(data: List[Path], sim_tags: List[str], by_chromosome: bool, interval: int, color_variants: List[str] | None = None) -> pandas.DataFrame:
+
+
+    distribution_data = []
+    for i, path in enumerate(data):
+        
+        print(f"Processing file: {path}")
+
+        df = pandas.read_csv(path, sep="\t", header=0)
+
+        configs = path.stem.split("__")
+        cfg, exp_ctrl, rep = None, None, None
+
+        # Only if we have compliant file name from pipeline
+        if len(configs) == 4:
+            sim, cfg, exp_ctrl, rep = configs
+        else:
+            try: 
+                sim = sim_tags[i]
+            except IndexError:
+                sim = str(i)
+        
+
+        if not by_chromosome:
+            df["ref_id"] = ["Host" if ref_id.startswith("chr") else ref_id for ref_id in df["ref_id"]]
+        
+
+        if color_variants and cfg:
+            variant_present = [v for v in color_variants if v in cfg]  # variants are substrings of the config name
+            variant = variant_present[0] if variant_present else None
+            var_cfg = cfg.replace(f"{variant}", "").replace("__", "_").strip("_")
+        else:
+            variant = None 
+            var_cfg = cfg
+
+        df["simulation"] = [sim for _ in df.iterrows()]
+        df["config"] = [var_cfg for _ in df.iterrows()]
+        df["variant"] = [variant for _ in df.iterrows()]
+        df["experiment"] = [exp_ctrl for _ in df.iterrows()]
+        df["replicate"] = [rep for _ in df.iterrows()]
+
+        distribution_data.append(df[["simulation", "config", "variant", "experiment", "replicate", "ref_id", "output_signal_length"]])
+
+    return pandas.concat(distribution_data)

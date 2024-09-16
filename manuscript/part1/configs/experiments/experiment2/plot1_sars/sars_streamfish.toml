@@ -49,7 +49,7 @@ threads                                 = 4                                     
 max_reads_queued                        = 4000                                                               # default: 4000  - may be important on faster and larger throughput runs
 
 [basecaller.server]
-path                                    = "/opt/ont/ont-dorado-server/bin/dorado_basecall_server"                         # `guppy`
+path                                    = "/opt/ont/guppy/bin/guppy_basecall_server"                         # `guppy`
 port                                    = "/tmp/.basecaller_local/5556"
 config                                  = "dna_r10.4.1_e8.2_400bps_5khz_hac.cfg"
 num_callers                             = 4                                                                  # default: 4
@@ -95,7 +95,7 @@ launch_basecall_server                  = true
 enabled                                 = true                                                               
 manager_port                            = 10000
 position_port                           = 10001                                                              # Required position port to connect to device
-config                                  = '/tmp/icarust_sars.toml'                                           # Path to config file if launching as part of the adaptive sampling run
+config                                  = '/tmp/sars_icarust.toml'                                           # Path to config file if launching as part of the adaptive sampling run
 deplete                                 = true
 launch                                  = true
 delay                                   = 30                                                                 # Seconds to wait to start generating data after launching Icarust
@@ -111,10 +111,11 @@ prefix                                  = "exp"
 control                                 = false
 mode                                    = 'mapping'
 type                                    = 'targeted_sequencing'
-reference                               = '/tmp/host_sars2.mmi'
+reference                               = '/tmp/host_genome.mmi'
 min_match_len                           = 0                                                                    # minimum matched mapping length
 targets                                 = ["SARS-CoV-2"]                                             # empty to target any mapped sequences - target string format can be refid::start::end wher positions are 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
 target_file                             = ""                                                                   # optional - overwrites targets field - one target per line, tab delimited, no header, fields: (seq, start, end, name), 1-based, closed
+# config                                  = "sars_genome.exp.toml"  # override with experiment tomls
 
 # Dynamic feedback loop configuration
 

@@ -1,0 +1,11 @@
+
+# Adaptive sampling experiment configuration
+
+[experiment]  
+control                                 = false
+mode                                    = 'mapping'
+type                                    = 'targeted_sequencing'
+reference                               = '/tmp/host_virosaurus_nosars.mmi'
+min_match_len                           = 0                                                                    # minimum matched mapping length
+targets                                 = []                                                                   # empty to target any mapped sequences - target string format can be refid::start::end wher positions are 1-based, closed (NCBI style): "chr11::9365480::9400673" (TMEM41B)
+target_file                             = "/tmp/coronaviruses.txt"       
