@@ -38,7 +38,7 @@ A full description of features, configurations and deployment options can be fou
 * [RPC servers]() for adaptive sampling and dynamic real-time assembly with alignment feedback loops
 * Slice and dice partitioning of flow cells for high throughput optimization [using multiple clients]()
 * [Experiment and latency benchmark runners]() with fully-integrated [`Icarust`](https://github.com/LooseLab/Icarust) configurations
-* Simulations of signal microbiomes with `Squigulator` and `Slow5/Blow5` extensions for `Icarust`
+* Simulations of signal microbiomes with [`Squigulator`](https://github.com/hasindu2008/squigulator) and [`Slow5/Blow5`](https://www.nature.com/articles/s41587-021-01147-4) extensions for `Icarust`
 
 More details on Streamfish features can be found in the documentation (TBD).
 
